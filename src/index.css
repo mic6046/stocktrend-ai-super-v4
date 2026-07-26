@@ -1,0 +1,98 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+body {
+  margin: 0;
+  background-color: #050505;
+}
+
+/* Custom styles for ReactMarkdown Neural Insight rendering */
+.markdown-body {
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #a1a1aa; /* text-zinc-400 */
+}
+
+.markdown-body h1,
+.markdown-body h2 {
+  font-family: var(--font-sans), sans-serif;
+  color: #f4f4f5; /* text-zinc-100 */
+  font-weight: 700;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+  letter-spacing: -0.01em;
+}
+
+.markdown-body h1 {
+  font-size: 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 0.25rem;
+}
+
+.markdown-body h2 {
+  font-size: 0.95rem;
+}
+
+.markdown-body h3 {
+  font-family: var(--font-sans), sans-serif;
+  color: #10b981; /* text-emerald-500 */
+  font-size: 0.85rem;
+  font-weight: 800;
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-left: 2px solid #10b981;
+  padding-left: 6px;
+}
+
+.markdown-body p {
+  margin-bottom: 0.75rem;
+  color: #a1a1aa; /* text-zinc-400 */
+}
+
+.markdown-body strong {
+  font-weight: 700;
+  color: #f4f4f5; /* text-zinc-100 */
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  margin-bottom: 1rem;
+  padding-left: 1rem;
+  list-style-type: disc;
+}
+
+.markdown-body li {
+  margin-bottom: 0.25rem;
+  color: #a1a1aa;
+}
+
+.markdown-body li::marker {
+  color: #10b981; /* emerald list bullets */
+}
+
+.markdown-body blockquote {
+  border-left: 3px solid rgba(255, 255, 255, 0.2);
+  padding-left: 0.75rem;
+  color: #71717a;
+  font-style: italic;
+  margin-bottom: 1rem;
+}
+
+.markdown-body code {
+  font-family: var(--font-mono), monospace;
+  background-color: rgba(255, 255, 255, 0.06);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 10px;
+  color: #f4f4f5;
+}
+
+
