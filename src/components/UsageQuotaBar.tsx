@@ -1,0 +1,354 @@
+import React, { useState } from 'react';
+import { Loader2, Zap, Newspaper, Plus, AlertTriangle } from 'lucide-react';
+import { cn } from '../lib/utils';
+import {
+  startOverageCheckout,
+  type OverageProduct,
+  type UsageSnapshot,
+} from '../lib/usageApi';
+
+interface UsageQuotaBarProps {
+  usage: UsageSnapshot | null;
+  email?: string | null;
+  onRefresh?: () => void;
+  compact?: boolean;
+}
+
+/** Resolve what the meter should show: daily included OR total credit units. */
+function meterValues(
+  usage: UsageSnapshot,
+  kind: 'analysis' | 'news'
+): { used: number; total: number; remaining: number; mode: 'daily' | 'pack' | 'out' } {
+  if (kind === 'analysis') {
+    if (usage.unlimited) {
+      return { used: 0, total: 0, remaining: 9999, mode: 'daily' };
+    }
+    if (usage.analysesOnBonus || (usage.bonusAnalyses || 0) > 0) {
+      const rem = Math.max(0, usage.bonusAnalyses || 0);
+      const used = Math.max(0, usage.bonusAnalysesUsed || 0);
+      // Total units in the credit pool (after purchase = full balance).
+      const total = Math.max(usage.bonusAnalysesPackSize || 0, used + rem, rem);
+      if (total <= 0) {
+        return { used: usage.analysesLimit, total: usage.analysesLimit, remaining: 0, mode: 'out' };
+      }
+      return { used: Math.min(used, total), total, remaining: rem, mode: 'pack' };
+    }
+    return {
+      used: usage.analysesUsed,
+      total: usage.analysesLimit,
+      remaining: Math.max(0, usage.analysesLimit - usage.analysesUsed),
+      mode: 'daily',
+    };
+  }
+
+  if (usage.unlimited) {
+    return { used: 0, total: 0, remaining: 9999, mode: 'daily' };
+  }
+  // Purchased news credits must always show on the meter (not only after daily is out).
+  if (usage.newsOnBonus || (usage.bonusNews || 0) > 0) {
+    const rem = Math.max(0, usage.bonusNews || 0);
+    const used = Math.max(0, usage.bonusNewsUsed || 0);
+    const total = Math.max(usage.bonusNewsPackSize || 0, used + rem, rem);
+    if (total <= 0) {
+      return { used: usage.newsLimit, total: usage.newsLimit, remaining: 0, mode: 'out' };
+    }
+    return { used: Math.min(used, total), total, remaining: rem, mode: 'pack' };
+  }
+  return {
+    used: usage.newsUsed,
+    total: usage.newsLimit,
+    remaining: Math.max(0, usage.newsLimit - usage.newsUsed),
+    mode: 'daily',
+  };
+}
+
+function InlineMeter({
+  label,
+  icon,
+  used,
+  total,
+  remaining,
+  unlimited,
+  accent,
+  mode,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  used: number;
+  total: number;
+  remaining: number;
+  unlimited: boolean;
+  accent: 'emerald' | 'cyan';
+  mode: 'daily' | 'pack' | 'out';
+}) {
+  const low = !unlimited && remaining <= Math.max(2, Math.ceil(Math.max(total, 1) * 0.2));
+  const empty = !unlimited && remaining <= 0;
+  const pct = unlimited ? 100 : total > 0 ? Math.min(100, Math.round((used / total) * 100)) : 100;
+
+  return (
+    <div
+      className="inline-flex items-center gap-1.5 shrink-0"
+      title={
+        unlimited
+          ? `${label}: unlimited`
+          : mode === 'pack'
+            ? `${label} credits: ${used}/${total} used · ${remaining} left`
+            : `${label}: ${used} used · ${remaining} left · ${total} daily limit`
+      }
+    >
+      <span
+        className={cn(
+          empty ? 'text-rose-400' : low ? 'text-amber-300' : accent === 'emerald' ? 'text-emerald-400' : 'text-cyan-400'
+        )}
+      >
+        {icon}
+      </span>
+      <span
+        className={cn(
+          'text-[9px] uppercase tracking-wide font-bold',
+          empty ? 'text-rose-300' : low ? 'text-amber-200' : 'text-gray-500'
+        )}
+      >
+        {label}
+        {mode === 'pack' && <span className="text-[8px] text-amber-300/90 normal-case ml-0.5">pack</span>}
+      </span>
+      {unlimited ? (
+        <span className="text-[10px] text-gray-200 font-semibold">∞</span>
+      ) : (
+        <>
+          <span
+            className={cn(
+              'text-[10px] font-semibold tabular-nums',
+              empty ? 'text-rose-300' : low ? 'text-amber-200' : 'text-gray-100'
+            )}
+          >
+            {used}
+            <span className="text-gray-500 font-normal">/{total}</span>
+          </span>
+          <div className="h-1 w-10 rounded-full bg-white/10 overflow-hidden">
+            <div
+              className={cn(
+                'h-full rounded-full transition-all',
+                empty ? 'bg-rose-500' : low ? 'bg-amber-400' : accent === 'emerald' ? 'bg-emerald-500' : 'bg-cyan-500'
+              )}
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+          <span
+            className={cn(
+              'text-[8px] font-mono tabular-nums hidden sm:inline',
+              empty ? 'text-rose-300/90' : low ? 'text-amber-200/80' : 'text-gray-500'
+            )}
+          >
+            {remaining} left
+          </span>
+        </>
+      )}
+    </div>
+  );
+}
+
+export function UsageQuotaBar({ usage, email, onRefresh, compact }: UsageQuotaBarProps) {
+  const [busy, setBusy] = useState<OverageProduct | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!usage) return null;
+
+  const buy = async (product: OverageProduct) => {
+    if (!email) {
+      setError('Sign in required');
+      return;
+    }
+    setError(null);
+    setBusy(product);
+    try {
+      const { url } = await startOverageCheckout(product, email);
+      window.location.href = url;
+    } catch (err: any) {
+      setError(err?.message || 'Checkout failed');
+      setBusy(null);
+    }
+  };
+
+  const searchMeter = meterValues(usage, 'analysis');
+  const newsMeter = meterValues(usage, 'news');
+
+  const searchLow =
+    !usage.unlimited &&
+    searchMeter.remaining <= Math.max(2, Math.ceil(Math.max(searchMeter.total, 1) * 0.2));
+  const newsLow =
+    !usage.unlimited &&
+    newsMeter.remaining <= Math.max(2, Math.ceil(Math.max(newsMeter.total, 1) * 0.2));
+  const anyLow = searchLow || newsLow;
+  const anyEmpty =
+    !usage.unlimited && (usage.analysesRemaining <= 0 || usage.newsRemaining <= 0);
+
+  return (
+    <div
+      className={cn(
+        'rounded-full border font-mono inline-flex items-center gap-2 shrink-0 px-2.5 py-1.5 h-9 max-w-full overflow-x-auto',
+        anyEmpty
+          ? 'border-rose-500/35 bg-rose-500/10'
+          : anyLow
+            ? 'border-amber-500/30 bg-amber-500/10'
+            : 'border-white/10 bg-[#111113]',
+        compact && 'px-2 py-1 h-8 gap-1.5'
+      )}
+      title={error || undefined}
+    >
+      <span className="text-[9px] uppercase tracking-wider text-emerald-400 font-bold whitespace-nowrap">
+        {usage.planLabel}
+      </span>
+      {(anyLow || anyEmpty) && (
+        <span
+          className={cn(
+            'inline-flex items-center gap-0.5 text-[8px] font-semibold uppercase tracking-wider',
+            anyEmpty ? 'text-rose-300' : 'text-amber-200'
+          )}
+        >
+          <AlertTriangle className="h-2.5 w-2.5 shrink-0" />
+          {anyEmpty ? 'Out' : 'Low'}
+        </span>
+      )}
+
+      <span className="w-px h-4 bg-white/10 shrink-0" />
+
+      <InlineMeter
+        label="Search"
+        icon={<Zap className="h-3 w-3" />}
+        used={searchMeter.used}
+        total={searchMeter.total}
+        remaining={searchMeter.remaining}
+        unlimited={usage.unlimited}
+        accent="emerald"
+        mode={searchMeter.mode === 'out' ? 'daily' : searchMeter.mode}
+      />
+      {!usage.unlimited && (
+        <button
+          type="button"
+          disabled={busy !== null}
+          onClick={() => buy('analysis')}
+          className="inline-flex items-center gap-0.5 rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 text-[8px] uppercase tracking-wide text-gray-300 hover:bg-white/10 disabled:opacity-50 shrink-0"
+          title="Buy +5 searches · RM 5"
+        >
+          {busy === 'analysis' ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Plus className="h-2.5 w-2.5" />}
+          +5
+        </button>
+      )}
+
+      <span className="w-px h-4 bg-white/10 shrink-0" />
+
+      <InlineMeter
+        label="News"
+        icon={<Newspaper className="h-3 w-3" />}
+        used={newsMeter.used}
+        total={newsMeter.total}
+        remaining={newsMeter.remaining}
+        unlimited={usage.unlimited}
+        accent="cyan"
+        mode={newsMeter.mode === 'out' ? 'daily' : newsMeter.mode}
+      />
+      {!usage.unlimited && (
+        <>
+          <button
+            type="button"
+            disabled={busy !== null}
+            onClick={() => buy('news')}
+            className="inline-flex items-center gap-0.5 rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 text-[8px] uppercase tracking-wide text-gray-300 hover:bg-white/10 disabled:opacity-50 shrink-0"
+            title="Buy +10 news · RM 5"
+          >
+            {busy === 'news' ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Plus className="h-2.5 w-2.5" />}
+            +10
+          </button>
+          <button
+            type="button"
+            disabled={busy !== null}
+            onClick={() => buy('analysis_pack')}
+            className="inline-flex items-center gap-0.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[8px] uppercase tracking-wide text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-50 shrink-0"
+            title="Buy +12 searches · RM 10"
+          >
+            {busy === 'analysis_pack' ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Plus className="h-2.5 w-2.5" />}
+            Pack
+          </button>
+        </>
+      )}
+
+      {error && onRefresh && (
+        <button type="button" className="text-[8px] text-rose-400 underline shrink-0" onClick={onRefresh}>
+          Retry
+        </button>
+      )}
+    </div>
+  );
+}
+
+interface QuotaExhaustedBannerProps {
+  message: string;
+  kind: 'analysis' | 'news';
+  email?: string | null;
+  onDismiss?: () => void;
+}
+
+export function QuotaExhaustedBanner({ message, kind, email, onDismiss }: QuotaExhaustedBannerProps) {
+  const [busy, setBusy] = useState<OverageProduct | null>(null);
+
+  const buy = async (product: OverageProduct) => {
+    if (!email) return;
+    setBusy(product);
+    try {
+      const { url } = await startOverageCheckout(product, email);
+      window.location.href = url;
+    } catch {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+      <p className="font-medium text-amber-200">{message}</p>
+      <p className="mt-1 text-[10px] text-amber-100/80">
+        Usage is out — reload credits below to continue.
+      </p>
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
+        {kind === 'analysis' ? (
+          <>
+            <button
+              type="button"
+              disabled={!email || busy !== null}
+              onClick={() => buy('analysis')}
+              className="rounded-md bg-emerald-500 px-2.5 py-1 text-[10px] font-bold text-black disabled:opacity-50"
+            >
+              {busy === 'analysis' ? '…' : 'Mini RM5 (+5)'}
+            </button>
+            <button
+              type="button"
+              disabled={!email || busy !== null}
+              onClick={() => buy('analysis_pack')}
+              className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-bold text-emerald-300 disabled:opacity-50"
+            >
+              {busy === 'analysis_pack' ? '…' : 'Pack RM10 (+12)'}
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            disabled={!email || busy !== null}
+            onClick={() => buy('news')}
+            className="rounded-md bg-cyan-500 px-2.5 py-1 text-[10px] font-bold text-black disabled:opacity-50"
+          >
+            {busy === 'news' ? '…' : 'News mini RM5 (+10)'}
+          </button>
+        )}
+        {onDismiss && (
+          <button
+            type="button"
+            onClick={onDismiss}
+            className="rounded-md border border-white/10 px-2.5 py-1 text-[10px] text-gray-400"
+          >
+            Dismiss
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}

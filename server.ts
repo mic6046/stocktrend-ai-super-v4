@@ -12,8 +12,15 @@ const yahooFinance = new YahooFinanceConstructor({
   }
 }) as any;
 import dotenv from 'dotenv';
+import { registerStripeWebhook, registerStripeRoutes } from './server/stripe';
+import { consumeUsageCredit, getUsageSnapshot } from './server/usageQuota';
 
 dotenv.config();
+
+const app = express();
+
+// Stripe webhooks need the raw body — register before express.json()
+registerStripeWebhook(app);
 
 // Twelve Data Configuration
 const getTwelveDataApiKey = (): string => {
@@ -174,12 +181,149 @@ const cacheStore: {
   picks: Record<string, { data: any; timestamp: number }>;
   stocks: Record<string, { data: any; timestamp: number }>;
   sentiment: { data: any; timestamp: number } | null;
+  news: Record<string, { data: any; timestamp: number }>;
 } = {
   markets: null,
   picks: {},
   stocks: {},
-  sentiment: null
+  sentiment: null,
+  news: {}
 };
+
+/** Coalesce concurrent identical upstream work (stock / predict / news). */
+const inflightRequests: Record<string, Promise<any>> = {};
+
+function withInflight<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const existing = inflightRequests[key];
+  if (existing) return existing as Promise<T>;
+  const pending = fn().finally(() => {
+    if (inflightRequests[key] === pending) delete inflightRequests[key];
+  });
+  inflightRequests[key] = pending;
+  return pending;
+}
+
+const NEWS_CACHE_TTL_MS = 600000; // 10 minutes
+const QUOTE_CACHE_TTL_MS = 12000; // 12 seconds — keep displayed price near real-time
+const quoteCacheStore: Record<string, { data: any; timestamp: number }> = {};
+
+function mapTwelveDataToYahooQuote(ticker: string, tdQuote: any) {
+  const price = parseFloat(tdQuote.close || tdQuote.price || '0');
+  const change = parseFloat(tdQuote.change || '0');
+  const changePercent = parseFloat(tdQuote.percent_change || '0');
+  const prevClose = parseFloat(tdQuote.previous_close || (price - change).toString());
+  return {
+    symbol: ticker,
+    regularMarketPrice: price,
+    regularMarketChange: change,
+    regularMarketChangePercent: changePercent,
+    regularMarketPreviousClose: prevClose,
+    regularMarketOpen: parseFloat(tdQuote.open || price.toString()),
+    regularMarketDayLow: tdQuote.fifty_two_week?.low
+      ? parseFloat(tdQuote.fifty_two_week.low)
+      : parseFloat(tdQuote.low || price.toString()) * 0.98,
+    regularMarketDayHigh: tdQuote.fifty_two_week?.high
+      ? parseFloat(tdQuote.fifty_two_week.high)
+      : parseFloat(tdQuote.high || price.toString()) * 1.02,
+    regularMarketVolume: parseInt(tdQuote.volume || '0', 10),
+    shortName: tdQuote.name || ticker,
+    longName: tdQuote.name || ticker,
+    currency: tdQuote.currency || 'USD',
+    fiftyTwoWeekLow: tdQuote.fifty_two_week?.low ? parseFloat(tdQuote.fifty_two_week.low) : undefined,
+    fiftyTwoWeekHigh: tdQuote.fifty_two_week?.high ? parseFloat(tdQuote.fifty_two_week.high) : undefined,
+    marketState: 'REGULAR',
+    exchange: tdQuote.exchange || 'NMS',
+  };
+}
+
+/** Fresh last-trade quote with short TTL + in-flight coalescing (no synthetic jitter). */
+async function fetchLiveQuote(ticker: string): Promise<any> {
+  const key = String(ticker || '').toUpperCase();
+  if (!key) throw new Error('Ticker required');
+
+  return withInflight(`live_quote_${key}`, async () => {
+    const hit = quoteCacheStore[key];
+    if (hit && Date.now() - hit.timestamp < QUOTE_CACHE_TTL_MS) {
+      return hit.data;
+    }
+
+    let quote: any = null;
+    if (getTwelveDataApiKey()) {
+      try {
+        quote = mapTwelveDataToYahooQuote(key, await fetchTwelveDataQuote(key));
+      } catch (err) {
+        console.warn(`[quote] Twelve Data failed for ${key}, trying Yahoo:`, (err as any)?.message || err);
+      }
+    }
+    if (!quote || quote.regularMarketPrice == null || !Number.isFinite(Number(quote.regularMarketPrice))) {
+      quote = await safeQuote(key);
+    }
+
+    quoteCacheStore[key] = { data: quote, timestamp: Date.now() };
+
+    // Keep chart caches' quote fields in sync so /api/stock cache hits stay current
+    for (const ck of Object.keys(cacheStore.stocks)) {
+      if (!ck.startsWith(`${key}_`) || !cacheStore.stocks[ck]?.data) continue;
+      const prev = cacheStore.stocks[ck].data;
+      cacheStore.stocks[ck] = {
+        ...cacheStore.stocks[ck],
+        data: {
+          ...prev,
+          quote: { ...(prev.quote || {}), ...quote },
+        },
+      };
+    }
+
+    return quote;
+  });
+}
+
+async function withFreshStockQuote(payload: any) {
+  if (!payload?.ticker) return payload;
+  try {
+    const live = await fetchLiveQuote(payload.ticker);
+    if (live && live.regularMarketPrice != null && Number.isFinite(Number(live.regularMarketPrice))) {
+      return {
+        ...payload,
+        quote: { ...(payload.quote || {}), ...live },
+        quoteAsOf: Date.now(),
+      };
+    }
+  } catch (err) {
+    console.warn(`[quote] live refresh failed for ${payload.ticker}:`, (err as any)?.message || err);
+  }
+  return payload;
+}
+
+async function fetchFinnhubCompanyNews(symbol: string): Promise<any[]> {
+  const key = `finnhub_${symbol.toUpperCase()}`;
+  const now = Date.now();
+  const cached = cacheStore.news[key];
+  if (cached && now - cached.timestamp < NEWS_CACHE_TTL_MS) {
+    return Array.isArray(cached.data) ? cached.data : [];
+  }
+
+  const token = process.env.FINNHUB_API_KEY || '';
+  if (!token) return [];
+
+  const todayDate = new Date();
+  const pastDate = new Date();
+  pastDate.setDate(todayDate.getDate() - 30);
+  const formatDate = (d: Date) => d.toISOString().split('T')[0];
+  const url = `https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(symbol.toUpperCase())}&from=${formatDate(pastDate)}&to=${formatDate(todayDate)}&token=${encodeURIComponent(token)}`;
+
+  try {
+    const fnResponse = await fetch(url);
+    if (!fnResponse.ok) return [];
+    const fnNews = await fnResponse.json();
+    const list = Array.isArray(fnNews) ? fnNews : [];
+    cacheStore.news[key] = { data: list, timestamp: now };
+    return list;
+  } catch (err) {
+    console.warn(`[finnhub] company-news failed for ${symbol}`, err);
+    return [];
+  }
+}
 
 // Robust helper for yahooFinance.quote to dodge any schema validation or other library failures
 async function safeQuote(ticker: string): Promise<any> {
@@ -298,8 +442,7 @@ function findOriginalStock(itemTicker: string, presetList: any[]) {
   return null;
 }
 
-const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 // Gemini Setup
 const ai = new GoogleGenAI({
@@ -318,9 +461,7 @@ async function safeGenerateContent(payload: {
   config?: any;
 }) {
   const modelFallbackList = [
-    payload.model || 'gemini-3.5-flash',
-    'gemini-3.1-pro-preview',
-    'gemini-3.1-flash-lite',
+    payload.model || 'gemini-2.0-flash',
     'gemini-flash-latest'
   ];
   
@@ -334,9 +475,9 @@ async function safeGenerateContent(payload: {
   let finalException: any = null;
 
   for (const modelName of uniqueModels) {
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        console.log(`[Gemini Safe] Requesting content: model=${modelName} (attempt=${attempt}/3)`);
+        console.log(`[Gemini Safe] Requesting content: model=${modelName} (attempt=${attempt}/2)`);
         const response = await ai.models.generateContent({
           ...payload,
           model: modelName
@@ -356,7 +497,7 @@ async function safeGenerateContent(payload: {
                             errMsg.includes('LIMIT') ||
                             errMsg.includes('RESOURCE_EXHAUSTED');
         
-        console.log(`[Gemini Safe] Model ${modelName} status: Unavailable on attempt ${attempt}/3: ${errMsg.substring(0, 120)}`);
+        console.log(`[Gemini Safe] Model ${modelName} status: Unavailable on attempt ${attempt}/2: ${errMsg.substring(0, 120)}`);
         
         if (isTransient) {
           const backoff = attempt * 500;
@@ -373,6 +514,71 @@ async function safeGenerateContent(payload: {
 
 // Middleware
 app.use(express.json());
+
+// CORS for Firebase Hosting / App Hosting / local (absolute Cloud Run URL)
+app.use((req, res, next) => {
+  const origin = req.headers.origin || '';
+  const allowed =
+    !origin ||
+    origin.includes('localhost') ||
+    origin.includes('127.0.0.1') ||
+    origin.endsWith('.web.app') ||
+    origin.endsWith('.firebaseapp.com') ||
+    origin.endsWith('.hosted.app') ||
+    origin.endsWith('.run.app');
+  if (allowed && origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  }
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  next();
+});
+
+registerStripeRoutes(app);
+
+app.get('/api/usage', async (req, res) => {
+  try {
+    const email = String(req.query.email || '').trim().toLowerCase();
+    if (!email) {
+      return res.status(400).json({ error: 'email query param required' });
+    }
+    const usage = await getUsageSnapshot(email);
+    res.json(usage);
+  } catch (err: any) {
+    console.error('[usage] failed:', err?.message || err);
+    res.status(500).json({ error: err?.message || 'Failed to load usage' });
+  }
+});
+
+// Health check for Cloud Run / load balancers
+app.get('/api/health', (_req, res) => {
+  const stripeKey = process.env.STRIPE_SECRET_KEY?.trim() || '';
+  const stripeMode = stripeKey.startsWith('sk_live_')
+    ? 'live'
+    : stripeKey.startsWith('sk_test_')
+      ? 'test'
+      : stripeKey
+        ? 'unknown'
+        : 'missing';
+  res.status(200).json({
+    ok: true,
+    service: 'stocktrend-ai',
+    ts: Date.now(),
+    stripeMode,
+    hasMonthlyPrice: Boolean(process.env.STRIPE_PRICE_MONTHLY?.trim()),
+    hasProPrice: Boolean(process.env.STRIPE_PRICE_PRO_MONTHLY?.trim()),
+  });
+});
+
+// Never accidentally serve HTML for /api misses
+app.use('/api', (req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  next();
+});
 
 // Helper to construct realistic real-time index metrics
 function getMockIndex(symbol: string, name: string) {
@@ -621,7 +827,7 @@ function getMockSentiment() {
 app.get('/api/markets', async (req, res) => {
   const now = Date.now();
   const bypassCache = req.query.bypassCache === 'true';
-  if (!bypassCache && cacheStore.markets && (now - cacheStore.markets.timestamp < 120000)) { // 2 minutes cache
+  if (!bypassCache && cacheStore.markets && (now - cacheStore.markets.timestamp < 600000)) { // 10 minutes cache
     return res.json(applyRealTimeFluctuationList(cacheStore.markets.data));
   }
 
@@ -752,7 +958,7 @@ app.get('/api/markets', async (req, res) => {
 app.get('/api/sentiment', async (req, res) => {
   const now = Date.now();
   const bypassCache = req.query.bypassCache === 'true';
-  if (!bypassCache && cacheStore.sentiment && (now - cacheStore.sentiment.timestamp < 300000)) { // 5 minutes cache
+  if (!bypassCache && cacheStore.sentiment && (now - cacheStore.sentiment.timestamp < 900000)) { // 15 minutes cache
     return res.json(cacheStore.sentiment.data);
   }
 
@@ -1113,7 +1319,7 @@ For each of the 20 stocks, return:
 
       const response = await Promise.race([
         safeGenerateContent({
-          model: 'gemini-3.5-flash',
+          model: 'gemini-2.0-flash',
           contents: geminiPrompt,
           config: {
             systemInstruction,
@@ -1229,88 +1435,94 @@ app.get('/api/stock/:ticker?', async (req, res) => {
 
   const cacheKey = `${ticker.toUpperCase()}_${range}_${interval}`;
   const now = Date.now();
-  if (bypassCache !== 'true' && cacheStore.stocks[cacheKey] && (now - cacheStore.stocks[cacheKey].timestamp < 300000)) { // 5 minutes cache
-    return res.json(applyStockPayloadFluctuation(cacheStore.stocks[cacheKey].data));
+  if (bypassCache !== 'true' && cacheStore.stocks[cacheKey] && (now - cacheStore.stocks[cacheKey].timestamp < 600000)) { // 10 minutes cache
+    // Serve cached history, but always merge a fresh last-trade quote (no synthetic jitter)
+    const fresh = await withFreshStockQuote(cacheStore.stocks[cacheKey].data);
+    return res.json(fresh);
   }
 
   try {
-    // Attempt to resolve numeric tickers (Common in Asia/HKEX like '1211')
-    if (/^\d{1,5}$/.test(ticker)) {
-      try {
-        const searchResults = (await safeSearch(ticker, {})) as any;
-        const bestMatch = searchResults.quotes?.find((q: any) => q.symbol.includes(ticker));
-        if (bestMatch) {
-          ticker = bestMatch.symbol;
-        } else if (ticker.length <= 4) {
-          // Default to HKEX for 1-4 digit numeric tickers if no search result
-          ticker = `${ticker.padStart(4, '0')}.HK`;
-        }
-      } catch (searchError) {
-        if (ticker.length <= 4) ticker = `${ticker.padStart(4, '0')}.HK`;
-        console.warn(`Ticker search failed for ${ticker}, using fallback.`);
+    const payload = await withInflight(`stock_${cacheKey}`, async () => {
+      // Re-check cache inside coalesced work (another request may have filled it)
+      if (bypassCache !== 'true' && cacheStore.stocks[cacheKey] && (Date.now() - cacheStore.stocks[cacheKey].timestamp < 600000)) {
+        return cacheStore.stocks[cacheKey].data;
       }
-    }
 
-    let history: any = { quotes: [] };
-    let quote: any = null;
-    let twelveDataSuccess = false;
+      let resolvedTicker = ticker;
+      // Attempt to resolve numeric tickers (Common in Asia/HKEX like '1211')
+      if (/^\d{1,5}$/.test(resolvedTicker)) {
+        try {
+          const searchResults = (await safeSearch(resolvedTicker, {})) as any;
+          const bestMatch = searchResults.quotes?.find((q: any) => q.symbol.includes(resolvedTicker));
+          if (bestMatch) {
+            resolvedTicker = bestMatch.symbol;
+          } else if (resolvedTicker.length <= 4) {
+            resolvedTicker = `${resolvedTicker.padStart(4, '0')}.HK`;
+          }
+        } catch (searchError) {
+          if (resolvedTicker.length <= 4) resolvedTicker = `${resolvedTicker.padStart(4, '0')}.HK`;
+          console.warn(`Ticker search failed for ${resolvedTicker}, using fallback.`);
+        }
+      }
 
-    // Check if Twelve Data is available and configured
-    const tdApiKey = getTwelveDataApiKey();
-    if (tdApiKey) {
-      try {
-        console.log(`[TwelveData] Initiating fetch for ticker: ${ticker}, interval: ${interval}`);
-        const tdQuote = await fetchTwelveDataQuote(ticker);
-        const price = parseFloat(tdQuote.close || tdQuote.price || '0');
-        const change = parseFloat(tdQuote.change || '0');
-        const changePercent = parseFloat(tdQuote.percent_change || '0');
-        const prevClose = parseFloat(tdQuote.previous_close || (price - change).toString());
+      let history: any = { quotes: [] };
+      let quote: any = null;
+      let twelveDataSuccess = false;
 
-        quote = {
-          symbol: ticker,
-          regularMarketPrice: price,
-          regularMarketChange: change,
-          regularMarketChangePercent: changePercent,
-          regularMarketPreviousClose: prevClose,
-          regularMarketOpen: parseFloat(tdQuote.open || price.toString()),
-          regularMarketDayLow: tdQuote.fifty_two_week?.low ? parseFloat(tdQuote.fifty_two_week.low) : parseFloat(tdQuote.low || price.toString()) * 0.98,
-          regularMarketDayHigh: tdQuote.fifty_two_week?.high ? parseFloat(tdQuote.fifty_two_week.high) : parseFloat(tdQuote.high || price.toString()) * 1.02,
-          regularMarketVolume: parseInt(tdQuote.volume || '0'),
-          shortName: tdQuote.name || ticker,
-          longName: tdQuote.name || ticker,
-          currency: tdQuote.currency || 'USD',
-          fiftyTwoWeekLow: tdQuote.fifty_two_week?.low ? parseFloat(tdQuote.fifty_two_week.low) : undefined,
-          fiftyTwoWeekHigh: tdQuote.fifty_two_week?.high ? parseFloat(tdQuote.fifty_two_week.high) : undefined,
-          marketState: 'REGULAR',
-          exchange: tdQuote.exchange || 'NMS'
-        };
+      const tdApiKey = getTwelveDataApiKey();
+      if (tdApiKey) {
+        try {
+          console.log(`[TwelveData] Initiating fetch for ticker: ${resolvedTicker}, interval: ${interval}`);
+          const [tdQuote, tdTs] = await Promise.all([
+            fetchTwelveDataQuote(resolvedTicker),
+            fetchTwelveDataTimeSeries(resolvedTicker, interval),
+          ]);
+          const price = parseFloat(tdQuote.close || tdQuote.price || '0');
+          const change = parseFloat(tdQuote.change || '0');
+          const changePercent = parseFloat(tdQuote.percent_change || '0');
+          const prevClose = parseFloat(tdQuote.previous_close || (price - change).toString());
 
-        const tdTs = await fetchTwelveDataTimeSeries(ticker, interval);
-        if (tdTs.values && Array.isArray(tdTs.values)) {
-          const sortedValues = [...tdTs.values].reverse();
-          history = {
-            quotes: sortedValues.map((item: any) => ({
-              date: new Date(item.datetime).toISOString(),
-              open: parseFloat(item.open || '0'),
-              high: parseFloat(item.high || '0'),
-              low: parseFloat(item.low || '0'),
-              close: parseFloat(item.close || '0'),
-              volume: parseInt(item.volume || '0'),
-              adjclose: parseFloat(item.close || '0')
-            }))
+          quote = {
+            symbol: resolvedTicker,
+            regularMarketPrice: price,
+            regularMarketChange: change,
+            regularMarketChangePercent: changePercent,
+            regularMarketPreviousClose: prevClose,
+            regularMarketOpen: parseFloat(tdQuote.open || price.toString()),
+            regularMarketDayLow: tdQuote.fifty_two_week?.low ? parseFloat(tdQuote.fifty_two_week.low) : parseFloat(tdQuote.low || price.toString()) * 0.98,
+            regularMarketDayHigh: tdQuote.fifty_two_week?.high ? parseFloat(tdQuote.fifty_two_week.high) : parseFloat(tdQuote.high || price.toString()) * 1.02,
+            regularMarketVolume: parseInt(tdQuote.volume || '0'),
+            shortName: tdQuote.name || resolvedTicker,
+            longName: tdQuote.name || resolvedTicker,
+            currency: tdQuote.currency || 'USD',
+            fiftyTwoWeekLow: tdQuote.fifty_two_week?.low ? parseFloat(tdQuote.fifty_two_week.low) : undefined,
+            fiftyTwoWeekHigh: tdQuote.fifty_two_week?.high ? parseFloat(tdQuote.fifty_two_week.high) : undefined,
+            marketState: 'REGULAR',
+            exchange: tdQuote.exchange || 'NMS'
           };
-          twelveDataSuccess = true;
-          console.log(`[TwelveData] Successfully retrieved quote and history for: ${ticker}`);
-        }
-      } catch (tdError: any) {
-        console.warn(`[TwelveData] Failed for ${ticker}, falling back to Yahoo Finance:`, tdError?.message || tdError);
-      }
-    }
 
-    if (!twelveDataSuccess) {
-      // Use original Yahoo Finance fetching logic
-      try {
-        // Use period1/period2 for maximum compatibility as range/interval often throws InvalidOptionsError
+          if (tdTs.values && Array.isArray(tdTs.values)) {
+            const sortedValues = [...tdTs.values].reverse();
+            history = {
+              quotes: sortedValues.map((item: any) => ({
+                date: new Date(item.datetime).toISOString(),
+                open: parseFloat(item.open || '0'),
+                high: parseFloat(item.high || '0'),
+                low: parseFloat(item.low || '0'),
+                close: parseFloat(item.close || '0'),
+                volume: parseInt(item.volume || '0'),
+                adjclose: parseFloat(item.close || '0')
+              }))
+            };
+            twelveDataSuccess = true;
+            console.log(`[TwelveData] Successfully retrieved quote and history for: ${resolvedTicker}`);
+          }
+        } catch (tdError: any) {
+          console.warn(`[TwelveData] Failed for ${resolvedTicker}, falling back to Yahoo Finance:`, tdError?.message || tdError);
+        }
+      }
+
+      if (!twelveDataSuccess) {
         const endDate = new Date();
         const startDate = new Date();
 
@@ -1321,56 +1533,70 @@ app.get('/api/stock/:ticker?', async (req, res) => {
           case '1mo': startDate.setMonth(startDate.getMonth() - 1); break;
           case '3mo': startDate.setMonth(startDate.getMonth() - 3); break;
           case '6mo': startDate.setMonth(startDate.getMonth() - 6); break;
-          case 'ytd': startDate.setMonth(0, 1); break; // Jan 1st
+          case 'ytd': startDate.setMonth(0, 1); break;
           case '1y': startDate.setFullYear(startDate.getFullYear() - 1); break;
           case '5y': startDate.setFullYear(startDate.getFullYear() - 5); break;
           case 'max': startDate.setFullYear(1970, 0, 1); break;
           default: startDate.setMonth(startDate.getMonth() - 1);
         }
 
-        history = (await safeChart(ticker, {
-          period1: startDate,
-          period2: endDate,
-          interval: interval as any,
-        })) as any;
-      } catch (e: any) {
-        const isDelistedOrNotFound = e.message?.includes('No data found') || e.message?.includes('not found') || e.message?.includes('delisted') || e.message?.includes('404');
-        if (isDelistedOrNotFound) {
-          return res.status(404).json({ error: `Security "${ticker}" not found or delisted.` });
-        }
+        const chartPromise = (async () => {
+          try {
+            return (await safeChart(resolvedTicker, {
+              period1: startDate,
+              period2: endDate,
+              interval: interval as any,
+            })) as any;
+          } catch (e: any) {
+            const isDelistedOrNotFound = e.message?.includes('No data found') || e.message?.includes('not found') || e.message?.includes('delisted') || e.message?.includes('404');
+            if (isDelistedOrNotFound) {
+              const err: any = new Error(`Security "${resolvedTicker}" not found or delisted.`);
+              err.status = 404;
+              throw err;
+            }
+            console.warn(`Chart data fetch failed for ${resolvedTicker} with options: ${e.message}`);
+            try {
+              const fallEnd = new Date();
+              const fallStart = new Date();
+              fallStart.setMonth(fallStart.getMonth() - 1);
+              return (await safeChart(resolvedTicker, {
+                period1: fallStart,
+                period2: fallEnd,
+                interval: '1d'
+              })) as any;
+            } catch {
+              console.warn('Final history fetch fallback sync complete.');
+              return { quotes: [] };
+            }
+          }
+        })();
 
-        console.warn(`Chart data fetch failed for ${ticker} with options: ${e.message}`);
-        // Final fallback to 1mo daily
-        try {
-          const fallEnd = new Date();
-          const fallStart = new Date();
-          fallStart.setMonth(fallStart.getMonth() - 1);
-          history = (await safeChart(ticker, { 
-            period1: fallStart, 
-            period2: fallEnd, 
-            interval: '1d' 
-          })) as any;
-        } catch (fallbackError: any) {
-          console.warn('Final history fetch fallback sync complete.');
-        }
+        const [chartResult, quoteResult] = await Promise.all([
+          chartPromise,
+          safeQuote(resolvedTicker),
+        ]);
+        history = chartResult;
+        quote = quoteResult;
       }
 
-      quote = await safeQuote(ticker);
-    }
+      if (!quote || (quote as any).regularMarketPrice === undefined) {
+        throw new Error(`Security data empty or rate-limited for ${resolvedTicker}`);
+      }
 
-    if (!quote || (quote as any).regularMarketPrice === undefined) {
-      throw new Error(`Security data empty or rate-limited for ${ticker}`);
-    }
+      const built = {
+        ticker: resolvedTicker,
+        quote,
+        history: history.quotes || [],
+      };
+      cacheStore.stocks[cacheKey] = { data: built, timestamp: Date.now() };
+      return built;
+    });
 
-    const payload = {
-      ticker,
-      quote,
-      history: history.quotes || [],
-    };
-
-    cacheStore.stocks[cacheKey] = { data: payload, timestamp: now };
-    res.json(applyStockPayloadFluctuation(payload));
+    res.json(await withFreshStockQuote(payload));
   } catch (error: any) {
+    if (error?.status === 404) {
+      return res.status(404).json({ error: error.message });
+    }
     const isDelistedOrNotFound = error.message?.includes('No data found') || error.message?.includes('not found') || error.message?.includes('delisted') || error.message?.includes('404') || error.message?.includes('not identified');
     if (isDelistedOrNotFound) {
       return res.status(404).json({ error: `Security "${ticker}" not found or delisted.` });
@@ -1379,11 +1605,49 @@ app.get('/api/stock/:ticker?', async (req, res) => {
     try {
       const payload = getFallbackStock(ticker, range, interval);
       cacheStore.stocks[cacheKey] = { data: payload, timestamp: now };
-      return res.json(applyStockPayloadFluctuation(payload));
+      return res.json(payload);
     } catch (fallbackError: any) {
       console.error('Synthetic generator failure:', fallbackError);
       return res.status(500).json({ error: 'Failed to establish data uplink.' });
     }
+  }
+});
+
+app.get('/api/quote/:ticker?', async (req, res) => {
+  try {
+    let ticker = req.params.ticker || (req.query.ticker as string);
+    if (!ticker) {
+      return res.status(400).json({ error: 'Ticker symbol is required' });
+    }
+    ticker = decomposeCompoundTicker(ticker);
+    if (!ticker) {
+      return res.status(400).json({ error: 'Ticker symbol is required' });
+    }
+
+    // Resolve numeric HKEX-style tickers the same way /api/stock does
+    if (/^\d{1,5}$/.test(ticker)) {
+      try {
+        const searchResults = (await safeSearch(ticker, {})) as any;
+        const bestMatch = searchResults.quotes?.find((q: any) => q.symbol.includes(ticker));
+        if (bestMatch) ticker = bestMatch.symbol;
+        else if (ticker.length <= 4) ticker = `${ticker.padStart(4, '0')}.HK`;
+      } catch {
+        if (ticker.length <= 4) ticker = `${ticker.padStart(4, '0')}.HK`;
+      }
+    }
+
+    const quote = await fetchLiveQuote(ticker);
+    if (!quote || quote.regularMarketPrice == null) {
+      return res.status(404).json({ error: `Live quote unavailable for ${ticker}` });
+    }
+    return res.json({
+      ticker,
+      quote,
+      asOf: Date.now(),
+    });
+  } catch (error: any) {
+    console.warn('[quote] endpoint failed:', error?.message || error);
+    return res.status(500).json({ error: error?.message || 'Failed to fetch live quote' });
   }
 });
 
@@ -1648,6 +1912,11 @@ app.get('/api/news/:ticker?', async (req, res) => {
     return res.json([]);
   }
   ticker = decomposeCompoundTicker(ticker);
+  const newsKey = ticker.toUpperCase();
+  const now = Date.now();
+  if (cacheStore.news[newsKey] && (now - cacheStore.news[newsKey].timestamp < 600000)) { // 10 minutes
+    return res.json(cacheStore.news[newsKey].data);
+  }
   try {
     // yahooFinance.search returns news along with quotes
     const searchResults = await Promise.race([
@@ -1660,12 +1929,17 @@ app.get('/api/news/:ticker?', async (req, res) => {
     const news = (searchResults && searchResults.news) || [];
     if (news.length === 0) {
       console.warn(`[news] No news returned from Yahoo Finance search for "${ticker}", using fallback generator.`);
-      return res.json(getFallbackNews(ticker));
+      const fallback = getFallbackNews(ticker);
+      cacheStore.news[newsKey] = { data: fallback, timestamp: now };
+      return res.json(fallback);
     }
+    cacheStore.news[newsKey] = { data: news, timestamp: now };
     res.json(news);
   } catch (error: any) {
     console.warn('News fetch info, deploying fallback generator for ticker:', ticker, error?.message || error);
-    res.json(getFallbackNews(ticker));
+    const fallback = getFallbackNews(ticker);
+    cacheStore.news[newsKey] = { data: fallback, timestamp: now };
+    res.json(fallback);
   }
 });
 
@@ -1711,7 +1985,7 @@ function getProceduralNewsSummary(articles: any[], ticker?: string): string {
 }
 
 app.post('/api/news-summary', async (req, res) => {
-  const { articles, ticker } = req.body;
+  const { articles, ticker, email } = req.body;
   if (!articles || !Array.isArray(articles) || articles.length === 0) {
     return res.status(400).json({ error: 'No news articles provided to summarize.' });
   }
@@ -1722,7 +1996,27 @@ app.post('/api/news-summary', async (req, res) => {
   const cached = (global as any).newsSummaryCache[cacheKey];
   
   if (cached && (Date.now() - cached.timestamp < 600000)) { // 10 minutes cache
-    return res.json({ summary: cached.summary });
+    if (email) {
+      const usageSnap = await getUsageSnapshot(String(email)).catch(() => null);
+      if (usageSnap && !usageSnap.unlimited && usageSnap.newsRemaining <= 0) {
+        return res.status(402).json({
+          error: 'Daily AI news usage is out. Please reload credits (News mini RM5 +10) to continue.',
+          code: 'news_quota_exceeded',
+          usage: usageSnap,
+        });
+      }
+      return res.json({ summary: cached.summary, cached: true, usage: usageSnap || undefined });
+    }
+    return res.json({ summary: cached.summary, cached: true });
+  }
+
+  const billed = await consumeUsageCredit(email, 'news');
+  if (!billed.ok) {
+    return res.status(billed.status).json({
+      error: billed.error || 'Daily AI news usage is out. Please reload credits to continue.',
+      code: billed.code,
+      usage: billed.usage,
+    });
   }
 
   const prompt = `You are a legendary hedge fund macro analyst and venture capitalist.
@@ -1737,7 +2031,7 @@ ${articles.slice(0, 8).map((a: any, idx: number) => `Head ${idx+1}: "${a.title}"
 
   try {
     const response = await safeGenerateContent({
-      model: 'gemini-3.5-flash',
+      model: 'gemini-2.0-flash',
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       config: {
         thinkingConfig: { thinkingLevel: 'LOW' as any },
@@ -1748,7 +2042,7 @@ ${articles.slice(0, 8).map((a: any, idx: number) => `Head ${idx+1}: "${a.title}"
     const summary = response.text || '';
     if (summary && summary.trim().length > 10) {
       (global as any).newsSummaryCache[cacheKey] = { summary: summary.trim(), timestamp: Date.now() };
-      return res.json({ summary: summary.trim() });
+      return res.json({ summary: summary.trim(), usage: billed.usage });
     }
     throw new Error('Received empty or too short response from Gemini');
   } catch (error: any) {
@@ -1759,7 +2053,7 @@ ${articles.slice(0, 8).map((a: any, idx: number) => `Head ${idx+1}: "${a.title}"
       console.log('[news-summary] Gemini news summary bypass, routing to fallback helper:', errMsg);
     }
     const fallbackSummary = getProceduralNewsSummary(articles, ticker);
-    return res.json({ summary: fallbackSummary, fallback: true });
+    return res.json({ summary: fallbackSummary, fallback: true, usage: billed.usage });
   }
 });
 
@@ -1887,7 +2181,7 @@ The top matching candidates are: ${top3Tickers}.
 Provide a powerful 2-sentence macro analysis outlining the asymmetric risks and hyper-growth triggers for this compounder group. Avoid generic platitudes.`;
       
       const response = await safeGenerateContent({
-        model: 'gemini-3.5-flash',
+        model: 'gemini-2.0-flash',
         contents: prompt,
         config: {
           thinkingConfig: { thinkingLevel: 'LOW' as any },
@@ -1937,56 +2231,91 @@ Provide a powerful 2-sentence macro analysis outlining the asymmetric risks and 
 });
 
 app.post('/api/predict', async (req, res) => {
-  const { ticker, history, quote: passedQuote, indicators, news: passedNews, bypassCache, modelWeights } = req.body;
+  const { ticker, history, quote: passedQuote, indicators, news: passedNews, bypassCache, modelWeights, email } = req.body;
   
   if (!history || history.length === 0) {
     return res.status(400).json({ error: 'Insufficient data for analysis' });
   }
 
-  // 1. Get/Enhance Yahoo Finance Quote data
-  let quote = passedQuote;
-  try {
-    const freshQuote = await safeQuote(ticker);
-    if (freshQuote) {
-      quote = freshQuote;
-    }
-  } catch (qErr) {
-    console.warn(`[predict] Fresh quote fetch failed for ${ticker}, using passed quote`, qErr);
-  }
+  // Use client quote first so cache key + early return avoid Yahoo/Finnhub on hits
+  let quote = passedQuote && typeof passedQuote === 'object' ? passedQuote : null;
 
-  // 2. Get Yahoo Finance Fundamentals
-  let fundamentals: any = null;
-  try {
-    fundamentals = await safeQuoteSummary(ticker, ['defaultKeyStatistics', 'financialData', 'summaryDetail']);
-  } catch (fErr) {
-    console.warn(`[predict] Fundamentals summary fetch failed for ${ticker}`, fErr);
-  }
-
-  // 3. Get Finnhub News
-  let finnhubNews: any[] = [];
-  try {
-    const token = process.env.FINNHUB_API_KEY || '';
-    if (token) {
-      const todayDate = new Date();
-      const pastDate = new Date();
-      pastDate.setDate(todayDate.getDate() - 30);
-      const formatDate = (d: Date) => d.toISOString().split('T')[0];
-      const toVal = formatDate(todayDate);
-      const fromVal = formatDate(pastDate);
-      const url = `https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(ticker.toUpperCase())}&from=${fromVal}&to=${toVal}&token=${encodeURIComponent(token)}`;
-      const fnResponse = await fetch(url);
-      if (fnResponse.ok) {
-        const fnNews = await fnResponse.json();
-        if (Array.isArray(fnNews)) {
-          finnhubNews = fnNews;
-        }
+  const closesForCache = (history || [])
+    .map((h: any) => h.close)
+    .filter((c: any) => typeof c === 'number' && !isNaN(c));
+  const priceForCache = quote?.regularMarketPrice || (closesForCache.length > 0 ? closesForCache[closesForCache.length - 1] : 0);
+  const priceStrEarly = priceForCache ? Number(priceForCache).toFixed(2) : '0.00';
+  const historyHashEarly = (history || []).slice(-5).map((h: any) => `${h.date}-${h.close}`).join('|');
+  const cacheKeyEarly = `pred_${ticker}_${historyHashEarly}_price_${priceStrEarly}`;
+  if (!(global as any).predictionCache) (global as any).predictionCache = {};
+  const cachedEarly = (global as any).predictionCache[cacheKeyEarly];
+  if (bypassCache !== true && cachedEarly && (Date.now() - cachedEarly.timestamp < 1800000)) {
+    if (email) {
+      const usageSnap = await getUsageSnapshot(String(email)).catch(() => null);
+      if (usageSnap && !usageSnap.unlimited && usageSnap.analysesRemaining <= 0) {
+        return res.status(402).json({
+          error: 'Daily AI search/analysis usage is out. Please reload credits (+5 RM5 or Pack RM10) to continue.',
+          code: 'analysis_quota_exceeded',
+          usage: usageSnap,
+        });
       }
+      console.log(`Serving cached prediction for ${ticker} (early hit)`);
+      return res.json({ ...cachedEarly.data, cached: true, usage: usageSnap || undefined });
     }
-  } catch (fnErr) {
-    console.warn(`[predict] Finnhub news fetch failed inside predict for ${ticker}`, fnErr);
+    console.log(`Serving cached prediction for ${ticker} (early hit)`);
+    return res.json({ ...cachedEarly.data, cached: true });
   }
 
-  const newsList = (finnhubNews && finnhubNews.length > 0) ? finnhubNews : (passedNews || []);
+  // Fresh quote / fundamentals / news only after confirming credits remain (avoid burning Yahoo/Finnhub on 402)
+  if (email) {
+    const usageSnapPre = await getUsageSnapshot(String(email)).catch(() => null);
+    if (usageSnapPre && !usageSnapPre.unlimited && usageSnapPre.analysesRemaining <= 0) {
+      return res.status(402).json({
+        error: 'Daily AI search/analysis usage is out. Please reload credits (+5 RM5 or Pack RM10) to continue.',
+        code: 'analysis_quota_exceeded',
+        usage: usageSnapPre,
+      });
+    }
+  }
+
+  const needQuote = !(quote && quote.regularMarketPrice != null);
+  const passedList = Array.isArray(passedNews) ? passedNews : [];
+  const needFinnhub = passedList.length < 5;
+
+  const quotePromise = needQuote
+    ? safeQuote(ticker).catch((qErr) => {
+        console.warn(`[predict] Fresh quote fetch failed for ${ticker}, using passed quote`, qErr);
+        return null;
+      })
+    : Promise.resolve(null);
+
+  const fundamentalsPromise = safeQuoteSummary(ticker, ['defaultKeyStatistics', 'financialData', 'summaryDetail']).catch(
+    (fErr) => {
+      console.warn(`[predict] Fundamentals summary fetch failed for ${ticker}`, fErr);
+      return null;
+    }
+  );
+
+  const finnhubPromise = needFinnhub
+    ? fetchFinnhubCompanyNews(String(ticker)).catch((fnErr) => {
+        console.warn(`[predict] Finnhub news fetch failed inside predict for ${ticker}`, fnErr);
+        return [] as any[];
+      })
+    : Promise.resolve([] as any[]);
+
+  const [freshQuote, fundamentals, finnhubNews] = await Promise.all([
+    quotePromise,
+    fundamentalsPromise,
+    finnhubPromise,
+  ]);
+
+  if (freshQuote) quote = freshQuote;
+
+  // Prefer client news when enough headlines are already available (skip Finnhub)
+  let newsList: any[] = passedList;
+  if (needFinnhub) {
+    newsList = finnhubNews && finnhubNews.length > 0 ? finnhubNews : passedList;
+  }
 
   let indicatorsSection = '';
   if (indicators) {
@@ -2057,16 +2386,36 @@ app.post('/api/predict', async (req, res) => {
 
   const dailyVolPercent = dVol * 100;
 
-  // Cache key checking
-  const priceStr = quote?.regularMarketPrice ? quote.regularMarketPrice.toFixed(2) : '0.00';
-  const historyHash = (history || []).slice(-5).map((h: any) => `${h.date}-${h.close}`).join('|');
+  // Re-check cache after quote resolution (price may have come from Yahoo)
+  const priceStr = quote?.regularMarketPrice ? quote.regularMarketPrice.toFixed(2) : priceStrEarly;
+  const historyHash = historyHashEarly;
   const cacheKey = `pred_${ticker}_${historyHash}_price_${priceStr}`;
-  if (!(global as any).predictionCache) (global as any).predictionCache = {};
   const cachedResult = (global as any).predictionCache[cacheKey];
   
   if (bypassCache !== true && cachedResult && (Date.now() - cachedResult.timestamp < 1800000)) { // 30 mins cache
+    if (email) {
+      const usageSnap = await getUsageSnapshot(String(email)).catch(() => null);
+      if (usageSnap && !usageSnap.unlimited && usageSnap.analysesRemaining <= 0) {
+        return res.status(402).json({
+          error: 'Daily AI search/analysis usage is out. Please reload credits (+5 RM5 or Pack RM10) to continue.',
+          code: 'analysis_quota_exceeded',
+          usage: usageSnap,
+        });
+      }
+      console.log(`Serving cached prediction for ${ticker}`);
+      return res.json({ ...cachedResult.data, cached: true, usage: usageSnap || undefined });
+    }
     console.log(`Serving cached prediction for ${ticker}`);
-    return res.json(cachedResult.data);
+    return res.json({ ...cachedResult.data, cached: true });
+  }
+
+  const billed = await consumeUsageCredit(email, 'analysis');
+  if (!billed.ok) {
+    return res.status(billed.status).json({
+      error: billed.error,
+      code: billed.code,
+      usage: billed.usage,
+    });
   }
 
   // Pattern matching lookback search
@@ -2570,7 +2919,7 @@ CRITICAL DIRECTIVES:
   try {
     try {
       const response = await safeGenerateContent({
-        model: 'gemini-3.5-flash',
+        model: 'gemini-2.0-flash',
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         config
       });
@@ -3016,7 +3365,7 @@ ${rating}
       data: responseData
     };
 
-    res.json(responseData);
+    res.json({ ...responseData, usage: billed.usage });
   } catch (error: any) {
     console.warn('Prediction execution triggered outer fallback:', error?.message || error);
     res.status(500).json({ error: error?.message || 'Quantitative evaluation failed. Please retry.' });
@@ -3025,43 +3374,22 @@ ${rating}
 
 app.get('/api/finnhub-news/:symbol', async (req, res) => {
   try {
-    const token = process.env.FINNHUB_API_KEY || '';
     const symbol = (req.params.symbol || 'AAPL').toUpperCase();
 
     if (!symbol) {
       return res.status(400).json({ error: 'Symbol parameter is required.' });
     }
 
-    const todayDate = new Date();
-    const pastDate = new Date();
-    pastDate.setDate(todayDate.getDate() - 30);
-
-    const formatDate = (d: Date) => d.toISOString().split('T')[0];
-    const to = formatDate(todayDate);
-    const from = formatDate(pastDate);
-
     let data: any[] = [];
     let isFallback = false;
+    const token = process.env.FINNHUB_API_KEY || '';
 
     if (!token) {
       isFallback = true;
       console.log(`[News Note] No FINNHUB_API_KEY detected. Dynamic statistical local media generator engaged for ${symbol}.`);
     } else {
-      const apiUrl = `https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(symbol)}&from=${from}&to=${to}&token=${encodeURIComponent(token)}`;
-      try {
-        const response = await fetch(apiUrl);
-        if (!response.ok) {
-          console.warn(`Finnhub returned status ${response.status} for ${symbol}. Engaging local media generator.`);
-          isFallback = true;
-        } else {
-          data = await response.json();
-          if (!Array.isArray(data)) {
-            data = [];
-            isFallback = true;
-          }
-        }
-      } catch (fetchErr) {
-        console.warn(`Fetch error for Finnhub API:`, fetchErr);
+      data = await withInflight(`finnhub_route_${symbol}`, () => fetchFinnhubCompanyNews(symbol));
+      if (!Array.isArray(data) || data.length === 0) {
         isFallback = true;
       }
     }
@@ -3336,6 +3664,12 @@ app.get('/api/marketaux-news/:symbol', async (req, res) => {
       return res.status(400).json({ error: 'Symbol parameter is required.' });
     }
 
+    const cacheKey = `marketaux_${symbol}`;
+    const cached = cacheStore.news[cacheKey];
+    if (cached && Date.now() - cached.timestamp < NEWS_CACHE_TTL_MS) {
+      return res.json(cached.data);
+    }
+
     let data: any[] = [];
     let isFallback = false;
 
@@ -3363,6 +3697,7 @@ app.get('/api/marketaux-news/:symbol', async (req, res) => {
               summary: art.snippet || art.description || "Quantum signal tracking metrics match baseline price margins on strong capital rotation currents.",
               url: art.url || "https://finance.yahoo.com/"
             }));
+            cacheStore.news[cacheKey] = { data, timestamp: Date.now() };
           } else {
             console.warn(`MarketAux news query returned invalid data structure:`, resJson);
             isFallback = true;
@@ -3646,6 +3981,10 @@ async function setupVite() {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
+      // API routes must never fall through to the SPA HTML shell
+      if (req.path.startsWith('/api')) {
+        return res.status(404).json({ error: 'API route not found', path: req.path });
+      }
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }

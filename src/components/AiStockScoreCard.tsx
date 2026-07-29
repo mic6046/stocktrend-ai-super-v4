@@ -1,9 +1,16 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ChevronDown, ChevronUp, Sparkles, Activity, Newspaper, ShieldAlert, Briefcase, Info, TrendingUp, BarChart2, Gem } from 'lucide-react';
+import {
+  Info,
+  Sparkles,
+  Minus,
+  ArrowDownRight,
+  ArrowUpRight,
+} from 'lucide-react';
 import { cn } from '../lib/utils';
 import { getRecommendationTheme } from '../utils/recommendationTheme';
-import { TruncatedText } from './TruncatedText';
+import { splitStatusLabel } from './FitText';
+import { formatMoney } from './analysis/analysisTheme';
 
 export interface AiStockScoreComponent {
   score: number;
@@ -30,433 +37,537 @@ export interface AiStockScoreData {
   overallExplanation: string;
 }
 
+export type ProjectionTrend = 'up' | 'down' | 'flat';
+
 interface AiStockScoreCardProps {
   scoreData: AiStockScoreData | null;
   ticker: string;
+  stockName?: string;
+  currentPrice?: number | null;
+  currency?: string;
   isLoading?: boolean;
+  projectionTrend?: ProjectionTrend;
+  projectionHorizonDays?: number;
+  shortTermConfidence?: number | null;
+  mediumTermConfidence?: number | null;
+  /** full = hero+components+explanation; compact = components+explanation only (hero lives above) */
+  variant?: 'full' | 'compact';
 }
 
-const sanitizeExplanation = (text: string | undefined): string => {
+function sanitizeExplanation(text: string | undefined): string {
   if (!text) return '';
-  
-  // Strip markdown tags (*, _, #, `, [], (), etc.) and normalize whitespace
-  let clean = text
+  return text
     .replace(/[*_#`~]/g, '')
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
     .replace(/\s+/g, ' ')
     .trim();
+}
 
-  // Enforce max 55 words limit
-  const words = clean.split(' ');
-  if (words.length > 55) {
-    clean = words.slice(0, 55).join(' ');
+function toPct(comp?: AiStockScoreComponent): number {
+  if (!comp) return 0;
+  const max = Math.max(1, Number(comp.maxWeight) || 100);
+  return Math.round(Math.min(100, Math.max(0, (Number(comp.score) || 0) / max * 100)));
+}
+
+function mediumConfidence(score: number, api?: number | null): number {
+  if (api != null && Number.isFinite(api)) return Math.round(Math.min(99, Math.max(1, api)));
+  return Math.round(Math.min(94, Math.max(55, 58 + Math.abs(score - 65) * 0.9)));
+}
+
+function shortConfidence(days: number, band = 1.5): number {
+  const h = days <= 5 ? 6 : days <= 10 ? 0 : -8;
+  const b = band <= 1 ? 5 : band <= 1.5 ? 0 : -5;
+  return Math.round(Math.min(92, Math.max(52, 70 + h + b)));
+}
+
+type HorizonBias = 'Bullish' | 'Bearish' | 'Neutral';
+
+function stanceFromScore(score: number): HorizonBias {
+  if (score >= 70) return 'Bullish';
+  if (score < 60) return 'Bearish';
+  return 'Neutral';
+}
+
+function longBiasFromComponents(c: AiStockScoreData['components']): HorizonBias {
+  const fund = toPct(c.fundamentals);
+  const val = toPct(c.valuation);
+  const avg = (fund + val) / 2;
+  if (avg >= 65) return 'Bullish';
+  if (avg < 45) return 'Bearish';
+  return 'Neutral';
+}
+
+function BiasIcon({ bias }: { bias: HorizonBias }) {
+  if (bias === 'Bullish') return <ArrowUpRight className="w-3.5 h-3.5 text-emerald-400" />;
+  if (bias === 'Bearish') return <ArrowDownRight className="w-3.5 h-3.5 text-rose-400" />;
+  return <Minus className="w-3.5 h-3.5 text-amber-400" />;
+}
+
+function biasColor(bias: HorizonBias) {
+  if (bias === 'Bullish') return 'text-emerald-400';
+  if (bias === 'Bearish') return 'text-rose-400';
+  return 'text-amber-400';
+}
+
+function riskFromScore(score: number): { risk: string; volatility: string; liquidity: string } {
+  if (score >= 80) return { risk: 'Low', volatility: 'Moderate', liquidity: 'High' };
+  if (score >= 60) return { risk: 'Medium', volatility: 'Moderate', liquidity: 'High' };
+  if (score >= 50) return { risk: 'Medium', volatility: 'Elevated', liquidity: 'Moderate' };
+  return { risk: 'High', volatility: 'Elevated', liquidity: 'Moderate' };
+}
+
+function buildReconcileCopy(opts: {
+  score: number;
+  label: string;
+  shortBias: HorizonBias;
+  mediumBias: HorizonBias;
+  days: number;
+}): string {
+  const { score, label, shortBias, mediumBias, days } = opts;
+  if (mediumBias === 'Bullish' && shortBias === 'Bearish') {
+    return `AI Stock Score remains ${label.toUpperCase()} (${score}/100) because the medium-term outlook is constructive. However, the AI projection expects a short-term pullback over the next ${days} trading sessions before the broader trend resumes.`;
   }
-
-  // Enforce max 320 characters limit
-  if (clean.length > 320) {
-    clean = clean.substring(0, 317).trim();
-    const lastPeriod = clean.lastIndexOf('.');
-    if (lastPeriod > 180) {
-      clean = clean.substring(0, lastPeriod + 1);
-    } else {
-      const lastSpace = clean.lastIndexOf(' ');
-      if (lastSpace > 0) {
-        clean = clean.substring(0, lastSpace) + '...';
-      }
-    }
+  if (mediumBias === 'Bearish' && shortBias === 'Bullish') {
+    return `AI Stock Score remains ${label.toUpperCase()} (${score}/100) on a weaker medium-term outlook. The purple projection’s short-term rebound over ~${days} sessions is likely a temporary relief rally within the broader trend.`;
   }
+  if (mediumBias === 'Neutral' && shortBias === 'Bearish') {
+    return `${label} (${score}/100) reflects a balanced medium-term view (1–3 months). Short-term technical momentum is soft and the AI projection expects a pullback over the next ${days} trading days — normal across different horizons.`;
+  }
+  if (mediumBias === 'Neutral' && shortBias === 'Bullish') {
+    return `${label} (${score}/100) is a medium-term neutral stance. Short-term AI projection leans higher over ~${days} sessions; treat that as tactical noise until the medium-term rating improves.`;
+  }
+  return `Medium-term Stock Score (${label}, ${score}/100) and short-term projection (${shortBias.toLowerCase()} over ${days}D) are read on separate horizons and should be used together, not as a conflict.`;
+}
 
-  return clean;
-};
+/** Semi-circular gauge — green (left) → amber → red (right), score centered inside. */
+function SemiGauge({ score }: { score: number }) {
+  const clamped = Math.min(100, Math.max(0, score));
+  const r = 58;
+  const cx = 72;
+  const cy = 68;
+  const startX = cx - r;
+  const endX = cx + r;
+  const circumference = Math.PI * r;
+  const progress = (clamped / 100) * circumference;
+  const angleDeg = 180 - (clamped / 100) * 180;
+  const rad = (angleDeg * Math.PI) / 180;
+  const nx = cx + Math.cos(rad) * (r - 10);
+  const ny = cy - Math.sin(rad) * (r - 10);
 
-const getScoreStyle = (score: number) => {
-  return getRecommendationTheme(score);
-};
+  return (
+    <div className="relative w-[148px] h-[100px] shrink-0">
+      <svg viewBox="0 0 144 84" className="w-full h-full overflow-visible">
+        <defs>
+          <linearGradient id="qnScoreArc" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="#10b981" />
+            <stop offset="50%" stopColor="#f59e0b" />
+            <stop offset="100%" stopColor="#f43f5e" />
+          </linearGradient>
+        </defs>
+        <path
+          d={`M ${startX} ${cy} A ${r} ${r} 0 0 1 ${endX} ${cy}`}
+          fill="none"
+          stroke="rgba(255,255,255,0.06)"
+          strokeWidth="11"
+          strokeLinecap="round"
+        />
+        <motion.path
+          d={`M ${startX} ${cy} A ${r} ${r} 0 0 1 ${endX} ${cy}`}
+          fill="none"
+          stroke="url(#qnScoreArc)"
+          strokeWidth="11"
+          strokeLinecap="round"
+          strokeDasharray={`${circumference}`}
+          initial={{ strokeDashoffset: circumference }}
+          animate={{ strokeDashoffset: circumference - progress }}
+          transition={{ duration: 1.1, ease: 'easeOut' }}
+        />
+        <line x1={cx} y1={cy} x2={nx} y2={ny} stroke="#e5e7eb" strokeWidth="2" strokeLinecap="round" />
+        <circle cx={cx} cy={cy} r="4" fill="#e5e7eb" />
+        <circle cx={cx} cy={cy} r="1.75" fill="#0a0a0c" />
+      </svg>
+      <div className="absolute inset-x-0 bottom-1 flex flex-col items-center pointer-events-none">
+        <span className="text-[28px] font-black font-mono text-white tracking-tight leading-none">{clamped}</span>
+        <span className="text-[11px] text-gray-500 font-semibold leading-none mt-0.5">/100</span>
+      </div>
+    </div>
+  );
+}
 
-export const AiStockScoreCard: React.FC<AiStockScoreCardProps> = ({ scoreData, ticker, isLoading }) => {
-  const [expandedSection, setExpandedSection] = useState<string | null>(null);
+/** Large status + Confidence row — matches the HOLD / Confidence mockup. */
+export function HeroStatusBlock({
+  label,
+  confidence,
+  textClassName,
+  uppercase = true,
+  align = 'left',
+  size = 'lg',
+  className,
+  /** When true, never clip/truncate; wrap at word boundaries and grow height */
+  allowWrap = false,
+}: {
+  label: string;
+  confidence?: number | null;
+  textClassName?: string;
+  uppercase?: boolean;
+  align?: 'left' | 'center';
+  size?: 'sm' | 'md' | 'lg';
+  className?: string;
+  allowWrap?: boolean;
+}) {
+  const { line1, line2 } = splitStatusLabel(label);
+  const display1 = uppercase && line1 ? line1.toUpperCase() : line1;
+  const display2 = uppercase ? line2.toUpperCase() : line2;
+  const alignCls = align === 'center' ? 'items-center text-center' : 'items-start text-left';
 
+  const line1Cls =
+    size === 'sm' ? 'text-[10px]' : size === 'md' ? 'text-[12px] sm:text-[13px]' : 'text-[13px] sm:text-[14px]';
+  const line2Cls =
+    size === 'sm'
+      ? 'text-[16px] sm:text-[18px]'
+      : size === 'md'
+        ? 'text-[20px] sm:text-[24px]'
+        : 'text-[28px] sm:text-[34px]';
+  const singleCls =
+    size === 'sm'
+      ? 'text-[16px] sm:text-[18px]'
+      : size === 'md'
+        ? 'text-[20px] sm:text-[24px]'
+        : 'text-[32px] sm:text-[40px]';
+  const confSize = size === 'sm' ? 'text-[14px]' : size === 'md' ? 'text-[16px]' : 'text-[18px] sm:text-[20px]';
+
+  const wrapCls = allowWrap
+    ? 'whitespace-normal break-words [overflow-wrap:normal] [word-break:normal]'
+    : 'break-keep';
+
+  return (
+    <AnimatePresence mode="wait">
+      <motion.div
+        key={label}
+        initial={{ opacity: 0, scale: 0.97, y: 4 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.98, y: -3 }}
+        transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+        className={cn(
+          'flex flex-col w-full',
+          allowWrap ? 'overflow-visible' : 'min-w-0 overflow-hidden',
+          alignCls,
+          className
+        )}
+      >
+        <div className={cn('flex flex-col w-full justify-center', allowWrap ? '' : 'min-w-0', alignCls, textClassName)}>
+          {line1 ? (
+            <>
+              <span className={cn('font-semibold tracking-wide leading-tight opacity-90 max-w-full', wrapCls, line1Cls)}>
+                {display1}
+              </span>
+              <span className={cn('font-black tracking-tight leading-[1.15] max-w-full mt-0.5', wrapCls, line2Cls)}>
+                {display2}
+              </span>
+            </>
+          ) : (
+            <span className={cn('font-black tracking-tight leading-[1.15] max-w-full', wrapCls, singleCls)}>
+              {display2}
+            </span>
+          )}
+        </div>
+
+        {confidence != null && Number.isFinite(confidence) && (
+          <div
+            className={cn(
+              'mt-3 pt-2.5 border-t border-white/10 w-full max-w-[160px]',
+              align === 'center' && 'mx-auto'
+            )}
+          >
+            <p className="text-[10px] text-gray-500 font-medium leading-none">Confidence</p>
+            <p className={cn('mt-1 font-bold text-emerald-400 tabular-nums leading-none', confSize)}>
+              {Math.round(confidence)}%
+            </p>
+          </div>
+        )}
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
+function ComponentBar({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: number;
+  accent: string;
+}) {
+  return (
+    <div className="space-y-1 min-w-0">
+      <div className="flex items-center justify-between gap-2 min-w-0">
+        <span className="text-[10px] text-gray-400 font-medium min-w-0 break-words leading-tight">{label}</span>
+        <span className="text-[10px] font-mono font-bold text-gray-200 tabular-nums shrink-0">
+          {value}
+          <span className="text-gray-500">/100</span>
+        </span>
+      </div>
+      <div className="h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
+        <motion.div
+          className={cn('h-full rounded-full', accent)}
+          initial={{ width: 0 }}
+          animate={{ width: `${value}%` }}
+          transition={{ duration: 0.8, ease: 'easeOut' }}
+        />
+      </div>
+    </div>
+  );
+}
+
+export const AiStockScoreCard: React.FC<AiStockScoreCardProps> = ({
+  scoreData,
+  ticker,
+  stockName,
+  currentPrice,
+  currency,
+  isLoading,
+  projectionTrend = 'flat',
+  projectionHorizonDays = 5,
+  shortTermConfidence = null,
+  mediumTermConfidence = null,
+  variant = 'full',
+}) => {
+  const displayName = stockName?.trim() || '';
+  const priceLabel =
+    currentPrice != null && Number.isFinite(currentPrice) && currentPrice > 0
+      ? formatMoney(currentPrice, currency)
+      : '';
   if (isLoading) {
     return (
-      <div className="bg-[#141416]/90 border border-white/5 rounded-2xl p-6 h-auto animate-pulse flex flex-col justify-between">
-        <div className="flex items-center justify-between pb-4 border-b border-white/5">
-          <div className="h-4 bg-white/10 rounded w-1/4"></div>
-          <div className="h-6 bg-white/10 rounded-full w-24"></div>
-        </div>
-        <div className="flex flex-col md:flex-row gap-6 my-6 items-center">
-          <div className="w-28 h-28 rounded-full border-4 border-white/5 border-t-white/20 animate-spin"></div>
-          <div className="flex-1 space-y-3 w-full">
-            <div className="h-3 bg-white/10 rounded w-3/4"></div>
-            <div className="h-3 bg-white/10 rounded w-5/6"></div>
-            <div className="h-3 bg-white/10 rounded w-1/2"></div>
-          </div>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {[1, 2, 3, 4, 5, 6, 7].map((i) => (
-            <div key={i} className="h-10 bg-white/5 rounded-lg border border-white/5"></div>
-          ))}
-        </div>
+      <div className="bg-[#121214] border border-white/10 rounded-2xl p-5 animate-pulse space-y-4">
+        <div className="h-3 w-48 bg-white/10 rounded" />
+        <div className="h-24 bg-white/5 rounded-xl" />
+        <div className="h-20 bg-white/5 rounded-xl" />
       </div>
     );
   }
 
-  // Safe fallback score generation
   const finalScoreData = scoreData || {
-    totalScore: 79,
-    rating: 'Buy',
+    totalScore: 61,
+    rating: 'Hold',
     components: {
-      priceAction: {
-        score: 20,
-        maxWeight: 25,
-        explanation: 'Trend analysis, Higher Highs/Lows structure, Support/Resistance boundaries, and moving averages (20/50/100/200 EMA alignment).'
-      },
-      volumeAnalysis: {
-        score: 12,
-        maxWeight: 15,
-        explanation: 'Relative Volume, Volume Profile distribution, OBV accumulation channel, and liquidity availability.'
-      },
-      institutionalFundFlow: {
-        score: 12,
-        maxWeight: 15,
-        explanation: 'Whale buying index, Dark Pool block trade inflows, Smart Money positioning, and ETF flow direction.'
-      },
-      technicalIndicators: {
-        score: 12,
-        maxWeight: 15,
-        explanation: 'RSI, MACD, ADX, ATR, Bollinger Bands, SuperTrend, Ichimoku Cloud, and momentum oscillator alignment.'
-      },
-      fundamentals: {
-        score: 12,
-        maxWeight: 15,
-        explanation: 'Revenue Growth, EPS Growth, Gross/Operating Margins, ROE, ROA, Free Cash Flow generation, and balance sheet strength.'
-      },
-      valuation: {
-        score: 7,
-        maxWeight: 10,
-        explanation: 'Intrinsic DCF valuation, Forward P/E, PEG ratio, EV/EBITDA multiples, and fair value margin of safety.'
-      },
-      marketSentiment: {
-        score: 4,
-        maxWeight: 5,
-        explanation: 'News sentiment catalysts, analyst ratings, options put/call flow, sector momentum, and market regime conditions.'
-      }
+      technicalIndicators: { score: 11, maxWeight: 15, explanation: '' },
+      institutionalFundFlow: { score: 8, maxWeight: 15, explanation: '' },
+      whaleAccumulation: { score: 12, maxWeight: 15, explanation: '' },
+      fundamentals: { score: 14, maxWeight: 15, explanation: '' },
+      valuation: { score: 6, maxWeight: 10, explanation: '' },
+      marketSentiment: { score: 2, maxWeight: 5, explanation: '' },
+      priceAction: { score: 15, maxWeight: 25, explanation: '' },
     },
-    overallExplanation: 'Solid price structures, steady volume accumulation, and technical indicator trend alignments validate an active investment stance.'
+    overallExplanation:
+      'Balanced medium-term setup. Fundamentals support the rating while short-term technical momentum can diverge from the AI price projection.',
   };
 
-  const scoreStyle = getScoreStyle(finalScoreData.totalScore);
-  const strokeDashoffset = 251.2 - (251.2 * finalScoreData.totalScore) / 100;
+  const theme = getRecommendationTheme(finalScoreData.totalScore);
+  const score = finalScoreData.totalScore;
+  const medConf = mediumConfidence(score, mediumTermConfidence);
+  const shortConf =
+    shortTermConfidence != null && Number.isFinite(shortTermConfidence)
+      ? Math.round(shortTermConfidence)
+      : shortConfidence(projectionHorizonDays);
 
-  const toggleSection = (section: string) => {
-    if (expandedSection === section) {
-      setExpandedSection(null);
-    } else {
-      setExpandedSection(section);
-    }
-  };
+  const shortBias: HorizonBias =
+    projectionTrend === 'up' ? 'Bullish' : projectionTrend === 'down' ? 'Bearish' : 'Neutral';
+  const mediumBias = stanceFromScore(score);
+  const longBias = longBiasFromComponents(finalScoreData.components);
+  const risks = riskFromScore(score);
 
-  const finalPriceAction = finalScoreData.components.priceAction || {
-    score: 20,
-    maxWeight: 25,
-    explanation: 'Trend analysis, Higher Highs/Lows structure, Support/Resistance boundaries, and moving averages (20/50/100/200 EMA alignment).'
-  };
-
-  const finalVolumeAnalysis = finalScoreData.components.volumeAnalysis || {
-    score: 12,
-    maxWeight: 15,
-    explanation: 'Relative Volume, Volume Profile distribution, OBV accumulation channel, and liquidity availability.'
-  };
-
-  const finalInstitutionalFundFlow = finalScoreData.components.institutionalFundFlow || {
-    score: 12,
-    maxWeight: 15,
-    explanation: 'Whale buying index, Dark Pool block trade inflows, Smart Money positioning, and ETF flow direction.'
-  };
-
-  const finalTechnicalIndicators = finalScoreData.components.technicalIndicators || finalScoreData.components.technicalTrend || {
-    score: 12,
-    maxWeight: 15,
-    explanation: 'RSI, MACD, ADX, ATR, Bollinger Bands, SuperTrend, Ichimoku Cloud, and momentum oscillator alignment.'
-  };
-
-  const finalFundamentals = finalScoreData.components.fundamentals || {
-    score: 12,
-    maxWeight: 15,
-    explanation: 'Revenue Growth, EPS Growth, Gross/Operating Margins, ROE, ROA, Free Cash Flow generation, and balance sheet strength.'
-  };
-
-  const finalValuation = finalScoreData.components.valuation || {
-    score: 7,
-    maxWeight: 10,
-    explanation: 'Intrinsic DCF valuation, Forward P/E, PEG ratio, EV/EBITDA multiples, and fair value margin of safety.'
-  };
-
-  const finalMarketSentiment = finalScoreData.components.marketSentiment || finalScoreData.components.newsSentiment || {
-    score: 4,
-    maxWeight: 5,
-    explanation: 'News sentiment catalysts, analyst ratings, options put/call flow, sector momentum, and market regime conditions.'
-  };
-
-  const sectionsList = [
+  const techPct = Math.round(
+    (toPct(finalScoreData.components.technicalIndicators || finalScoreData.components.technicalTrend) +
+      toPct(finalScoreData.components.priceAction)) /
+      2 || toPct(finalScoreData.components.technicalIndicators)
+  );
+  const bars = [
     {
-      id: 'priceAction',
-      name: 'Price Action',
-      weight: '25%',
-      icon: <TrendingUp className="w-4 h-4 text-purple-400" />,
-      item: finalPriceAction,
-      color: 'text-purple-400',
-      bgColor: 'bg-purple-500/5',
-      borderColor: 'border-purple-500/10'
+      label: 'Technical Analysis',
+      value: techPct || toPct(finalScoreData.components.priceAction),
+      accent: 'bg-gradient-to-r from-cyan-500 to-emerald-400',
     },
     {
-      id: 'volumeAnalysis',
-      name: 'Volume & Liquidity',
-      weight: '15%',
-      icon: <BarChart2 className="w-4 h-4 text-emerald-400" />,
-      item: finalVolumeAnalysis,
-      color: 'text-emerald-400',
-      bgColor: 'bg-emerald-500/5',
-      borderColor: 'border-emerald-500/10'
+      label: 'Institutional Flow',
+      value: toPct(finalScoreData.components.institutionalFundFlow),
+      accent: 'bg-gradient-to-r from-sky-500 to-cyan-400',
     },
     {
-      id: 'institutionalFundFlow',
-      name: 'Institutional Fund Flow',
-      weight: '15%',
-      icon: <Gem className="w-4 h-4 text-cyan-400" />,
-      item: finalInstitutionalFundFlow,
-      color: 'text-cyan-400',
-      bgColor: 'bg-cyan-500/5',
-      borderColor: 'border-cyan-500/10'
+      label: 'Whale Money Flow',
+      value: toPct(finalScoreData.components.whaleAccumulation || finalScoreData.components.volumeAnalysis),
+      accent: 'bg-gradient-to-r from-violet-500 to-fuchsia-400',
     },
     {
-      id: 'technicalIndicators',
-      name: 'Technical Indicators',
-      weight: '15%',
-      icon: <Activity className="w-4 h-4 text-amber-400" />,
-      item: finalTechnicalIndicators,
-      color: 'text-amber-400',
-      bgColor: 'bg-amber-500/5',
-      borderColor: 'border-amber-500/10'
+      label: 'Fundamental Strength',
+      value: toPct(finalScoreData.components.fundamentals),
+      accent: 'bg-gradient-to-r from-emerald-500 to-teal-400',
     },
     {
-      id: 'fundamentals',
-      name: 'Fundamental Strength',
-      weight: '15%',
-      icon: <Briefcase className="w-4 h-4 text-blue-400" />,
-      item: finalFundamentals,
-      color: 'text-blue-400',
-      bgColor: 'bg-blue-500/5',
-      borderColor: 'border-blue-500/10'
+      label: 'Valuation',
+      value: toPct(finalScoreData.components.valuation),
+      accent: 'bg-gradient-to-r from-amber-500 to-orange-400',
     },
     {
-      id: 'valuation',
-      name: 'Valuation & Fair Value',
-      weight: '10%',
-      icon: <Info className="w-4 h-4 text-indigo-400" />,
-      item: finalValuation,
-      color: 'text-indigo-400',
-      bgColor: 'bg-indigo-500/5',
-      borderColor: 'border-indigo-500/10'
+      label: 'Market Sentiment',
+      value: toPct(finalScoreData.components.marketSentiment || finalScoreData.components.newsSentiment),
+      accent: 'bg-gradient-to-r from-rose-500 to-pink-400',
     },
-    {
-      id: 'marketSentiment',
-      name: 'Market Sentiment',
-      weight: '5%',
-      icon: <Newspaper className="w-4 h-4 text-rose-400" />,
-      item: finalMarketSentiment,
-      color: 'text-rose-400',
-      bgColor: 'bg-rose-500/5',
-      borderColor: 'border-rose-500/10'
-    }
   ];
 
-  const ratingLegend = [
-    { label: '95-100', tag: 'Exceptional Buy', color: getRecommendationTheme('Exceptional Buy').textColor },
-    { label: '90-94', tag: 'Very Strong Buy', color: getRecommendationTheme('Very Strong Buy').textColor },
-    { label: '80-89', tag: 'Strong Buy', color: getRecommendationTheme('Strong Buy').textColor },
-    { label: '70-79', tag: 'Buy', color: getRecommendationTheme('Buy').textColor },
-    { label: '60-69', tag: 'Hold', color: getRecommendationTheme('Hold').textColor },
-    { label: '50-59', tag: 'Sell', color: getRecommendationTheme('Sell').textColor },
-    { label: '<50', tag: 'Avoid', color: getRecommendationTheme('Avoid').textColor }
+  const explanation =
+    sanitizeExplanation(finalScoreData.overallExplanation) ||
+    buildReconcileCopy({
+      score,
+      label: theme.label,
+      shortBias,
+      mediumBias,
+      days: projectionHorizonDays,
+    });
+
+  const horizons: { label: string; range: string; bias: HorizonBias }[] = [
+    { label: 'Short-Term', range: '3–10 Days', bias: shortBias },
+    { label: 'Medium-Term', range: '1–3 Months', bias: mediumBias },
+    { label: 'Long-Term', range: '3–12 Months', bias: longBias },
   ];
+
+  const compact = variant === 'compact';
 
   return (
-    <div className="bg-[#141416] border border-white/5 rounded-2xl p-4 sm:p-5 shadow-2xl relative overflow-hidden w-full">
-      {/* Background radial soft light blur */}
-      <div 
-        className="absolute -right-24 -top-24 w-60 h-60 rounded-full opacity-10 pointer-events-none blur-3xl"
-        style={{ backgroundColor: scoreStyle.accentColor }}
-      />
-
-      {/* Header section with badge */}
-      <div className="flex items-center justify-between pb-4 border-b border-white/5">
-        <div className="flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-emerald-400" />
-          <h4 className="text-xs font-bold text-gray-300 uppercase tracking-wider font-mono">
-            AI Quantum Stock Score
-          </h4>
-        </div>
-        <div className={cn(
-          "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest font-mono border",
-          scoreStyle.textColor, scoreStyle.bgColor, scoreStyle.borderColor, scoreStyle.glow
-        )}>
-          {scoreStyle.label} ({scoreStyle.rangeText})
-        </div>
-      </div>
-
-      {/* Circle Meter and Overall Explanation */}
-      <div className="flex flex-col md:flex-row gap-6 my-6 items-center">
-        {/* Animated Radial Circle Gauge */}
-        <div className="relative shrink-0 flex items-center justify-center w-32 h-32">
-          <svg className="w-28 h-28 transform -rotate-90">
-            {/* Background track circle */}
-            <circle
-              cx="56"
-              cy="56"
-              r="40"
-              className="stroke-white/5 fill-transparent"
-              strokeWidth="10"
-            />
-            {/* Foreground progress circle */}
-            <motion.circle
-              cx="56"
-              cy="56"
-              r="40"
-              className="fill-transparent"
-              stroke={scoreStyle.accentColor}
-              strokeWidth="10"
-              strokeDasharray="251.2"
-              strokeLinecap="round"
-              initial={{ strokeDashoffset: 251.2 }}
-              animate={{ strokeDashoffset }}
-              transition={{ duration: 1.2, ease: 'easeOut' }}
-            />
-          </svg>
-          <div className="absolute flex flex-col items-center justify-center">
-            <span className="text-3xl font-black font-mono tracking-tighter text-white">
-              {finalScoreData.totalScore}
-            </span>
-            <span className="text-[8px] font-mono uppercase text-gray-500 tracking-widest -mt-1">
-              Pts Limit
-            </span>
-          </div>
-        </div>
-
-        {/* Dynamic Explanation block */}
-        <div className="flex-grow text-center md:text-left min-w-0 w-full overflow-hidden">
-          <span className="text-[10px] text-gray-500 font-mono uppercase tracking-widest mb-1.5 block">
-            Stance & Synthesis for {ticker.toUpperCase()}
-          </span>
-          <TruncatedText
-            text={finalScoreData.overallExplanation}
-            maxLines={5}
-            className="text-xs sm:text-sm text-gray-400 font-sans"
-          />
-          
-          {/* Visual color segmented indicator lines for score range representation */}
-          <div className="w-full flex h-1.5 bg-white/5 rounded-full mt-4 overflow-hidden p-[2px]">
-            <div className={cn("h-full rounded-full", scoreStyle.progressBg)} style={{ width: `${finalScoreData.totalScore}%` }}></div>
-          </div>
-        </div>
-      </div>
-
-      {/* Component breakdown grids containing accordions with detailed justifications */}
-      <div className="space-y-3">
-        <div className="text-[9px] uppercase font-bold tracking-widest text-gray-500 font-mono mb-2 flex items-center gap-1">
-          <Info className="w-3 h-3 text-gray-500" /> Component Breakdown (Click to Expand Explanations)
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {sectionsList.map((section) => {
-            const isExpanded = expandedSection === section.id;
-            const percentageUsed = (section.item.score / section.item.maxWeight) * 100;
-            return (
-              <div 
-                key={section.id} 
-                className={cn(
-                  "border rounded-xl transition-all duration-300 overflow-hidden bg-black/40 flex flex-col justify-between h-full p-4 sm:p-5 min-w-0 w-full",
-                  isExpanded ? "border-white/10 bg-black/70 shadow-lg" : "border-white/5 hover:border-white/10"
-                )}
-              >
-                {/* Header clickable row */}
-                <button
-                  onClick={() => toggleSection(section.id)}
-                  className="w-full flex items-center justify-between text-left focus:outline-none cursor-pointer"
-                >
-                  <div className="flex items-center gap-2.5 min-w-0 pr-2">
-                    <div className={cn("p-1.5 rounded-lg border border-white/5 shrink-0", section.bgColor)}>
-                      {section.icon}
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-[11px] font-bold text-gray-300 font-sans flex items-center gap-1.5 truncate">
-                        {section.name}
-                        <span className="text-[8.5px] font-mono text-gray-500 shrink-0">({section.weight})</span>
-                      </div>
-                      <div className="text-[11.5px] font-black font-mono text-gray-100 flex items-center gap-1 mt-0.5">
-                        {section.item.score} <span className="text-[9px] text-gray-500 font-medium font-mono">/ {section.item.maxWeight} pts</span>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center gap-2.5 shrink-0">
-                    {/* Linear Micro Gauge inside column */}
-                    <div className="w-12 bg-white/5 h-1.5 rounded-full overflow-hidden hidden sm:block">
-                      <div 
-                        className={cn("h-full rounded-full",
-                          section.id === 'whaleAccumulation' ? 'bg-purple-400' :
-                          section.id === 'fundamentals' ? 'bg-emerald-400' :
-                          section.id === 'technicalTrend' ? 'bg-cyan-400' :
-                          section.id === 'newsSentiment' ? 'bg-amber-400' : 'bg-rose-400'
-                        )} 
-                        style={{ width: `${percentageUsed}%` }}
-                      ></div>
-                    </div>
-                    {isExpanded ? <ChevronUp className="w-4 h-4 text-gray-500" /> : <ChevronDown className="w-4 h-4 text-gray-500" />}
-                  </div>
-                </button>
-
-                {/* Expanded explanation text */}
-                <AnimatePresence initial={false}>
-                  {isExpanded && (
-                    <motion.div
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: 'auto', opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      transition={{ duration: 0.25, ease: 'easeInOut' }}
-                      className="overflow-hidden"
-                    >
-                      <div className="pt-3 border-t border-white/5 mt-3 min-w-0 w-full">
-                        <p className="text-[10px] text-gray-500 font-mono uppercase tracking-widest mb-1 font-bold">
-                          JUSTIFICATION & METRICS
-                        </p>
-                        <TruncatedText
-                          text={section.item.explanation}
-                          maxLines={5}
-                          className="text-xs text-gray-400 font-sans"
-                        />
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Color Range Threshold Legend */}
-      <div className="mt-5 pt-4 border-t border-white/5 flex flex-wrap justify-between items-center gap-3">
-        <span className="text-[9px] font-mono uppercase text-gray-500 tracking-wider">
-          Rating Threshold Scale
-        </span>
-        <div className="flex flex-wrap gap-x-3 gap-y-1">
-          {ratingLegend.map((item, idx) => (
-            <div key={idx} className="flex items-center gap-1 text-[9.5px] font-mono">
-              <span className={cn("font-bold", item.color)}>{item.label}</span>
-              <span className="text-gray-600 text-[8px]">{item.tag}</span>
+    <div className="space-y-3 w-full">
+      {!compact && (
+      <div className="bg-[#121214] border border-white/10 rounded-2xl p-4 sm:p-5 shadow-xl relative overflow-hidden min-w-0">
+        <div className="flex items-start gap-2 mb-4 min-w-0">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 min-w-0">
+              <h4 className="text-[11px] font-bold text-gray-100 uppercase tracking-[0.14em] font-mono">
+                AI Quantum Stock Score
+              </h4>
+              <span title="Medium-term investment rating (1–3 months)">
+                <Info className="w-3.5 h-3.5 text-gray-500 shrink-0" />
+              </span>
             </div>
+            {displayName && (
+              <p className="mt-1 text-[12px] text-gray-300 font-medium leading-snug break-words">
+                {displayName}
+              </p>
+            )}
+            {priceLabel && (
+              <p className="mt-1 text-[15px] font-mono font-bold text-emerald-300 tabular-nums leading-none">
+                {priceLabel}
+              </p>
+            )}
+          </div>
+          <span className="ml-auto text-[9px] font-mono text-gray-500 uppercase tracking-wider shrink-0 pt-0.5">
+            {ticker.toUpperCase()}
+          </span>
+        </div>
+
+        <div className="flex flex-col lg:flex-row gap-5 lg:gap-6 items-stretch min-w-0">
+          <div className="flex flex-col items-center gap-2.5 shrink-0 lg:pt-1">
+            <SemiGauge score={score} />
+            <div className="rounded-lg border border-white/10 bg-black/40 px-3 py-1.5 text-center w-full max-w-[148px]">
+              <p className="text-[8px] uppercase tracking-wider text-gray-500 leading-tight">Time Horizon (Primary)</p>
+              <p className="text-[11px] font-semibold text-white mt-0.5">1 – 3 Months</p>
+            </div>
+          </div>
+
+          <div className="flex flex-col justify-center min-w-0 lg:min-w-[140px] lg:max-w-[200px] shrink-0">
+            <HeroStatusBlock
+              label={theme.label}
+              confidence={medConf}
+              textClassName={theme.textColor}
+              uppercase
+              align="left"
+            />
+          </div>
+
+          <div className="flex-1 min-w-0 flex flex-col gap-2 justify-center">
+            {horizons.map((h) => (
+              <div
+                key={h.label}
+                className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/35 px-3.5 py-2.5 min-w-0"
+              >
+                <div className="min-w-0">
+                  <p className="text-[12px] font-semibold text-white leading-tight">{h.label}</p>
+                  <p className="text-[10px] text-gray-500 mt-0.5 leading-tight">{h.range}</p>
+                </div>
+                <div className={cn('flex items-center gap-1.5 text-[12px] font-bold shrink-0', biasColor(h.bias))}>
+                  <BiasIcon bias={h.bias} />
+                  {h.bias}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+      )}
+
+      <div className="bg-[#121214] border border-white/10 rounded-2xl p-4 sm:p-5 glass-panel">
+        {compact && (
+          <div className="flex items-start justify-between gap-3 mb-3 pb-3 border-b border-white/5 min-w-0">
+            <div className="min-w-0">
+              <h4 className="text-[11px] font-bold text-gray-100 uppercase tracking-[0.14em] font-mono">
+                AI Quantum Stock Score
+              </h4>
+              {displayName ? (
+                <p className="mt-1 text-[12px] text-gray-300 font-medium leading-snug break-words">
+                  {displayName}
+                </p>
+              ) : null}
+              {priceLabel ? (
+                <p className="mt-1 text-[15px] font-mono font-bold text-emerald-300 tabular-nums leading-none">
+                  {priceLabel}
+                </p>
+              ) : null}
+            </div>
+            <span className="text-[9px] font-mono text-gray-500 uppercase tracking-wider shrink-0 pt-0.5">
+              {ticker.toUpperCase()}
+            </span>
+          </div>
+        )}
+        <div className="flex items-center gap-2 mb-3">
+          <h4 className="text-[11px] font-bold text-gray-200 uppercase tracking-[0.14em] font-mono">
+            AI Score Components
+          </h4>
+          <Info className="w-3.5 h-3.5 text-gray-500" />
+        </div>
+        <div className="space-y-2.5">
+          {bars.map((b) => (
+            <ComponentBar key={b.label} label={b.label} value={b.value} accent={b.accent} />
           ))}
         </div>
+      </div>
+
+      <div className="bg-[#121214] border border-white/10 rounded-2xl p-4 sm:p-5 min-w-0 overflow-hidden glass-panel">
+        <div className="flex items-center gap-2 mb-2.5 min-w-0">
+          <Sparkles className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+          <h4 className="text-[11px] font-bold text-gray-200 uppercase tracking-[0.14em] font-mono truncate">
+            AI Explanation
+          </h4>
+        </div>
+        <p className="text-[12px] text-gray-300 leading-relaxed font-sans break-words">{explanation}</p>
+        {shortBias !== mediumBias && (
+          <p className="mt-2 text-[10px] text-amber-200/80 leading-relaxed border border-amber-500/20 bg-amber-500/5 rounded-lg px-2.5 py-2 break-words">
+            These signals use different horizons. Short-term forecasts may differ from the medium-term rating — that is
+            normal and does not mean conflicting analysis.
+          </p>
+        )}
+        <div className="mt-3 flex flex-wrap gap-1.5 min-w-0">
+          <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-0.5 text-[9px] font-mono font-bold text-amber-300">
+            Risk: {risks.risk}
+          </span>
+          <span className="rounded-full border border-sky-500/30 bg-sky-500/10 px-2.5 py-0.5 text-[9px] font-mono font-bold text-sky-300">
+            Volatility: {risks.volatility}
+          </span>
+          <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-[9px] font-mono font-bold text-emerald-300">
+            Liquidity: {risks.liquidity}
+          </span>
+        </div>
+        <p className="mt-2 text-[9px] text-gray-600 font-mono">
+          Short-term projection confidence {shortConf}% (separate horizon)
+        </p>
       </div>
     </div>
   );

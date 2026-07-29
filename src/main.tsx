@@ -23,11 +23,24 @@ if (typeof window !== 'undefined' && window.performance && typeof window.perform
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
+import { AuthProvider } from './lib/auth';
+import { SubscriptionGate } from './components/SubscriptionGate';
+import { LegalHost } from './components/LegalDocs';
 import './index.css';
+
+if (typeof document !== 'undefined') {
+  document.title = 'Quantum Node';
+}
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <AuthProvider>
+      <LegalHost>
+        <SubscriptionGate>
+          <App />
+        </SubscriptionGate>
+      </LegalHost>
+    </AuthProvider>
   </StrictMode>,
 );
 

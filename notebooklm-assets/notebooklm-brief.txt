@@ -1,0 +1,41 @@
+﻿Quantum Node — product brief for NotebookLM video
+
+App name: Quantum Node
+Tagline: AI equity terminal
+URL: https://stocktrend-ai-super.web.app
+
+One-sentence pitch:
+Quantum Node is a private AI-powered stock analysis terminal that helps investors research equities with AI scores, charts, news summaries, valuation context, and trade management zones — behind a secure Google sign-in and subscription.
+
+What it is:
+Quantum Node is an AI-assisted market analysis web app (not a broker and not financial advice). After signing in with Google and subscribing, users open a dashboard to analyse stocks with live quotes, AI insights powered by Google Gemini, and decision-support visuals.
+
+Core features to show in the video:
+1. Secure access — Google sign-in gate; charts, news, and AI stay private.
+2. AI Quantum Stock Score — company name, live price, and an AI score with Buy / Hold / Sell style guidance.
+3. Trade Management Zones — BUY → ADD → HOLD → TAKE PROFIT journey for holders already in a position, plus a protective Stop Loss Below (not an entry signal).
+4. Historical PE Valuation — PE multiples vs the stock’s own average to frame valuation.
+5. AI news summaries — daily news digest for the selected ticker.
+6. Market pulse / charts & alerts — terminal-style dark UI for watchlist research.
+7. Plans — Basic RM199/month (10 AI analyses + 10 news/day) and Pro RM349/month (30 + 30), with optional mini reloads and analysis packs.
+
+Suggested 45–60 second video script:
+[0–8s] Open on the Quantum Node landing page. Narrate: “Quantum Node is an AI equity terminal for serious stock research.”
+[8–18s] Show Google sign-in. Narrate: “Sign in securely and unlock your private dashboard.”
+[18–30s] Show AI Quantum Stock Score. Narrate: “Get an AI stock score, live price, and clear directional guidance.”
+[30–42s] Show Trade Management Zones. Narrate: “Map Buy, Add, Hold, and Take Profit zones — plus a stop-loss floor for risk control.”
+[42–52s] Show Historical PE Valuation. Narrate: “Compare today’s PE to the stock’s own history to spot rich or cheap valuation.”
+[52–60s] Close on pricing / brand. Narrate: “Basic or Pro plans. Analysis tool only — not financial advice. Quantum Node.”
+
+Risk disclaimer (must include):
+Quantum Node provides analysis tools only. It is not a licensed financial adviser, broker, or fund manager. Markets involve risk of loss. Past performance is not indicative of future results.
+
+Visual style notes for NotebookLM:
+Dark near-black UI, emerald green accents, modern terminal aesthetic, brand name QUANTUM NODE.
+
+Images in this folder:
+01-landing-login.png — real screenshot (login modal)
+02-landing-hero.png — real screenshot (landing hero)
+03-ai-stock-score.png — feature mock for video
+04-trade-zones.png — feature mock for video
+05-historical-pe.png — feature mock for video

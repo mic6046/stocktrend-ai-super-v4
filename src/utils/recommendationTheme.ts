@@ -51,16 +51,16 @@ export function getRecommendationTheme(input: any): RecommendationTheme {
 
   if (score >= 95) {
     return {
-      label: 'Exceptional Buy',
+      label: 'Exceptional Strong Buy',
       rangeText: '95-100',
-      textColor: 'text-purple-400',
-      bgColor: 'bg-purple-500/10',
-      borderColor: 'border-purple-500/30',
-      progressBg: 'bg-gradient-to-r from-purple-500 to-fuchsia-400',
-      glow: 'shadow-[0_0_15px_rgba(168,85,247,0.15)]',
-      accentColor: '#a855f7',
-      subColor: 'rgba(168,85,247,0.7)',
-      badgeClass: 'bg-purple-500/10 text-purple-400 border border-purple-500/30'
+      textColor: 'text-emerald-300',
+      bgColor: 'bg-emerald-500/10',
+      borderColor: 'border-emerald-400/40',
+      progressBg: 'bg-gradient-to-r from-emerald-400 to-green-300',
+      glow: 'shadow-[0_0_15px_rgba(52,211,153,0.2)]',
+      accentColor: '#6ee7b7',
+      subColor: 'rgba(110,231,183,0.7)',
+      badgeClass: 'bg-emerald-500/10 text-emerald-300 border border-emerald-400/40'
     };
   }
 
@@ -70,14 +70,14 @@ export function getRecommendationTheme(input: any): RecommendationTheme {
     return {
       label,
       rangeText,
-      textColor: 'text-emerald-400',
+      textColor: 'text-emerald-300',
       bgColor: 'bg-emerald-500/10',
-      borderColor: 'border-emerald-500/30',
+      borderColor: 'border-emerald-400/35',
       progressBg: 'bg-gradient-to-r from-teal-500 to-emerald-400',
       glow: 'shadow-[0_0_15px_rgba(16,185,129,0.15)]',
-      accentColor: '#10b981',
-      subColor: 'rgba(16,185,129,0.7)',
-      badgeClass: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+      accentColor: '#34d399',
+      subColor: 'rgba(52,211,153,0.7)',
+      badgeClass: 'bg-emerald-500/10 text-emerald-300 border border-emerald-400/35'
     };
   }
 
@@ -85,17 +85,18 @@ export function getRecommendationTheme(input: any): RecommendationTheme {
     return {
       label: 'Buy',
       rangeText: '70-79',
-      textColor: 'text-green-400',
-      bgColor: 'bg-green-500/10',
-      borderColor: 'border-green-500/30',
-      progressBg: 'bg-gradient-to-r from-green-600 to-emerald-500',
-      glow: 'shadow-[0_0_10px_rgba(34,197,94,0.1)]',
-      accentColor: '#22c55e',
-      subColor: 'rgba(34,197,94,0.7)',
-      badgeClass: 'bg-green-500/10 text-green-400 border border-green-500/30'
+      textColor: 'text-sky-400',
+      bgColor: 'bg-sky-500/10',
+      borderColor: 'border-sky-500/30',
+      progressBg: 'bg-gradient-to-r from-sky-500 to-cyan-400',
+      glow: 'shadow-[0_0_10px_rgba(56,189,248,0.12)]',
+      accentColor: '#38bdf8',
+      subColor: 'rgba(56,189,248,0.7)',
+      badgeClass: 'bg-sky-500/10 text-sky-400 border border-sky-500/30'
     };
   }
 
+  // HOLD — amber (matches AI Quantum Stock Score mockup)
   if (score >= 60) {
     return {
       label: 'Hold',
@@ -103,39 +104,40 @@ export function getRecommendationTheme(input: any): RecommendationTheme {
       textColor: 'text-amber-400',
       bgColor: 'bg-amber-500/10',
       borderColor: 'border-amber-500/30',
-      progressBg: 'bg-gradient-to-r from-yellow-500 to-amber-400',
-      glow: 'shadow-[0_0_10px_rgba(251,191,36,0.1)]',
+      progressBg: 'bg-gradient-to-r from-amber-500 to-orange-400',
+      glow: 'shadow-[0_0_10px_rgba(251,191,36,0.15)]',
       accentColor: '#fbbf24',
-      subColor: 'rgba(251,191,36,0.7)',
+      subColor: 'rgba(251,191,36,0.75)',
       badgeClass: 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
     };
   }
 
+  // SELL — vivid rose
   if (score >= 50) {
     return {
       label: 'Sell',
       rangeText: '50-59',
-      textColor: 'text-orange-400',
-      bgColor: 'bg-orange-500/10',
-      borderColor: 'border-orange-500/30',
-      progressBg: 'bg-gradient-to-r from-amber-600 to-orange-500',
-      glow: 'shadow-[0_0_10px_rgba(249,115,22,0.1)]',
-      accentColor: '#f97316',
-      subColor: 'rgba(249,115,22,0.7)',
-      badgeClass: 'bg-orange-500/10 text-orange-400 border border-orange-500/30'
+      textColor: 'text-rose-400',
+      bgColor: 'bg-rose-500/10',
+      borderColor: 'border-rose-500/30',
+      progressBg: 'bg-gradient-to-r from-rose-500 to-pink-500',
+      glow: 'shadow-[0_0_10px_rgba(244,63,94,0.15)]',
+      accentColor: '#f43f5e',
+      subColor: 'rgba(244,63,94,0.75)',
+      badgeClass: 'bg-rose-500/10 text-rose-400 border border-rose-500/30'
     };
   }
 
   return {
-    label: 'Avoid',
+    label: 'Strong Sell',
     rangeText: 'Below 50',
-    textColor: 'text-red-500',
-    bgColor: 'bg-red-500/10',
-    borderColor: 'border-red-500/30',
-    progressBg: 'bg-gradient-to-r from-rose-600 to-red-500',
-    glow: 'shadow-[0_0_15px_rgba(239,68,68,0.15)]',
-    accentColor: '#ef4444',
-    subColor: 'rgba(239,68,68,0.7)',
-    badgeClass: 'bg-red-500/10 text-red-500 border border-red-500/30'
+    textColor: 'text-red-600',
+    bgColor: 'bg-red-950/45',
+    borderColor: 'border-red-700/45',
+    progressBg: 'bg-gradient-to-r from-rose-700 to-red-600',
+    glow: 'shadow-[0_0_15px_rgba(220,38,38,0.18)]',
+    accentColor: '#dc2626',
+    subColor: 'rgba(220,38,38,0.7)',
+    badgeClass: 'bg-red-950/40 text-red-600 border border-red-700/40'
   };
 }

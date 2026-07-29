@@ -1,6 +1,6 @@
 {
-  "name": "Remix: StockTrend AI",
-  "description": "AI-powered stock analysis tool that providing real-time data and market outlooks using Gemini.",
+  "name": "Quantum Node",
+  "description": "AI-powered stock analysis tool providing real-time data and market outlooks using Gemini.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

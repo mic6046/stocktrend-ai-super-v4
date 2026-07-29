@@ -1,12 +1,30 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, TrendingUp, TrendingDown, Info, Loader2, Sparkles, LineChart as ChartIcon, Activity, Globe, Newspaper, ExternalLink, MousePointer, Trash2, Tag, Gauge, Check, Zap, Bell, BellRing, Plus, Volume2, History, Flame, ShieldAlert, X, Coins, Briefcase, Shield, RefreshCw, Layers, Settings, Rocket, HelpCircle, ArrowRight, ChevronDown, ChevronUp, Download, Share2, ZoomIn, ZoomOut, Sliders, Brain, Percent, Trophy, Target, Gem } from 'lucide-react';
+import { Search, TrendingUp, TrendingDown, Info, Loader2, Sparkles, LineChart as ChartIcon, Activity, Globe, Newspaper, ExternalLink, MousePointer, Trash2, Tag, Gauge, Check, Zap, Bell, BellRing, Plus, Volume2, History, Flame, ShieldAlert, X, Coins, Briefcase, Shield, Layers, Settings, Rocket, HelpCircle, ArrowRight, ChevronDown, ChevronUp, Download, Share2, ZoomIn, ZoomOut, Sliders, Brain, Percent, Trophy, Target, Gem } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import html2canvas from 'html2canvas';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { computeTechnicalIndicators, calculateRSISeries, detectRSIDivergence } from './lib/technical';
 import { AiStockScoreCard } from './components/AiStockScoreCard';
+import { HistoricalValuationDashboard } from './components/HistoricalValuationDashboard';
+import {
+  AnalysisHeroCard,
+  AiInsightsStrip,
+  TradeZonesPanel,
+  RiskMeterPanel,
+  MetricRadialRow,
+  type HorizonKey,
+} from './components/analysis';
+import { buildHorizonView } from './lib/horizonView';
 import { TruncatedText } from './components/TruncatedText';
+import { AuthModal } from './components/AuthModal';
+import { UsageQuotaBar, QuotaExhaustedBanner } from './components/UsageQuotaBar';
+import { LegalLinks } from './components/LegalDocs';
+import { useAuth } from './lib/auth';
+import { loadUserData, saveUserData } from './lib/userData';
+import { apiUrl, assertJsonResponse } from './lib/api';
+import { fetchUsage, type UsageSnapshot } from './lib/usageApi';
+import { buildInstitutionalFlowNarrative, formatSignedMillions } from './lib/institutionalFlow';
 import { generateStockReportPDF } from './utils/pdfGenerator';
 import { getRecommendationTheme } from './utils/recommendationTheme';
 import { 
@@ -998,7 +1016,16 @@ const Candlestick = (props: any) => {
 };
 
 export default function App() {
-  const [ticker, setTicker] = useState('NVDA');
+  const { user, loading: authLoading, accessState, signOut } = useAuth();
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [cloudSyncStatus, setCloudSyncStatus] = useState<'idle' | 'loading' | 'synced' | 'error'>('idle');
+  const cloudHydratedRef = useRef(false);
+  const [usage, setUsage] = useState<UsageSnapshot | null>(null);
+  const [quotaBanner, setQuotaBanner] = useState<{ kind: 'analysis' | 'news'; message: string } | null>(null);
+  const [ticker, setTicker] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchInputKey, setSearchInputKey] = useState(0);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<StockData | null>(null);
   const [chartHistory, setChartHistory] = useState<any[]>([]);
@@ -1171,6 +1198,7 @@ export default function App() {
   const [showNewsSentiment, setShowNewsSentiment] = useState(true);
   const [showFibonacci, setShowFibonacci] = useState(false);
   const [showProjection, setShowProjection] = useState(true);
+  const [analysisHorizon, setAnalysisHorizon] = useState<HorizonKey>('1M');
   const [expandProjectionTuner, setExpandProjectionTuner] = useState(false);
   const [expandSrTuner, setExpandSrTuner] = useState(false);
   const [showVWAP, setShowVWAP] = useState(false);
@@ -1180,6 +1208,7 @@ export default function App() {
   const [showAiSellIndicator, setShowAiSellIndicator] = useState(true);
   const [showRsiDivergenceBadge, setShowRsiDivergenceBadge] = useState(false);
   const [showSmartMoney, setShowSmartMoney] = useState(true);
+  const [showOverlaysMenu, setShowOverlaysMenu] = useState(false);
   const [showVolume, setShowVolume] = useState(true);
   const [chartStyle, setChartStyle] = useState<'candle' | 'line'>('line');
   const [learningTimeframe, setLearningTimeframe] = useState<'90_DAYS' | '60_DAYS' | '30_DAYS'>('90_DAYS');
@@ -1255,9 +1284,7 @@ export default function App() {
       setShowRSIPanel(false);
       setShowSR(true);
       setSrSource('AI');
-      if (data && !prediction && !predicting) {
-        handlePredict(data);
-      }
+      // No API on preset switch — predict only on Search / Refresh
     }
   };
 
@@ -1315,7 +1342,6 @@ export default function App() {
   const [loadingPicks, setLoadingPicks] = useState(false);
   const [picksTheme, setPicksTheme] = useState<'GROWTH' | 'VALUE' | 'DIVIDEND' | 'MOMENTUM' | 'REBOUND' | 'ACCUMULATION'>('GROWTH');
   const [simulatedPrincipal, setSimulatedPrincipal] = useState<number>(10000);
-  const [expandInterestCalculator, setExpandInterestCalculator] = useState<boolean>(false);
 
 
   useEffect(() => {
@@ -1355,8 +1381,6 @@ export default function App() {
   const [marketSentiment, setMarketSentiment] = useState<any>(null);
   const [loadingSentiment, setLoadingSentiment] = useState<boolean>(false);
   const [sentimentTab, setSentimentTab] = useState<'US' | 'HK'>('US');
-  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
-  const [lastRefreshedAt, setLastRefreshedAt] = useState<string>(() => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
 
   // Helper functions to convert oklch and oklab colors to standard rgb/rgba format.
   // This prevents html2canvas parser crashes when encountering unsupported CSS color functions used by Tailwind v4.
@@ -2323,7 +2347,7 @@ export default function App() {
     setTestingPing(true);
     const start = performance.now();
     try {
-      const res = await fetch('/api/health');
+      const res = await fetch(apiUrl('/api/health'));
       if (res.ok) {
         const end = performance.now();
         setPingLatency(Math.round(end - start));
@@ -2406,6 +2430,117 @@ export default function App() {
     }
   }, [annotations]);
 
+  // Load user data from Firestore after sign-in (active subscribers only)
+  useEffect(() => {
+    if (!user?.email || accessState !== 'active') {
+      cloudHydratedRef.current = false;
+      setCloudSyncStatus('idle');
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      setCloudSyncStatus('loading');
+      try {
+        const cloud = await loadUserData(user.email!);
+        if (cancelled) return;
+
+        if (Array.isArray(cloud.alerts) && cloud.alerts.length > 0) {
+          setAlerts(cloud.alerts as PriceAlert[]);
+          localStorage.setItem('quantum_price_alerts', JSON.stringify(cloud.alerts));
+        }
+        if (typeof cloud.autoAlertRsiDivergence === 'boolean') {
+          setAutoAlertRsiDivergence(cloud.autoAlertRsiDivergence);
+          localStorage.setItem('quantum_auto_alert_rsi_divergence', JSON.stringify(cloud.autoAlertRsiDivergence));
+        }
+        if (cloud.modelWeights) {
+          setModelWeights((prev) => {
+            const merged = { ...prev, ...cloud.modelWeights };
+            localStorage.setItem('quantum_model_weights', JSON.stringify(merged));
+            return merged;
+          });
+        }
+        if (Array.isArray(cloud.trendlines)) {
+          setTrendlines(cloud.trendlines);
+          localStorage.setItem('quantum_trendlines', JSON.stringify(cloud.trendlines));
+        }
+        if (Array.isArray(cloud.annotations)) {
+          setAnnotations(cloud.annotations);
+          localStorage.setItem('quantum_annotations', JSON.stringify(cloud.annotations));
+        }
+
+        cloudHydratedRef.current = true;
+        setCloudSyncStatus('synced');
+      } catch (err) {
+        console.warn('Firestore load failed:', err);
+        cloudHydratedRef.current = true;
+        setCloudSyncStatus('error');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.email, accessState]);
+
+  const refreshUsage = async () => {
+    if (!user?.email) {
+      setUsage(null);
+      return;
+    }
+    try {
+      const snap = await fetchUsage(user.email);
+      setUsage(snap);
+    } catch (err) {
+      console.warn('Usage fetch failed:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (!user?.email || accessState !== 'active') {
+      setUsage(null);
+      return;
+    }
+    void refreshUsage();
+  }, [user?.email, accessState]);
+
+  // Refresh usage after pack/overage checkout returns (confirm may finish after first fetch).
+  useEffect(() => {
+    const onRefresh = (ev: Event) => {
+      const detail = (ev as CustomEvent).detail as { usage?: UsageSnapshot } | undefined;
+      if (detail?.usage) {
+        setUsage(detail.usage);
+      }
+      void refreshUsage();
+      window.setTimeout(() => void refreshUsage(), 1500);
+      window.setTimeout(() => void refreshUsage(), 4000);
+    };
+    window.addEventListener('quantum:usage-refresh', onRefresh);
+    return () => window.removeEventListener('quantum:usage-refresh', onRefresh);
+  }, [user?.email]);
+
+  // Persist user data to Firestore while signed in with active subscription
+  useEffect(() => {
+    if (!user?.email || accessState !== 'active' || !cloudHydratedRef.current) return;
+
+    const timer = window.setTimeout(() => {
+      saveUserData(user.email!, {
+        alerts,
+        autoAlertRsiDivergence,
+        modelWeights,
+        trendlines,
+        annotations,
+      })
+        .then(() => setCloudSyncStatus('synced'))
+        .catch((err) => {
+          console.warn('Firestore save failed:', err);
+          setCloudSyncStatus('error');
+        });
+    }, 800);
+
+    return () => window.clearTimeout(timer);
+  }, [user?.email, accessState, alerts, autoAlertRsiDivergence, modelWeights, trendlines, annotations]);
+
   const [selectedColor, setSelectedColor] = useState('#f59e0b'); // Amber default
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawingStart, setDrawingStart] = useState<any | null>(null);
@@ -2457,7 +2592,11 @@ export default function App() {
     const isAi = !!payload.buyAiConfirmed;
     const isAiScore = keyFactors === 'AI_SCORE';
 
-    const theme = getRecommendationTheme(isAiScore ? confidence : (confidence >= 95 ? 'EXCEPTIONAL BUY' : confidence >= 80 ? 'STRONG BUY' : 'BUY'));
+    // Always map by action tier — never pass raw confidence into the shared
+    // score→theme scale (that made HOLD/SELL land on the same amber/orange).
+    const theme = getRecommendationTheme(
+      confidence >= 95 ? 'EXCEPTIONAL BUY' : confidence >= 80 ? 'STRONG BUY' : 'BUY'
+    );
     const themeColor = theme.accentColor;
     const subColor = theme.subColor;
 
@@ -2526,7 +2665,8 @@ export default function App() {
     const isAi = !!payload.sellAiConfirmed;
     const isAiScore = keyFactors === 'AI_SCORE';
 
-    const theme = getRecommendationTheme(isAiScore ? confidence : (confidence < 50 ? 'AVOID' : 'SELL'));
+    // Force sell-family colors (rose/red) — do not use numeric confidence bands
+    const theme = getRecommendationTheme(confidence < 50 ? 'AVOID' : 'SELL');
     const themeColor = theme.accentColor;
     const subColor = theme.subColor;
 
@@ -2594,7 +2734,8 @@ export default function App() {
     const keyFactors = payload.holdFactors || 'NEUTRAL';
     const isAiScore = keyFactors === 'AI_SCORE';
 
-    const theme = getRecommendationTheme(isAiScore ? confidence : 'HOLD');
+    // Force HOLD sky-blue — never score-map confidence (avoids SELL lookalike)
+    const theme = getRecommendationTheme('HOLD');
     const themeColor = theme.accentColor;
     const subColor = theme.subColor;
 
@@ -4468,6 +4609,28 @@ export default function App() {
     };
   }, [decoratedChartData, recommendation, parsedOutlook]);
 
+  const projectionMeta = React.useMemo(() => {
+    const status = indicatorsAlignment?.trajectoryStatus;
+    const trend =
+      status === 'UPWARD' ? ('up' as const) : status === 'DOWNWARD' ? ('down' as const) : ('flat' as const);
+    const horizonAdj = projectionHorizon <= 5 ? 6 : projectionHorizon <= 10 ? 0 : -8;
+    const bandAdj =
+      projectionConfidence <= 1 ? 5 : projectionConfidence <= 1.5 ? 0 : projectionConfidence <= 2 ? -4 : -8;
+    const shortConf = Math.round(Math.min(92, Math.max(52, 70 + horizonAdj + bandAdj)));
+    const projPts = (decoratedChartData || []).filter((d: any) => d.isProjectionPoint);
+    const last = projPts.length ? projPts[projPts.length - 1] : null;
+    const hist = (decoratedChartData || []).filter((d: any) => !d.isProjectionPoint);
+    const lastClose = hist.length ? Number(hist[hist.length - 1].close) : 0;
+    return {
+      trend,
+      shortConf,
+      baseCase: last?.projectedPrice != null ? Number(last.projectedPrice) : null,
+      bullCase: last?.projectedUpper != null ? Number(last.projectedUpper) : null,
+      bearCase: last?.projectedLower != null ? Number(last.projectedLower) : null,
+      lastClose,
+    };
+  }, [indicatorsAlignment, decoratedChartData, projectionHorizon, projectionConfidence]);
+
   const rsiAlertBacktest = React.useMemo(() => {
     if (!decoratedChartData || decoratedChartData.length === 0) return null;
     
@@ -4858,7 +5021,17 @@ export default function App() {
 
     // 7. MULTI-HORIZON FORECAST ENGINE PROBABILITIES
     // 8. PRICE RANGE FORECAST & SCENARIO ENGINE
-    const currentPrice = parseFloat((financials?.currentPrice || data?.quote?.regularMarketPrice || 100).toString().replace(/[$,]/g, ''));
+    // Prefer live quote so Trade Management Zones / stops track the market in real time
+    const liveQuotePx = Number(data?.quote?.regularMarketPrice);
+    const fromFinancials = parseFloat(
+      String(financials?.currentPrice || '').replace(/[$,]/g, '')
+    );
+    const currentPrice =
+      Number.isFinite(liveQuotePx) && liveQuotePx > 0
+        ? liveQuotePx
+        : Number.isFinite(fromFinancials) && fromFinancials > 0
+          ? fromFinancials
+          : 100;
     const bearCase = {
       prob: Math.round(30 - (isAccum ? 10 : -10)),
       targetPrice: currentPrice * (1 - (volIsHigh ? 0.15 : 0.08)),
@@ -4991,6 +5164,43 @@ export default function App() {
     };
   }, [prediction, technicalBreakdown, recommendation, confidence, aiStockScore, ensembleForecast, patternSuccessSummary, financials, data, whyBuyStrength, whySellStrength, adaptiveLearning]);
 
+  /** Investment Horizon is the single source of truth for the analysis dashboard. */
+  const horizonView = React.useMemo(() => {
+    const lastClose =
+      Number(data?.quote?.regularMarketPrice) ||
+      projectionMeta.lastClose ||
+      Number(cockpitData?.entryPrice) ||
+      0;
+    return buildHorizonView({
+      horizon: analysisHorizon,
+      lastClose,
+      baseScore: aiStockScore?.totalScore ?? (confidence ?? 65),
+      baseConfidence: confidence ?? cockpitData?.confidence ?? null,
+      baseTarget: projectionMeta.baseCase ?? cockpitData?.baseCase?.targetPrice ?? null,
+      bullTarget: projectionMeta.bullCase ?? cockpitData?.bullCase?.targetPrice ?? null,
+      bearTarget: projectionMeta.bearCase ?? cockpitData?.bearCase?.targetPrice ?? null,
+      baseReturn: cockpitData?.baseCase?.expectedReturn ?? null,
+      bullReturn: cockpitData?.bullCase?.expectedReturn ?? null,
+      baseDrawdown: cockpitData?.baseCase?.expectedDrawdown ?? null,
+      baseVolatility: technicalBreakdown?.indicators?.volatility ?? null,
+      baseRiskScore: cockpitData?.riskScore ?? Math.max(0, 100 - (aiStockScore?.totalScore ?? 60)),
+      baseSharpe:
+        cockpitData?.rrRatio != null ? Number((cockpitData.rrRatio * 0.85).toFixed(2)) : null,
+      stopLoss: cockpitData?.stopLoss ?? null,
+      forecastHorizons,
+      ticker: data?.ticker,
+    });
+  }, [
+    analysisHorizon,
+    data?.quote?.regularMarketPrice,
+    data?.ticker,
+    projectionMeta,
+    cockpitData,
+    aiStockScore,
+    confidence,
+    technicalBreakdown?.indicators?.volatility,
+    forecastHorizons,
+  ]);
 
   const radarData = React.useMemo(() => {
     if (!news || news.length === 0) return [];
@@ -5666,9 +5876,12 @@ export default function App() {
     { label: 'MAX', range: 'max', interval: '1mo' },
   ];
 
-  const fetchWithRetry = async (url: string, options?: RequestInit, retries = 3, delay = 1000): Promise<Response> => {
+  const getActiveTimeframeParams = () =>
+    TIMEFRAMES.find((t) => t.label === timeframe) || { label: '1M', range: '1mo', interval: '1d' };
+
+  const fetchWithRetry = async (url: string, options?: RequestInit, retries = 2, delay = 1200): Promise<Response> => {
     try {
-      const res = await fetch(url, options);
+      const res = await assertJsonResponse(await fetch(apiUrl(url), options));
       if (!res.ok) {
         let msg = `HTTP error ${res.status}`;
         try {
@@ -5683,7 +5896,7 @@ export default function App() {
     } catch (err) {
       if (retries <= 1) throw err;
       await new Promise(resolve => setTimeout(resolve, delay));
-      return fetchWithRetry(url, options, retries - 1, delay * 1.5);
+      return fetchWithRetry(url, options, retries - 1, Math.min(delay * 1.5, 4000));
     }
   };
 
@@ -5728,35 +5941,109 @@ export default function App() {
 
 
 
-  const fetchStock = async (symbol: string, range = '1mo', interval = '1d', isInitial = true, bypassCache = false, isPageLoad = false) => {
+  const stockRequestSeq = useRef(0);
+
+  const clearTickerSearchState = () => {
+    setData(null);
+    setChartHistory([]);
+    setIndicatorHistory([]);
+    setNews([]);
+    setNewsSummary(null);
+    setShowNewsSummaryBox(false);
+    setPrediction(null);
+    setConfidence(null);
+    setLevels(null);
+    setRecommendation(null);
+    setFinancials(null);
+    setNewsSummaryDetail(null);
+    setWhyBuyNow(null);
+    setWhyBuyStrength(null);
+    setWhySellNow(null);
+    setWhySellStrength(null);
+    setBullishFactors([]);
+    setBearishFactors([]);
+    setKeyRisks([]);
+    setAiStockScore(null);
+    setWhaleAccumulation(null);
+    setAiFallbackActive(false);
+    setAiFallbackReason(null);
+    setForecastHorizons([]);
+    setEnsembleForecast(null);
+    setPatternMatches([]);
+    setPatternSuccessSummary(null);
+    setAdaptiveLearning(null);
+    setTimeframe('1M');
+    setZoomRange(null);
+    setError(null);
+  };
+
+  const fetchStock = async (
+    symbol: string,
+    range = '1mo',
+    interval = '1d',
+    isInitial = true,
+    bypassCache = false,
+    runPredict = false
+  ): Promise<any | null> => {
     const cleanSymbol = decomposeCompoundTicker(symbol);
-    if (!cleanSymbol) return;
+    if (!cleanSymbol) return null;
+    const requestId = ++stockRequestSeq.current;
     if (isInitial) {
-      setTicker(cleanSymbol.toUpperCase());
       setLoading(true);
-      setError(null);
-      setPrediction(null);
-      setConfidence(null);
-      setLevels(null);
-      setTimeframe('1M');
-      setZoomRange(null);
+      clearTickerSearchState();
     }
     
     try {
-      const res = await fetchWithRetry(`/api/stock?ticker=${encodeURIComponent(cleanSymbol.toUpperCase())}&range=${range}&interval=${interval}${bypassCache ? '&bypassCache=true' : ''}`);
+      const tickerEnc = encodeURIComponent(cleanSymbol.toUpperCase());
+      const cacheQs = bypassCache ? '&bypassCache=true' : '';
+      const chartUrl = `/api/stock?ticker=${tickerEnc}&range=${range}&interval=${interval}${cacheQs}`;
+
+      // Kick off news + optional 1y history in parallel with the chart fetch (predict path)
+      const needsParallel1y =
+        runPredict &&
+        !(String(range) === '1y' && String(interval) === '1d') &&
+        String(range) !== '5y' &&
+        String(range) !== 'max';
+      const newsPromise = runPredict ? fetchNews(symbol) : Promise.resolve([] as any[]);
+      const longHistPromise = needsParallel1y
+        ? fetchWithRetry(`/api/stock?ticker=${tickerEnc}&range=1y&interval=1d${cacheQs}`)
+            .then((r) => r.json())
+            .catch((err) => {
+              console.warn('Parallel 1y stock fetch failed:', err);
+              return null;
+            })
+        : Promise.resolve(null);
+
+      const res = await fetchWithRetry(chartUrl);
+      if (requestId !== stockRequestSeq.current) return null;
       const stockData = await res.json();
       
       // Ensure history data is valid for chart
       const sanitizedHistory = (stockData.history || []).filter((h: any) => h.close !== null && h.close !== undefined);
       stockData.history = sanitizedHistory;
 
+      const [newsItems, longData] = runPredict
+        ? await Promise.all([newsPromise, longHistPromise])
+        : [[], null];
+
+      let predictHistoryOverride: any[] | undefined;
+      if (longData?.history) {
+        predictHistoryOverride = longData.history.filter(
+          (h: any) => h.close !== null && h.close !== undefined
+        );
+        if (predictHistoryOverride.length) {
+          setIndicatorHistory(predictHistoryOverride);
+        }
+      }
+
       if (isInitial) {
+        setError(null);
         setData(stockData);
         setChartHistory(sanitizedHistory);
-        if (isPageLoad || activePreset === 'ai') {
-          handlePredict(stockData);
+        // Predict + news only on explicit Search / Refresh (runPredict)
+        if (runPredict) {
+          await handlePredict(stockData, false, newsItems, predictHistoryOverride);
         }
-        fetchNews(symbol);
         
         // Auto-fill sentinel alerts builder
         setAlertTicker(stockData.ticker);
@@ -5764,92 +6051,104 @@ export default function App() {
           setAlertTargetPrice(stockData.quote.regularMarketPrice.toFixed(2));
         }
       } else {
+        if (requestId !== stockRequestSeq.current) return null;
         setChartHistory(sanitizedHistory);
         setData(prev => prev ? {
           ...prev,
           quote: stockData.quote || prev.quote,
           history: sanitizedHistory || prev.history,
         } : stockData);
+        if (runPredict) {
+          await handlePredict(stockData, bypassCache, newsItems, predictHistoryOverride);
+        }
       }
 
       // Always run immediate live alerts sentinel check whenever ticker price loads
       if (stockData.quote?.regularMarketPrice) {
         checkAlertsForTicker(stockData.ticker, stockData.quote.regularMarketPrice);
       }
+      return stockData;
     } catch (err: any) {
-      setError(err.message);
+      if (requestId !== stockRequestSeq.current) return null;
+      const raw = err?.message || String(err);
+      const msg =
+        /failed to fetch|networkerror|load failed/i.test(raw)
+          ? 'Cannot reach the API. Please retry in a moment.'
+          : raw;
+      setError(msg);
+      return null;
     } finally {
-      setLoading(false);
+      if (requestId === stockRequestSeq.current) {
+        setLoading(false);
+      }
     }
   };
 
   const handleTimeframeChange = async (tf: any) => {
-    if (!data) return;
+    // UI-only: no API until Search or Refresh
     setZoomRange(null);
     setTimeframe(tf.label);
-    setLoadingTimeframe(true);
-    try {
-      await fetchStock(data.ticker, tf.range, tf.interval, false);
-    } catch (err) {
-      console.error('Timeframe change failed:', err);
-    } finally {
-      setLoadingTimeframe(false);
-    }
   };
 
-  const fetchNews = async (symbol: string) => {
+  const fetchNews = async (symbol: string): Promise<any[]> => {
     try {
-      if (!symbol) return;
+      if (!symbol) return [];
       setNewsSummary(null);
       setShowNewsSummaryBox(false);
       const res = await fetchWithRetry(`/api/news?ticker=${encodeURIComponent(symbol.toUpperCase())}`);
       const newsData = await res.json();
-      setNews(newsData);
+      const list = Array.isArray(newsData) ? newsData : [];
+      setNews(list);
+      return list;
     } catch (err) {
       console.warn('[news] News feed fallback sync:', err);
+      return [];
     }
   };
 
   const generateNewsSummary = async () => {
     if (!news || news.length === 0) return;
+    if (!assertNewsCredits()) {
+      setNewsSummary('Usage is out. Please reload news credits to continue.');
+      setShowNewsSummaryBox(true);
+      return;
+    }
     setLoadingNewsSummary(true);
     setShowNewsSummaryBox(true);
     try {
       const activeSym = data?.ticker || '';
-      const response = await fetch('/api/news-summary', {
+      const response = await fetch(apiUrl('/api/news-summary'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           articles: news,
-          ticker: activeSym
+          ticker: activeSym,
+          email: user?.email || undefined,
         }),
       });
       if (!response.ok) {
-        throw new Error('Summary API response failed');
+        const errData = await response.json().catch(() => ({}));
+        if (response.status === 402) {
+          if (errData.usage) setUsage(errData.usage);
+          setQuotaBanner({
+            kind: 'news',
+            message: errData.error || 'Daily AI news usage is out. Please reload credits.',
+          });
+          setNewsSummary('Usage is out. Please reload news credits to continue.');
+          return;
+        }
+        throw new Error(errData.error || 'Summary API response failed');
       }
       const result = await response.json();
       setNewsSummary(result.summary);
+      if (result.usage) setUsage(result.usage);
+      else void refreshUsage();
+      setQuotaBanner(null);
     } catch (err) {
       console.error('Failed to generate news summary:', err);
-      if (news && news.length > 0) {
-        const topics = new Set<string>();
-        const sources = new Set<string>();
-        news.forEach((a: any) => {
-          if (a.publisher) sources.add(a.publisher);
-          const t = (a.title || '').toLowerCase();
-          if (t.includes('ai') || t.includes('speech')) topics.add('AI technological transitions');
-          if (t.includes('satellite') || t.includes('space')) topics.add('Space orbital arrays');
-        });
-        const sourceStr = Array.from(sources).slice(0,3).join(', ');
-        const bul1 = `• **Consolidated Feed Sentiment**: Analysis indicates active coverage across key channels including ${sourceStr || 'the global news wires'}.`;
-        const bul2 = `• **Target Sector Catalysts**: News flow remains oriented toward high-growth thematic markers such as ${topics.size > 0 ? Array.from(topics).join(' and ') : 'strategic industry partnerships'}.`;
-        const bul3 = `• **Technical Focus Guidelines**: Traders are advised to monitor key standard deviation boundaries and historical support ranges corresponding to aggregate sentiment shifts.`;
-        setNewsSummary(`${bul1}\n${bul2}\n${bul3}`);
-      } else {
-        setNewsSummary('• **No Feed Context**: Unable to extract news data stream for consolidation.\n• **Operational Guidelines**: Verify that the network uplink remains connected.\n• **Analysis Terminated**: Retry sifting the catalog elements.');
-      }
+      setNewsSummary('Unable to generate news summary. Please try again.');
     } finally {
       setLoadingNewsSummary(false);
     }
@@ -5860,7 +6159,7 @@ export default function App() {
     setLoadingFinnhub(true);
     setFinnhubError(null);
     try {
-      const response = await fetch(`/api/finnhub-news/${encodeURIComponent(sym.toUpperCase())}`);
+      const response = await fetch(apiUrl(`/api/finnhub-news/${encodeURIComponent(sym.toUpperCase())}`));
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
         throw new Error(errData.error || `HTTP error ${response.status}`);
@@ -5878,37 +6177,52 @@ export default function App() {
     }
   };
 
-  // Automated effect to Synchronize News on News Center Symbol or Source alteration
+  // News Center: fetch only when user clicks Execute (no auto API on page open / typing / source toggle)
+  const [newsCenterFetchKey, setNewsCenterFetchKey] = useState(0);
+
   useEffect(() => {
-    if (activePage === 'NEWS_CENTER') {
-      const fetchNewsCenter = async () => {
-        setLoadingNewsCenter(true);
-        setNewsCenterError(null);
-        setNewsCenterSummary(null);
-        try {
-          const endpoint = newsSource === 'MARKETAUX'
-            ? `/api/marketaux-news/${encodeURIComponent(newsCenterSymbol.toUpperCase())}`
-            : `/api/finnhub-news/${encodeURIComponent(newsCenterSymbol.toUpperCase())}`;
-          const response = await fetch(endpoint);
-          if (!response.ok) {
-            const errData = await response.json().catch(() => ({}));
-            throw new Error(errData.error || `HTTP request failed (${response.status})`);
-          }
-          const data = await response.json();
-          if (!Array.isArray(data)) {
-            throw new Error("Invalid payload structure. Expected articles array.");
-          }
-          setNewsCenterArticles(data);
-        } catch (err: any) {
-          console.error(`Error loading ${newsSource} news in News Center:`, err);
-          setNewsCenterError(err.message || `Stream connection issue. Check ${newsSource}_API_KEY environment variable.`);
-        } finally {
-          setLoadingNewsCenter(false);
+    if (activePage !== 'NEWS_CENTER' || newsCenterFetchKey === 0) return;
+
+    let cancelled = false;
+    const symbol = newsCenterSymbol;
+    const source = newsSource;
+    const fetchNewsCenter = async () => {
+      setLoadingNewsCenter(true);
+      setNewsCenterError(null);
+      setNewsCenterSummary(null);
+      try {
+        const endpoint = source === 'MARKETAUX'
+          ? `/api/marketaux-news/${encodeURIComponent(symbol.toUpperCase())}`
+          : `/api/finnhub-news/${encodeURIComponent(symbol.toUpperCase())}`;
+        const response = await fetch(apiUrl(endpoint));
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.error || `HTTP request failed (${response.status})`);
         }
-      };
-      fetchNewsCenter();
-    }
-  }, [activePage, newsCenterSymbol, newsSource]);
+        const data = await response.json();
+        if (!Array.isArray(data)) {
+          throw new Error("Invalid payload structure. Expected articles array.");
+        }
+        if (!cancelled) setNewsCenterArticles(data);
+      } catch (err: any) {
+        console.error(`Error loading ${source} news in News Center:`, err);
+        if (!cancelled) {
+          setNewsCenterError(err.message || `Stream connection issue. Check ${source}_API_KEY environment variable.`);
+        }
+      } finally {
+        if (!cancelled) setLoadingNewsCenter(false);
+      }
+    };
+    fetchNewsCenter();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-fetch when Execute increments key
+  }, [newsCenterFetchKey]);
+
+  const runNewsCenterQuery = () => {
+    setNewsCenterFetchKey((k) => k + 1);
+  };
 
   // === Self-Learning Engine v6 Optimization Math & Controls ===
   const [calibrating, setCalibrating] = useState(false);
@@ -6123,50 +6437,70 @@ export default function App() {
   // Generates 3-bullet point executive summary of News Center articles using our API
   const generateNewsCenterSummary = async () => {
     if (!newsCenterArticles || newsCenterArticles.length === 0) return;
+    if (!assertNewsCredits()) {
+      setNewsCenterSummary('Usage is out. Please reload news credits to continue.');
+      return;
+    }
     setLoadingNewsCenterSummary(true);
     try {
       const simplifiedArticles = newsCenterArticles.slice(0, 8).map((art: any) => ({
         title: art.headline,
         publisher: art.source
       }));
-      const response = await fetch('/api/news-summary', {
+      const response = await fetch(apiUrl('/api/news-summary'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           articles: simplifiedArticles,
-          ticker: newsCenterSymbol.toUpperCase()
+          ticker: newsCenterSymbol.toUpperCase(),
+          email: user?.email || undefined,
         }),
       });
       if (!response.ok) {
-        throw new Error('Summary Generation failed');
+        const errData = await response.json().catch(() => ({}));
+        if (response.status === 402) {
+          if (errData.usage) setUsage(errData.usage);
+          setQuotaBanner({
+            kind: 'news',
+            message: errData.error || 'Daily AI news usage is out. Please reload credits.',
+          });
+          setNewsCenterSummary('Usage is out. Please reload news credits to continue.');
+          return;
+        }
+        throw new Error(errData.error || 'Summary Generation failed');
       }
       const result = await response.json();
       setNewsCenterSummary(result.summary);
+      if (result.usage) setUsage(result.usage);
+      else void refreshUsage();
+      setQuotaBanner(null);
     } catch (err: any) {
       console.error('Failed to generate News Center summary:', err);
-      // Construct a premium responsive fallback in case Gemini stream isn't configured/connected
-      if (newsCenterArticles && newsCenterArticles.length > 0) {
-        const sources = Array.from(new Set(newsCenterArticles.map((a: any) => a.source))).slice(0, 3).join(', ');
-        const bul1 = `• **Consolidated Wire Sentiment**: Analysis indicates active coverage across key channels including ${sources || 'global financial wires'} for ${newsCenterSymbol.toUpperCase()}.`;
-        const bul2 = `• **Thematic Catalysts**: Recent press releases focus on operational advancements, development sprints, and product telemetry metrics.`;
-        const bul3 = `• **Strategic Guideline Matrix**: Tactical asset positioning targets standard deviation support thresholds in the coming cycles.`;
-        setNewsCenterSummary(`${bul1}\n${bul2}\n${bul3}`);
-      } else {
-        setNewsCenterSummary('• **No Wire Context**: Verification error loading latest news articles stream.');
-      }
+      setNewsCenterSummary('Unable to generate news summary. Please try again.');
     } finally {
       setLoadingNewsCenterSummary(false);
     }
   };
 
-  const handlePredict = async (stockData: StockData, forceBypass = false) => {
+  const handlePredict = async (
+    stockData: StockData,
+    forceBypass = false,
+    newsOverride?: any[],
+    predictHistoryOverride?: any[]
+  ) => {
+    if (!assertAnalysisCredits()) {
+      setPredicting(false);
+      setPrediction(null);
+      return;
+    }
     // Round current price to 2 decimals to define cache key
     const currentPrice = stockData.quote?.regularMarketPrice || 0;
     const priceStr = currentPrice ? currentPrice.toFixed(2) : '0.00';
     const cacheKey = `${stockData.ticker}_${stockData.history.slice(-5).map(h => h.close).join('|')}_price_${priceStr}`;
     
+    // Client cache only when credits remain (already gated above)
     if (!forceBypass && predictCache[cacheKey]) {
       const cached = predictCache[cacheKey];
       setPrediction(cached.prediction);
@@ -6218,22 +6552,52 @@ export default function App() {
     setPatternSuccessSummary(null);
     setAdaptiveLearning(null);
     try {
-      // Always fetch a robust 1-year daily history dataset to ensure high-fidelity predictive input
+      // Prefer existing ~1y daily history when already loaded (same accuracy, one fewer Yahoo/Twelve call).
+      // Only fetch 1y when the chart series is too short for SMA200 / pattern lookback.
       let predictHistory = stockData.history;
-      try {
-        const resDaily = await fetchWithRetry(`/api/stock?ticker=${encodeURIComponent(stockData.ticker)}&range=1y&interval=1d`);
-        const dailyData = await resDaily.json();
-        if (dailyData.history) {
-          predictHistory = dailyData.history.filter((h: any) => h.close !== null && h.close !== undefined);
-          setIndicatorHistory(predictHistory);
-        } else {
+      const historySpanDays = (history: any[]) => {
+        if (!history?.length) return 0;
+        const a = new Date(history[0]?.date).getTime();
+        const b = new Date(history[history.length - 1]?.date).getTime();
+        if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a) return 0;
+        return (b - a) / 86400000;
+      };
+      const isEnoughForPredict = (history: any[]) =>
+        Array.isArray(history) &&
+        history.length >= 180 &&
+        historySpanDays(history) >= 250;
+
+      if (predictHistoryOverride && isEnoughForPredict(predictHistoryOverride)) {
+        predictHistory = predictHistoryOverride;
+        setIndicatorHistory(predictHistory);
+      } else if (
+        data?.ticker &&
+        String(data.ticker).toUpperCase() === String(stockData.ticker).toUpperCase() &&
+        isEnoughForPredict(indicatorHistory)
+      ) {
+        predictHistory = indicatorHistory;
+      } else if (isEnoughForPredict(stockData.history)) {
+        predictHistory = stockData.history;
+        setIndicatorHistory(predictHistory);
+      } else {
+        try {
+          const resDaily = await fetchWithRetry(`/api/stock?ticker=${encodeURIComponent(stockData.ticker)}&range=1y&interval=1d`);
+          const dailyData = await resDaily.json();
+          if (dailyData.history) {
+            predictHistory = dailyData.history.filter((h: any) => h.close !== null && h.close !== undefined);
+            setIndicatorHistory(predictHistory);
+          } else {
+            setIndicatorHistory(stockData.history);
+          }
+        } catch (dailyErr) {
+          console.warn('Background 1y stock data fetch failed, using fallback:', dailyErr);
           setIndicatorHistory(stockData.history);
         }
-      } catch (dailyErr) {
-        console.warn('Background 1y stock data fetch failed, using fallback:', dailyErr);
-        setIndicatorHistory(stockData.history);
       }
 
+      const newsForPredict = Array.isArray(newsOverride) && newsOverride.length > 0
+        ? newsOverride
+        : (news || []);
       const computedIndicators = computeTechnicalIndicators(predictHistory, stockData.quote);
 
       const res = await fetchWithRetry('/api/predict', {
@@ -6244,12 +6608,33 @@ export default function App() {
           history: predictHistory, // Pass full 1-year timeline for lookback pattern seekers & adaptive learning
           quote: stockData.quote,
           indicators: computedIndicators,
-          news: news ? news.slice(0, 8).map((n: any) => ({ title: n.title, publisher: n.publisher })) : [],
+          news: newsForPredict.slice(0, 12).map((n: any) => ({
+            title: n.title || n.headline,
+            publisher: n.publisher || n.source,
+            headline: n.headline || n.title,
+            source: n.source || n.publisher,
+          })),
           bypassCache: forceBypass,
-          modelWeights: modelWeights
+          modelWeights: modelWeights,
+          email: user?.email || undefined,
         })
       });
       const result = await res.json();
+      if (!res.ok) {
+        if (res.status === 402) {
+          if (result.usage) setUsage(result.usage);
+          setQuotaBanner({
+            kind: 'analysis',
+            message: result.error || 'Daily AI search/analysis usage is out. Please reload credits.',
+          });
+          setPrediction(null);
+          return;
+        }
+        throw new Error(result.error || 'Predict failed');
+      }
+      if (result.usage) setUsage(result.usage);
+      else if (!result.cached) void refreshUsage();
+      setQuotaBanner(null);
       setPrediction(result.prediction);
       setConfidence(result.confidence);
       setLevels(result.levels);
@@ -6327,50 +6712,63 @@ export default function App() {
     console.log("Earliest Date:", earliestDate);
   }, [timeframe, visibleBaseHistory, decoratedChartData]);
 
-  const handleManualRefresh = async () => {
-    if (isRefreshing) return;
-    setIsRefreshing(true);
-    try {
-      const activeTicker = data?.ticker || ticker || 'NVDA';
-      const timeframesList = [
-        { label: '1D', range: '1d', interval: '2m' },
-        { label: '5D', range: '5d', interval: '15m' },
-        { label: '7D', range: '7d', interval: '30m' },
-        { label: '1M', range: '1mo', interval: '1d' },
-        { label: '3M', range: '3mo', interval: '1d' },
-        { label: '6M', range: '6mo', interval: '1h' },
-        { label: 'YTD', range: 'ytd', interval: '1d' },
-        { label: '1Y', range: '1y', interval: '1d' },
-        { label: '5Y', range: '5y', interval: '1wk' },
-        { label: 'MAX', range: 'max', interval: '1mo' },
-      ];
-      const tf = timeframesList.find((t) => t.label === timeframe) || { range: '1mo', interval: '1d' };
+  // No auto API on mount — wait for Search
 
-      await Promise.allSettled([
-        fetchStock(activeTicker, tf.range, tf.interval, false, true),
-        fetchMarkets(true),
-        fetchSentiment(true),
-        fetchNews(activeTicker),
-        fetchPicks(picksTheme, picksRisk, false, true),
-      ]);
-
-      setLastRefreshedAt(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-    } catch (err) {
-      console.error('Manual refresh error:', err);
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
-
+  // Keep displayed current price near real-time (lightweight /api/quote poll; does not re-run AI)
   useEffect(() => {
-    fetchStock('NVDA', '1mo', '1d', true, true, true);
-    fetchMarkets(true);
-    fetchSentiment(true);
-  }, []);
+    const activeTicker = data?.ticker;
+    if (!activeTicker) return;
 
-  useEffect(() => {
-    fetchPicks(picksTheme, picksRisk);
-  }, [picksTheme, picksRisk]);
+    let cancelled = false;
+
+    const refreshLiveQuote = async () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      try {
+        const res = await fetch(
+          apiUrl(`/api/quote?ticker=${encodeURIComponent(activeTicker)}`)
+        );
+        if (!res.ok || cancelled) return;
+        const body = await res.json();
+        const live = body?.quote;
+        const px = Number(live?.regularMarketPrice);
+        if (!live || !Number.isFinite(px) || px <= 0 || cancelled) return;
+
+        setData((prev) => {
+          if (!prev || String(prev.ticker).toUpperCase() !== String(activeTicker).toUpperCase()) {
+            return prev;
+          }
+          const prevPx = Number(prev.quote?.regularMarketPrice);
+          const asOf = Number(body?.asOf) || Date.now();
+          // Skip quote churn when unchanged within 1 cent, but keep asOf fresh
+          if (Number.isFinite(prevPx) && Math.abs(prevPx - px) < 0.005) {
+            if ((prev as any).quoteAsOf === asOf) return prev;
+            return { ...prev, quoteAsOf: asOf };
+          }
+          return {
+            ...prev,
+            quote: { ...(prev.quote || {}), ...live },
+            quoteAsOf: asOf,
+          };
+        });
+
+        checkAlertsForTicker(activeTicker, px);
+      } catch {
+        // Silent — chart/analysis remain usable on transient quote failures
+      }
+    };
+
+    void refreshLiveQuote();
+    const id = window.setInterval(refreshLiveQuote, 12000);
+    const onVis = () => {
+      if (document.visibilityState === 'visible') void refreshLiveQuote();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [data?.ticker]);
 
   // Real-time wall clock ticking so relative times update live (local browser clock only, no network calls)
   useEffect(() => {
@@ -6605,18 +7003,85 @@ export default function App() {
     return globalGetIndexPrediction(symbol, currentPrice, changePercent);
   };
 
+  const clearSearchField = () => {
+    setSearchQuery('');
+    if (searchInputRef.current) {
+      searchInputRef.current.value = '';
+      searchInputRef.current.blur();
+    }
+    // Remount input so the DOM cannot keep stale text / autofill
+    setSearchInputKey((k) => k + 1);
+  };
+
+  const assertAnalysisCredits = (): boolean => {
+    if (!user?.email) {
+      setQuotaBanner({
+        kind: 'analysis',
+        message: 'Sign in required to use AI search / analysis credits.',
+      });
+      return false;
+    }
+    if (usage && !usage.unlimited && usage.analysesRemaining <= 0) {
+      setQuotaBanner({
+        kind: 'analysis',
+        message: 'Daily AI search/analysis usage is out. Please reload credits (+5 RM5 or Pack RM10) to continue.',
+      });
+      return false;
+    }
+    return true;
+  };
+
+  const assertNewsCredits = (): boolean => {
+    if (!user?.email) {
+      setQuotaBanner({
+        kind: 'news',
+        message: 'Sign in required to use AI news credits.',
+      });
+      return false;
+    }
+    if (usage && !usage.unlimited && usage.newsRemaining <= 0) {
+      setQuotaBanner({
+        kind: 'news',
+        message: 'Daily AI news usage is out. Please reload credits (News mini RM5 +10) to continue.',
+      });
+      return false;
+    }
+    return true;
+  };
+
+  const runTickerSearch = (rawInput: string) => {
+    const raw = rawInput.trim();
+    if (!raw) return;
+    if (!assertAnalysisCredits()) return;
+    let cleanTicker = raw.split(/[\s,·•\-]+/)[0].toUpperCase();
+    cleanTicker = decomposeCompoundTicker(cleanTicker);
+    if (!cleanTicker) return;
+    clearSearchField();
+    setTicker(cleanTicker);
+    const tf = getActiveTimeframeParams();
+    void fetchStock(cleanTicker, tf.range, tf.interval, true, false, true);
+  };
+
+  // Keep search box empty after a ticker has loaded (defeats browser autofill restoring old "TICKER · name")
+  useEffect(() => {
+    if (!data?.ticker) return;
+    setSearchQuery('');
+    if (searchInputRef.current) searchInputRef.current.value = '';
+    setSearchInputKey((k) => k + 1);
+  }, [data?.ticker]);
+
   const handleIndexLoad = (sym: string) => {
+    if (!assertAnalysisCredits()) return;
+    clearSearchField();
     setTicker(sym);
-    fetchStock(sym);
+    const tf = getActiveTimeframeParams();
+    void fetchStock(sym, tf.range, tf.interval, true, false, true);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!ticker.trim()) return;
-    let cleanTicker = ticker.trim().split(/[\s,]+/)[0].toUpperCase();
-    cleanTicker = decomposeCompoundTicker(cleanTicker);
-    setTicker(cleanTicker);
-    fetchStock(cleanTicker);
+    const typed = searchInputRef.current?.value ?? searchQuery;
+    runTickerSearch(typed);
   };
 
   const handleExportPDF = () => {
@@ -6665,178 +7130,218 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#050505] text-[#e0e0e0] font-sans selection:bg-emerald-500 selection:text-black overflow-x-hidden relative">
+      <AuthModal
+        open={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        onSuccess={(state) => {
+          if (state === 'active') setActivePage('DASHBOARD');
+        }}
+      />
       {/* Atmosphere Blobs */}
       <div className="fixed top-[-100px] left-[-100px] w-[500px] h-[500px] bg-emerald-500/10 rounded-full blur-[120px] pointer-events-none" />
       <div className="fixed bottom-[-100px] right-[-100px] w-[600px] h-[600px] bg-blue-600/10 rounded-full blur-[150px] pointer-events-none" />
 
       {/* Navigation */}
-      <nav className="relative z-10 border-b border-white/5 backdrop-blur-md sticky top-0 px-6 py-4 flex items-center justify-between gap-6">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-emerald-500 rounded flex items-center justify-center shadow-[0_0_15px_rgba(16,185,129,0.4)]">
+      <nav className="relative z-10 border-b border-white/5 backdrop-blur-md sticky top-0 px-4 sm:px-6 py-3 sm:py-4 flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-9 h-9 bg-emerald-500 rounded-lg flex items-center justify-center shadow-[0_0_18px_rgba(16,185,129,0.45)] shrink-0">
             <Activity className="w-5 h-5 text-black" />
           </div>
-          <h1 className="text-xl font-bold tracking-tighter uppercase whitespace-nowrap">
+          <h1 className="text-lg sm:text-xl font-sans font-extrabold tracking-tight uppercase whitespace-nowrap">
             QUANTUM<span className="text-emerald-500">NODE</span>
           </h1>
-          <div className="hidden lg:flex items-center gap-2 ml-6 border-l border-white/10 pl-6">
+          <div className="hidden lg:flex items-center gap-0.5 ml-5 border-l border-white/10 pl-5">
             <button
               type="button"
               onClick={() => setActivePage('DASHBOARD')}
               className={cn(
-                "px-3 py-1.5 rounded-lg text-xs font-mono font-bold tracking-wider uppercase transition-all border cursor-pointer",
+                "px-2.5 py-2 rounded-xl text-[11px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer",
                 activePage === 'DASHBOARD'
-                  ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-450"
-                  : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.02]"
+                  ? "bg-emerald-500 text-black border-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.35)]"
+                  : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
               )}
             >
-              📊 Dashboard
+              Dashboard
             </button>
             <button
               type="button"
               onClick={() => setActivePage('NEWS_CENTER')}
               className={cn(
-                "px-3 py-1.5 rounded-lg text-xs font-mono font-bold tracking-wider uppercase transition-all border cursor-pointer",
+                "px-2.5 py-2 rounded-xl text-[11px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer",
                 activePage === 'NEWS_CENTER'
-                  ? "bg-blue-500/15 border-blue-500/25 text-blue-450 font-extrabold shadow-[0_0_10px_rgba(59,130,246,0.1)]"
-                  : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.02]"
+                  ? "bg-blue-500 text-white border-blue-400 shadow-[0_0_18px_rgba(59,130,246,0.3)]"
+                  : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
               )}
             >
-              📰 News Center
+              News Center
             </button>
             <button
               type="button"
               onClick={() => setActivePage('SELF_LEARNING')}
               className={cn(
-                "px-3 py-1.5 rounded-lg text-xs font-mono font-bold tracking-wider uppercase transition-all border cursor-pointer",
+                "px-2.5 py-2 rounded-xl text-[11px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer",
                 activePage === 'SELF_LEARNING'
-                  ? "bg-indigo-500/15 border-indigo-500/25 text-indigo-400 font-extrabold shadow-[0_0_10px_rgba(99,102,241,0.1)]"
-                  : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.02]"
+                  ? "bg-indigo-500 text-white border-indigo-400 shadow-[0_0_18px_rgba(99,102,241,0.3)]"
+                  : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
               )}
             >
-              🧠 Self-Learning Engine v6
+              Self-Learning
             </button>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 flex-1 max-w-md">
-          <form onSubmit={handleSubmit} className="flex-1 relative group">
-            <input
-              type="text"
-              value={ticker}
-              onChange={(e) => setTicker(e.target.value)}
-              placeholder="Search Ticker (e.g. AAPL, BTC)"
-              className="w-full bg-[#111113] border border-white/10 rounded-full px-12 py-2.5 text-sm focus:outline-none focus:border-emerald-500/50 transition-all placeholder:text-gray-600 font-mono"
-            />
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 group-focus-within:text-emerald-500 transition-colors" />
-            {loading && <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 animate-spin text-emerald-500" />}
-          </form>
-
-          {/* Mobile Refresh Button */}
-          <button
-            type="button"
-            onClick={handleManualRefresh}
-            disabled={isRefreshing || loading}
-            className="flex md:hidden items-center gap-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-2 rounded-full font-mono font-bold text-[10px] tracking-wider uppercase transition-all active:scale-95 cursor-pointer shrink-0 disabled:opacity-50"
-            title="Manual Refresh Data"
+        <div className="flex items-center gap-2 flex-1 min-w-[200px] max-w-md">
+          <form
+            onSubmit={handleSubmit}
+            className="flex-1 min-w-0 group"
+            autoComplete="off"
           >
-            <RefreshCw className={cn("w-3.5 h-3.5 text-emerald-400", (isRefreshing || loading) && "animate-spin")} />
-            <span className="hidden sm:inline">{isRefreshing ? "REFRESHING..." : "REFRESH"}</span>
-          </button>
+            <div className="relative w-full min-w-0">
+              <input
+                key={searchInputKey}
+                ref={searchInputRef}
+                type="search"
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
+                  e.preventDefault();
+                  runTickerSearch((e.target as HTMLInputElement).value);
+                }}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                inputMode="search"
+                name={`qn-ticker-${searchInputKey}`}
+                id={`qn-ticker-${searchInputKey}`}
+                placeholder="Ticker then Enter (e.g. AAPL)"
+                title="Press Enter to search"
+                className="w-full bg-[#111113] border border-white/10 rounded-full pl-10 pr-9 py-2 text-sm focus:outline-none focus:border-emerald-500/50 transition-all placeholder:text-gray-600 font-mono tracking-wide"
+              />
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500 group-focus-within:text-emerald-500 transition-colors pointer-events-none" />
+              {loading && <Loader2 className="absolute right-3.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-emerald-500" />}
+            </div>
+          </form>
         </div>
 
-        <div className="hidden md:flex gap-6 items-center text-[10px] font-mono tracking-widest uppercase">
-          <button
-            type="button"
-            onClick={handleManualRefresh}
-            disabled={isRefreshing || loading}
-            className="flex items-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3.5 py-1.5 rounded-lg font-mono font-bold text-[10px] tracking-wider uppercase transition-all shadow-[0_0_12px_rgba(16,185,129,0.12)] active:scale-95 cursor-pointer disabled:opacity-50"
-            title="Click to manually refresh all stock, price chart, and market data"
-          >
-            <RefreshCw className={cn("w-3.5 h-3.5 text-emerald-400", (isRefreshing || loading) && "animate-spin")} />
-            <span>{isRefreshing ? "REFRESHING..." : "REFRESH DATA"}</span>
-          </button>
+        {user && (
+          <UsageQuotaBar usage={usage} email={user.email} onRefresh={refreshUsage} />
+        )}
 
-          <div className="flex flex-col items-end">
-            <span className="text-gray-500">Mode</span>
-            <span className="text-emerald-400 font-bold flex items-center gap-1.5">
+        <div className="hidden xl:flex gap-3 items-center text-[11px] tracking-wide uppercase shrink-0 ml-auto">
+          <div className="flex flex-col items-end font-sans opacity-80 leading-tight gap-0">
+            <span className="text-[9px] text-gray-500 normal-case tracking-normal">Mode</span>
+            <span className="text-emerald-400 font-semibold flex items-center gap-1 font-mono text-[10px]">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-              MANUAL ({lastRefreshedAt})
+              MANUAL
             </span>
           </div>
           <div className="w-[1px] h-6 bg-white/10" />
-          <div className="flex flex-col items-end">
-            <span className="text-gray-500">Node Status</span>
-            <span className="text-emerald-400">ACTIVE</span>
+          <div className="flex flex-col items-end font-sans opacity-70">
+            <span className="text-[10px] text-gray-500 normal-case tracking-normal">Status</span>
+            <span className="text-emerald-400 font-semibold text-[10px]">ACTIVE</span>
           </div>
           <div className="w-[1px] h-6 bg-white/10" />
-          <div className="flex flex-col items-end">
-            <span className="text-gray-500">Uptime</span>
-            <span className="text-blue-400">99.98%</span>
+          <div className="flex flex-col items-end font-sans opacity-70">
+            <span className="text-[10px] text-gray-500 normal-case tracking-normal">Cloud</span>
+            <span className={cn(
+              "font-semibold text-[10px]",
+              cloudSyncStatus === 'synced' ? 'text-emerald-400' :
+              cloudSyncStatus === 'loading' ? 'text-amber-400' :
+              cloudSyncStatus === 'error' ? 'text-red-400' : 'text-gray-500'
+            )}>
+              {user
+                ? (accessState === 'active'
+                    ? (cloudSyncStatus === 'loading' ? 'SYNCING' : cloudSyncStatus === 'error' ? 'ERROR' : 'ACTIVE')
+                    : String(accessState).toUpperCase())
+                : 'LOCAL'}
+            </span>
           </div>
+          {user && (
+            <>
+              <div className="w-[1px] h-6 bg-white/10" />
+              <div className="flex items-center gap-2">
+                <div className="flex flex-col items-end max-w-[140px] font-sans">
+                  <span className="text-[10px] text-gray-500 normal-case tracking-normal">Account</span>
+                  <span className="text-blue-400 truncate text-[10px] font-mono" title={user.email || user.uid}>
+                    {user.displayName || user.email || 'Signed in'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => signOut()}
+                  className="rounded-lg border border-white/10 px-2.5 py-1.5 text-[10px] font-sans font-semibold text-gray-300 hover:bg-white/5 hover:text-white normal-case tracking-normal"
+                >
+                  Sign out
+                </button>
+              </div>
+            </>
+          )}
         </div>
+
+        {!user && (
+          <button
+            type="button"
+            onClick={() => setShowAuthModal(true)}
+            disabled={authLoading}
+            className="ml-auto flex items-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-3.5 py-2 font-sans font-bold text-[11px] text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50"
+          >
+            <Shield className="h-3.5 w-3.5" />
+            Sign in
+          </button>
+        )}
+
+        {user && (
+          <div className="flex xl:hidden items-center gap-2 ml-auto shrink-0">
+            <button
+              type="button"
+              onClick={() => signOut()}
+              className="rounded-lg border border-white/10 px-2.5 py-1.5 text-[10px] font-sans font-semibold text-gray-300 hover:bg-white/5 hover:text-white normal-case tracking-normal"
+            >
+              Sign out
+            </button>
+          </div>
+        )}
       </nav>
 
+      {quotaBanner && (
+        <div className="relative z-10 px-4 sm:px-6 pt-3">
+          <QuotaExhaustedBanner
+            kind={quotaBanner.kind}
+            message={quotaBanner.message}
+            email={user?.email}
+            onDismiss={() => setQuotaBanner(null)}
+          />
+        </div>
+      )}
+
       {/* Market Pulse Bar */}
-      <div className="relative z-10 bg-[#0A0A0C] border-b border-white/5 py-2 overflow-hidden flex whitespace-nowrap">
+      <div className="relative z-10 bg-[#0A0A0C] border-b border-white/5 py-2.5 overflow-hidden flex whitespace-nowrap">
         <motion.div 
           animate={{ x: [0, -1000] }}
           transition={{ duration: 30, repeat: Infinity, ease: "linear" }}
           className="flex gap-12 px-6 items-center"
         >
           {indices.length > 0 ? indices.concat(indices).map((idx, i) => (
-            <div key={`${idx.symbol}-${i}`} className="flex gap-2 items-center font-mono text-[10px] tracking-tight">
-              <span className="text-gray-500">{idx.shortName || idx.symbol}:</span>
-              <span className="text-white">${idx.regularMarketPrice?.toFixed(2) || '---'}</span>
-              <span className={(idx.regularMarketChange || 0) >= 0 ? "text-emerald-500" : "text-rose-500"}>
+            <div key={`${idx.symbol}-${i}`} className="flex gap-2.5 items-center font-mono text-[13px] tracking-tight">
+              <span className="text-gray-400">{idx.shortName || idx.symbol}:</span>
+              <span className="text-white font-semibold">${idx.regularMarketPrice?.toFixed(2) || '---'}</span>
+              <span className={(idx.regularMarketChange || 0) >= 0 ? "text-emerald-400 font-semibold" : "text-rose-400 font-semibold"}>
                 {idx.regularMarketChangePercent?.toFixed(2) || '0.00'}%
               </span>
             </div>
           )) : (
-            <div className="text-[9px] text-gray-700 animate-pulse uppercase tracking-widest">Awaiting Global Exchange Feed Synchronization...</div>
+            <div className="text-[11px] text-gray-600 animate-pulse font-sans">Awaiting global exchange feed…</div>
           )}
         </motion.div>
       </div>
 
-      <main className="relative z-10 max-w-[1400px] mx-auto p-6 md:p-10">
-        {/* Mobile/Tablet Inline Page Selector */}
-        <div className="flex lg:hidden items-center justify-center gap-3 mb-6 bg-[#0D0D10] border border-white/5 rounded-xl p-2">
-          <button
-            type="button"
-            onClick={() => setActivePage('DASHBOARD')}
-            className={cn(
-              "flex-1 py-2 text-center rounded-lg text-xs font-mono font-bold tracking-wider uppercase transition-all border cursor-pointer",
-              activePage === 'DASHBOARD'
-                ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-450 font-black"
-                : "border-transparent text-gray-400 hover:text-white"
-            )}
-          >
-            📊 Dashboard
-          </button>
-          <button
-            type="button"
-            onClick={() => setActivePage('NEWS_CENTER')}
-            className={cn(
-              "flex-1 py-2 text-center rounded-lg text-xs font-mono font-bold tracking-wider uppercase transition-all border cursor-pointer",
-              activePage === 'NEWS_CENTER'
-                ? "bg-blue-500/15 border-blue-500/25 text-blue-450 font-extrabold"
-                : "border-transparent text-gray-400 hover:text-white"
-            )}
-          >
-            📰 News Center
-          </button>
-          <button
-            type="button"
-            onClick={() => setActivePage('SELF_LEARNING')}
-            className={cn(
-              "flex-1 py-2 text-center rounded-lg text-xs font-mono font-bold tracking-wider uppercase transition-all border cursor-pointer",
-              activePage === 'SELF_LEARNING'
-                ? "bg-indigo-500/15 border-indigo-500/25 text-indigo-400 font-extrabold"
-                : "border-transparent text-gray-400 hover:text-white"
-            )}
-          >
-            🧠 Self-Learning
-          </button>
-        </div>
+      <main className="relative z-10 max-w-[1400px] mx-auto p-6 md:p-10 pb-28 lg:pb-10">
+        {/* Desktop-only spacer; mobile uses bottom nav */}
+        <div className="hidden" />
 
         <AnimatePresence mode="wait">
           {activePage === 'NEWS_CENTER' ? (
@@ -6865,7 +7370,7 @@ export default function App() {
                         <Newspaper className="w-6 h-6" />
                       </div>
                       <div>
-                        <h2 className="text-xl font-black text-white uppercase tracking-wider flex items-center gap-2.5">
+                        <h2 className="text-xl font-sans font-extrabold text-white tracking-tight flex items-center gap-2.5">
                           Quantum News Hub
                           <span className={cn(
                             "text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full border uppercase tracking-widest transition-all",
@@ -6876,8 +7381,8 @@ export default function App() {
                             {newsSource === 'MARKETAUX' ? 'MARKETAUX STREAM' : 'LIVE WIRE'}
                           </span>
                         </h2>
-                        <p className="text-xs text-gray-400 uppercase tracking-tight mt-0.5 font-mono">
-                          Universal Ticker Media Streams // {newsSource === 'MARKETAUX' ? 'MarketAux Intelligence Suite' : 'Authenticated Finnhub Terminal'}
+                        <p className="text-sm text-gray-400 mt-1 font-sans">
+                          Live media streams · {newsSource === 'MARKETAUX' ? 'MarketAux intelligence' : 'Finnhub terminal'}
                         </p>
                       </div>
                     </div>
@@ -6934,7 +7439,7 @@ export default function App() {
                     </div>
                     <button
                       type="button"
-                      onClick={() => setNewsCenterSymbol(newsCenterSymbol)}
+                      onClick={() => runNewsCenterQuery()}
                       className={cn(
                         "px-5 py-2.5 text-white text-[11px] font-mono font-bold uppercase rounded-xl tracking-wider transition-all cursor-pointer hover:scale-[1.02] active:scale-[0.98]",
                         newsSource === 'MARKETAUX'
@@ -7175,11 +7680,11 @@ export default function App() {
                       Adaptive Intelligence Unit
                     </span>
                   </div>
-                  <h2 className="text-2xl font-black text-white tracking-tight uppercase">
+                  <h2 className="text-2xl font-sans font-extrabold text-white tracking-tight">
                     Self-Learning & Calibration Engine v6
                   </h2>
-                  <p className="text-xs text-gray-500 font-mono mt-1">
-                    Automated feedback-loop auditing of predictive factors, backtest outcomes, and model coefficient auto-tuning
+                  <p className="text-sm text-gray-400 font-sans mt-1">
+                    Feedback-loop auditing of predictive factors, backtests, and model coefficient auto-tuning
                   </p>
                 </div>
 
@@ -7872,388 +8377,255 @@ export default function App() {
                 </div>
               </div>
             </motion.div>
-          ) : error ? (
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0 }}
-              className="mt-20 max-w-lg mx-auto bg-rose-500/5 border border-rose-500/20 p-8 rounded-2xl text-center"
-            >
-              <Info className="w-12 h-12 text-rose-500 mx-auto mb-4" />
-              <h3 className="text-xl font-bold mb-2">Interface Failure</h3>
-              <p className="text-gray-400 font-mono text-sm mb-6">{error}</p>
-              <button 
-                onClick={() => fetchStock(ticker || 'NVDA')}
-                className="bg-rose-500 hover:bg-rose-600 text-white font-mono font-bold text-xs uppercase px-5 py-2.5 rounded-lg flex items-center justify-center gap-1.5 transition-all mx-auto shadow-[0_0_15px_rgba(244,63,94,0.15)] cursor-pointer"
-              >
-                Re-Initialize Sequence
-              </button>
-            </motion.div>
           ) : data ? (
               <motion.div 
                 key={data.ticker}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="col-span-12 grid grid-cols-12 gap-8"
+                className="col-span-12 grid grid-cols-12 gap-6 lg:gap-8 items-start"
               >
-                {/* Left Column: Data & Chart */}
-                <motion.div 
+                {/* Premium analysis hero stack — full width */}
+                <div className="col-span-12 space-y-4">
+                  <AnalysisHeroCard
+                    ticker={data.ticker}
+                    stockName={data.quote?.shortName || data.quote?.longName || ''}
+                    currentPrice={
+                      Number(
+                        data.quote?.regularMarketPrice ??
+                          data.quote?.price ??
+                          projectionMeta.lastClose ??
+                          0
+                      ) || null
+                    }
+                    score={horizonView.score}
+                    ratingLabel={horizonView.ratingLabel}
+                    confidence={horizonView.confidence}
+                    currency={data.quote?.currency}
+                    targetPrice={horizonView.targetPrice}
+                    expectedReturn={horizonView.expectedReturn}
+                    horizon={analysisHorizon}
+                    onHorizonChange={setAnalysisHorizon}
+                    horizonExplanation={horizonView.explanation}
+                    isLoading={predicting || (loading && !aiStockScore && !prediction)}
+                  />
+                  <AiInsightsStrip
+                    bullishFactors={bullishFactors}
+                    bearishFactors={bearishFactors}
+                    keyRisks={keyRisks}
+                    technical={{
+                      rsi: technicalBreakdown?.indicators?.rsi ?? null,
+                      macdBullish:
+                        technicalBreakdown?.indicators?.macd != null
+                          ? technicalBreakdown.indicators.macd.macdLine >
+                            technicalBreakdown.indicators.macd.signalLine
+                          : null,
+                      trend: technicalBreakdown?.quantumRefinement?.trendStrength?.status ?? null,
+                      volatility: horizonView.volatility,
+                    }}
+                    whaleScore={
+                      whaleAccumulation?.metrics?.whaleAccumulationIndex ??
+                      (aiStockScore?.components?.whaleAccumulation
+                        ? Math.round(
+                            (aiStockScore.components.whaleAccumulation.score /
+                              Math.max(1, aiStockScore.components.whaleAccumulation.maxWeight)) *
+                              100
+                          )
+                        : null)
+                    }
+                    institutionalScore={cockpitData?.instAccumScore ?? null}
+                    riskLabel={horizonView.riskLabel}
+                    fullAnalysis={prediction}
+                    whyBuyNow={whyBuyNow}
+                    whySellNow={whySellNow}
+                    horizonLead={horizonView.summaryLead}
+                    horizonLabel={horizonView.horizonLabel}
+                    horizonKey={analysisHorizon}
+                  />
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                    <TradeZonesPanel
+                      lastClose={
+                        Number(data.quote?.regularMarketPrice) ||
+                        projectionMeta.lastClose ||
+                        0
+                      }
+                      levels={activeLevels}
+                      bullCase={horizonView.bullCase}
+                      bearCase={horizonView.bearCase}
+                      stopLoss={horizonView.stopLoss}
+                      currency={data.quote?.currency}
+                      quoteAsOf={(data as any)?.quoteAsOf ?? null}
+                      zoneScale={horizonView.zoneScale}
+                      horizon={analysisHorizon}
+                      horizonLabel={horizonView.horizonLabel}
+                    />
+                    <RiskMeterPanel
+                      riskScore={horizonView.riskScore}
+                      riskLabel={horizonView.riskLabel}
+                      volatility={horizonView.volatility}
+                      liquidityLabel={horizonView.liquidityLabel}
+                      drawdown={horizonView.drawdown}
+                      sharpe={horizonView.sharpe}
+                      horizon={analysisHorizon}
+                      horizonLabel={horizonView.horizonLabel}
+                    />
+                  </div>
+                  <MetricRadialRow
+                    metrics={[
+                      {
+                        id: 'whale',
+                        label: 'Whale Score',
+                        value:
+                          whaleAccumulation?.metrics?.whaleAccumulationIndex ??
+                          (aiStockScore?.components?.whaleAccumulation
+                            ? Math.round(
+                                (aiStockScore.components.whaleAccumulation.score /
+                                  Math.max(1, aiStockScore.components.whaleAccumulation.maxWeight)) *
+                                  100
+                              )
+                            : 55),
+                        accent: '#a78bfa',
+                      },
+                      {
+                        id: 'sentiment',
+                        label: 'Sentiment',
+                        value: cockpitData?.sentimentScore ?? 70,
+                        accent: '#38bdf8',
+                      },
+                      {
+                        id: 'momentum',
+                        label: 'Momentum',
+                        value: cockpitData?.momentumScore ?? 65,
+                        accent: '#34d399',
+                      },
+                      {
+                        id: 'confidence',
+                        label: 'AI Confidence',
+                        value: horizonView.confidence,
+                        accent: '#fbbf24',
+                      },
+                      {
+                        id: 'institutional',
+                        label: 'Institutional Flow',
+                        value: cockpitData?.instAccumScore ?? 60,
+                        accent: '#22d3ee',
+                      },
+                    ]}
+                  />
+                </div>
+
+                {/* Left column: Chart then secondary analysis (continuous — no row gaps) */}
+                <motion.div
                   key={data.ticker + 'main'}
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                className="col-span-12 lg:col-span-7 space-y-8"
-              >
-                <div id="quantum-terminal-telemetry" className="bg-[#111113] border border-white/5 rounded-2xl p-4 sm:p-5 shadow-2xl relative overflow-hidden group">
-                  <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity">
-                    <Globe className="w-32 h-32" />
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  className="col-span-12 lg:col-span-7 space-y-6"
+                >
+                <div id="quantum-terminal-telemetry" className="bg-[#111113]/90 border border-white/10 rounded-2xl p-2.5 sm:p-3 shadow-2xl relative overflow-hidden group glass-panel">
+                  <div className="absolute top-0 right-0 p-6 opacity-5 pointer-events-none">
+                    <Globe className="w-24 h-24" />
                   </div>
 
-                  <div className="flex flex-col md:flex-row justify-between items-start gap-4 relative z-10">
-                    <div>
-                      <div className="flex items-baseline gap-3 mb-1">
-                        <h2 className="text-5xl font-black tracking-tighter">{data.ticker}</h2>
-                        <span className="text-gray-500 text-xl font-medium">{data.quote.shortName || data.quote.longName}</span>
-                      </div>
-                      {(() => {
-                        const latestDataPoint = chartHistory[chartHistory.length - 1];
-                        let latestDataDateStr = "";
-                        if (latestDataPoint?.date) {
-                          try {
-                            const d = new Date(latestDataPoint.date);
-                            if (isValid(d)) {
-                              latestDataDateStr = format(d, 'MMMM d, yyyy');
-                            }
-                          } catch (e) {}
-                        }
-                        return (
-                          <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-3">
-                            <p className="text-[10px] font-mono text-emerald-500/70 tracking-[0.2em] uppercase">
-                              Global Consolidated Index // Real-time Feed
-                            </p>
-                            {latestDataDateStr && (
-                              <span className="hidden sm:inline text-[9px] text-gray-700 font-mono">|</span>
-                            )}
-                            {latestDataDateStr && (
-                              <p className="text-[10px] font-mono text-cyan-400/80 tracking-[0.05em] uppercase">
-                                MARKET DATA DATE: {latestDataDateStr}
-                              </p>
-                            )}
-                          </div>
-                        );
-                      })()}
-
-                      {/* Premium Analysis Profile Preset Switcher */}
-                      <div className="mt-4 p-3 bg-black/40 border border-white/5 rounded-xl max-w-2xl select-none">
-                        <div className="flex items-center gap-2 mb-2 pb-1.5 border-b border-white/[0.04]">
-                          <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-                          <span className="text-[9px] font-mono font-bold text-gray-400 uppercase tracking-widest">Active Analysis Profile:</span>
-                          {activePreset === 'custom' ? (
-                            <span className="ml-auto px-1.5 py-0.5 rounded text-[8px] font-mono font-bold text-amber-400 border border-amber-500/20 bg-amber-500/10 uppercase tracking-widest leading-none">
-                              CUSTOM PROFILE
-                            </span>
-                          ) : (
-                            <span className="ml-auto px-1.5 py-0.5 rounded text-[8px] font-mono font-bold text-emerald-400 border border-emerald-500/20 bg-emerald-500/10 uppercase tracking-widest leading-none">
-                              PRESET PROFILE ACTIVE
-                            </span>
-                          )}
-                        </div>
-                        <div className="grid grid-cols-3 gap-2">
-                          <button
-                            type="button"
-                            onClick={() => applyPreset('investor')}
-                            className={cn(
-                              "flex flex-col items-start p-2 rounded-lg border text-left transition-all cursor-pointer group/preset",
-                              activePreset === 'investor'
-                                ? "bg-emerald-500/10 border-emerald-500/35 text-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.1)]"
-                                : "bg-black/30 border-white/5 hover:border-white/10 hover:bg-white/[0.01]"
-                            )}
-                          >
-                            <span className={cn(
-                              "text-[10.5px] font-bold tracking-wider uppercase font-mono transition-colors",
-                              activePreset === 'investor' ? "text-emerald-400" : "text-gray-450 group-hover/preset:text-white"
-                            )}>
-                              💼 Investor
-                            </span>
-                            <span className="text-[8px] font-mono text-gray-500 mt-0.5 leading-normal">
-                              Long trends, support, resistance, high volume context.
-                            </span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => applyPreset('trader')}
-                            className={cn(
-                              "flex flex-col items-start p-2 rounded-lg border text-left transition-all cursor-pointer group/preset",
-                              activePreset === 'trader'
-                                ? "bg-emerald-500/10 border-emerald-500/35 text-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.1)]"
-                                : "bg-black/30 border-white/5 hover:border-white/10 hover:bg-white/[0.01]"
-                            )}
-                          >
-                            <span className={cn(
-                              "text-[10.5px] font-bold tracking-wider uppercase font-mono transition-colors",
-                              activePreset === 'trader' ? "text-emerald-400" : "text-gray-450 group-hover/preset:text-white"
-                            )}>
-                              ⚡ Trader
-                            </span>
-                            <span className="text-[8px] font-mono text-gray-500 mt-0.5 leading-normal">
-                              RSI Panel, divergences, immediate indicators, buy/sell alerts.
-                            </span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => applyPreset('ai')}
-                            className={cn(
-                              "flex flex-col items-start p-2 rounded-lg border text-left transition-all cursor-pointer group/preset",
-                              activePreset === 'ai'
-                                ? "bg-purple-500/15 border-purple-500/35 text-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.12)]"
-                                : "bg-black/30 border-white/5 hover:border-white/10 hover:bg-white/[0.01]"
-                            )}
-                          >
-                            <span className={cn(
-                              "text-[10.5px] font-bold tracking-wider uppercase font-mono transition-colors",
-                              activePreset === 'ai' ? "text-purple-400 font-extrabold" : "text-gray-450 group-hover/preset:text-white"
-                            )}>
-                              🔮 AI Sentinel
-                            </span>
-                            <span className="text-[8px] font-mono text-gray-500 mt-0.5 leading-normal">
-                              Generative paths, sentiment context, high precision news.
-                            </span>
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Real-time Technical State Status Lights */}
-                      {(() => {
-                        const rsiValue = technicalBreakdown?.indicators?.rsi;
-                        const isOverbought = rsiValue !== undefined && rsiValue !== null && rsiValue > 70;
-                        const isOversold = rsiValue !== undefined && rsiValue !== null && rsiValue < 30;
-                        const isNeutral = rsiValue !== undefined && rsiValue !== null && rsiValue >= 30 && rsiValue <= 70;
-                        return (
-                          <div className="flex flex-wrap items-center gap-2.5 mt-2.5">
-                            {/* Live RSI Tracker Badge */}
-                            <div className="flex items-center gap-2 px-2.5 py-1 rounded bg-[#0A0A0C] border border-white/[0.08] shadow-[0_2px_10px_rgba(0,0,0,0.5)]">
-                              <span className="text-[9px] font-mono font-bold text-gray-400 tracking-wider">LIVE RSI:</span>
-                              <span className={cn(
-                                "text-[10px] font-mono font-black animate-pulse",
-                                isOverbought ? "text-rose-400" : isOversold ? "text-emerald-400" : "text-blue-400"
-                              )}>
-                                {rsiValue !== undefined && rsiValue !== null ? rsiValue.toFixed(2) : "Calculating..."}
-                              </span>
-                            </div>
-
-                            <div className={cn(
-                              "flex items-center gap-2 px-2.5 py-1 rounded bg-[#0D0D0F] border",
-                              isOverbought ? "border-rose-500/30 bg-rose-950/5" : "border-white/[0.04]"
-                            )}>
-                              <span className="relative flex h-2 w-2">
-                                {isOverbought && (
-                                  <span className="absolute inline-flex h-full w-full rounded-full bg-rose-500 opacity-75 animate-ping" />
-                                )}
-                                <span className={cn(
-                                  "relative inline-flex rounded-full h-2 w-2 transition-all duration-300",
-                                  isOverbought ? "bg-rose-500 shadow-[0_0_8px_#ef4444]" : "bg-gray-700 opacity-30"
-                                )} />
-                              </span>
-                              <span className={cn(
-                                "text-[8.5px] font-mono font-bold tracking-wider",
-                                isOverbought ? "text-rose-400 font-extrabold" : "text-gray-500/85"
-                              )}>
-                                RSI OVERBOUGHT {isOverbought ? `🔴 ALERT (${rsiValue?.toFixed(1)})` : "⚪ INACTIVE (>70)"}
-                              </span>
-                            </div>
-
-                            <div className={cn(
-                              "flex items-center gap-2 px-2.5 py-1 rounded bg-[#0D0D0F] border",
-                              isNeutral ? "border-blue-500/30 bg-blue-950/5" : "border-white/[0.04]"
-                            )}>
-                              <span className="relative flex h-2 w-2">
-                                {isNeutral && (
-                                  <span className="absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-75 animate-ping" />
-                                )}
-                                <span className={cn(
-                                  "relative inline-flex rounded-full h-2 w-2 transition-all duration-300",
-                                  isNeutral ? "bg-blue-500 shadow-[0_0_8px_#3b82f6]" : "bg-gray-700 opacity-30"
-                                )} />
-                              </span>
-                              <span className={cn(
-                                "text-[8.5px] font-mono font-bold tracking-wider",
-                                isNeutral ? "text-blue-400 font-extrabold" : "text-gray-500/85"
-                              )}>
-                                RSI NEUTRAL {isNeutral ? `🔵 BALANCED (${rsiValue?.toFixed(1)})` : "⚪ INACTIVE (30-70)"}
-                              </span>
-                            </div>
-
-                            <div className={cn(
-                              "flex items-center gap-2 px-2.5 py-1 rounded bg-[#0D0D0F] border",
-                              isOversold ? "border-emerald-500/30 bg-emerald-950/5" : "border-white/[0.04]"
-                            )}>
-                              <span className="relative flex h-2 w-2">
-                                {isOversold && (
-                                  <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-75 animate-ping" />
-                                )}
-                                <span className={cn(
-                                  "relative inline-flex rounded-full h-2 w-2 transition-all duration-300",
-                                  isOversold ? "bg-emerald-500 shadow-[0_0_8px_#10b981]" : "bg-gray-700 opacity-30"
-                                )} />
-                              </span>
-                              <span className={cn(
-                                "text-[8.5px] font-mono font-bold tracking-wider",
-                                isOversold ? "text-emerald-400 font-extrabold" : "text-gray-500/85"
-                              )}>
-                                RSI OVERSOLD {isOversold ? `🟢 DISCOVERY (${rsiValue?.toFixed(1)})` : "⚪ INACTIVE (<30)"}
-                              </span>
-                            </div>
-                          </div>
-                        );
-                      })()}
-
-                      {/* Action Triggers: Refresh, Export & Share */}
-                      <div id="telemetry-actions-row" className="flex flex-wrap items-center gap-3 mt-5 pt-4 border-t border-white/[0.04] relative z-20">
-                        {/* Refresh Data Trigger */}
-                        <button
-                          type="button"
-                          onClick={handleManualRefresh}
-                          disabled={isRefreshing || loading}
-                          className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/25 hover:border-emerald-500/40 hover:bg-emerald-500/15 text-emerald-400 text-[10.5px] font-mono font-black uppercase tracking-wider transition-all cursor-pointer shadow-[0_0_15px_rgba(16,185,129,0.05)] active:scale-95 disabled:opacity-50"
-                          title="Manually fetch latest price action, indicators, and market data"
-                        >
-                          <RefreshCw className={cn("w-3.5 h-3.5 text-emerald-400", (isRefreshing || loading) && "animate-spin")} />
-                          {isRefreshing ? "Refreshing Data..." : "Refresh Data"}
-                        </button>
-
-                        {/* Share Trigger */}
-                        <button
-                          type="button"
-                          onClick={shareStockAnalysis}
-                          className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-purple-500/10 border border-purple-500/25 hover:border-purple-500/40 hover:bg-purple-500/15 text-purple-400 text-[10.5px] font-mono font-black uppercase tracking-wider transition-all cursor-pointer shadow-[0_0_15px_rgba(168,85,247,0.05)] active:scale-95"
-                          title="Share current stock forecast summary to other apps or clipboard"
-                        >
-                          <Share2 className="w-3.5 h-3.5" />
-                          Share Analysis
-                        </button>
-
-                        {/* Export Telemetry PNG Trigger */}
-                        <button
-                          type="button"
-                          onClick={exportStockReport}
-                          className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/25 hover:border-emerald-500/40 hover:bg-emerald-500/15 text-emerald-400 text-[10.5px] font-mono font-black uppercase tracking-wider transition-all cursor-pointer shadow-[0_0_15px_rgba(16,185,129,0.05)] active:scale-95"
-                          title="Compile and export high-fidelity analytical stock telemetry snapshot (.png)"
-                        >
-                          <Download className="w-3.5 h-3.5" />
-                          Download PNG
-                        </button>
-
-                        {/* Export Price Chart Only Trigger */}
-                        <button
-                          type="button"
-                          onClick={exportPriceChartOnly}
-                          className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-500/10 border border-blue-500/25 hover:border-blue-500/40 hover:bg-blue-500/15 text-blue-400 text-[10.5px] font-mono font-black uppercase tracking-wider transition-all cursor-pointer shadow-[0_0_15px_rgba(59,130,246,0.05)] active:scale-95"
-                          title="Compile and export the high-fidelity stock price chart with all active indicators (.png)"
-                        >
-                          <ChartIcon className="w-3.5 h-3.5" />
-                          Download Price Chart
-                        </button>
-                      </div>
+                  {/* Row 1: ticker · price · RSI · actions */}
+                  <div className="relative z-10 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                    <div className="flex items-baseline gap-1.5 min-w-0">
+                      <h2 className="text-2xl font-black tracking-tighter leading-none">{data.ticker}</h2>
+                      <span className="text-gray-500 text-xs font-medium truncate max-w-[140px] hidden sm:inline">{data.quote.shortName || data.quote.longName}</span>
                     </div>
-                    
-                    <div className="text-right">
-                      <div className="text-6xl font-light tracking-tighter mb-1 font-mono leading-none">
-                        ${data.quote?.regularMarketPrice?.toFixed(2) || '---'}
-                      </div>
-                      <div className={cn(
-                        "text-sm font-bold font-mono tracking-wider",
+                    <div className="flex items-baseline gap-1.5 font-mono">
+                      <span className="text-2xl font-light tracking-tighter leading-none">${data.quote?.regularMarketPrice?.toFixed(2) || '---'}</span>
+                      <span className={cn(
+                        "text-[11px] font-bold",
                         (data.quote?.regularMarketChange || 0) >= 0 ? "text-emerald-400" : "text-rose-500"
-                       )}>
-                        {(data.quote?.regularMarketChange || 0) >= 0 ? '▲' : '▼'} {Math.abs(data.quote?.regularMarketChange || 0).toFixed(2)} ({data.quote?.regularMarketChangePercent?.toFixed(2) || '0.00'}%)
-                      </div>
+                      )}>
+                        {(data.quote?.regularMarketChange || 0) >= 0 ? '▲' : '▼'}{Math.abs(data.quote?.regularMarketChangePercent || 0).toFixed(2)}%
+                      </span>
+                    </div>
+                    {(() => {
+                      const rsiValue = technicalBreakdown?.indicators?.rsi;
+                      const isOverbought = rsiValue != null && rsiValue > 70;
+                      const isOversold = rsiValue != null && rsiValue < 30;
+                      return (
+                        <span className={cn(
+                          "text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border",
+                          isOverbought ? "text-rose-400 border-rose-500/30 bg-rose-500/10" :
+                          isOversold ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/10" :
+                          "text-blue-400 border-white/10 bg-black/40"
+                        )}>
+                          RSI {rsiValue != null ? rsiValue.toFixed(1) : '—'}
+                        </span>
+                      );
+                    })()}
+                    <div id="telemetry-actions-row" className="ml-auto flex items-center gap-1">
+                      <button type="button" onClick={shareStockAnalysis} title="Share" className="p-1.5 rounded-md border border-purple-500/25 bg-purple-500/10 text-purple-400 hover:bg-purple-500/15 cursor-pointer">
+                        <Share2 className="w-3 h-3" />
+                      </button>
+                      <button type="button" onClick={exportStockReport} title="Download PNG" className="p-1.5 rounded-md border border-emerald-500/25 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/15 cursor-pointer">
+                        <Download className="w-3 h-3" />
+                      </button>
+                      <button type="button" onClick={exportPriceChartOnly} title="Download chart" className="p-1.5 rounded-md border border-blue-500/25 bg-blue-500/10 text-blue-400 hover:bg-blue-500/15 cursor-pointer">
+                        <ChartIcon className="w-3 h-3" />
+                      </button>
                     </div>
                   </div>
 
-                  {/* Timeframe & Technical Overlays */}
-                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mt-8 z-20 relative">
-                    <div className="flex flex-wrap items-center gap-3">
-                      <div className="flex gap-1.5 flex-wrap">
-                        {TIMEFRAMES.map((tf) => (
-                          <button
-                            key={tf.label}
-                            onClick={() => handleTimeframeChange(tf)}
-                            className={cn(
-                              "px-3 py-1 rounded text-[10px] font-mono font-bold transition-all border cursor-pointer",
-                              timeframe === tf.label 
-                                ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-400 font-bold shadow-[0_2px_10px_rgba(16,185,129,0.05)]" 
-                                : "bg-white/[0.02] border-white/5 text-gray-500 hover:text-gray-300 hover:bg-white/[0.04]"
-                            )}
-                          >
-                            {tf.label}
-                          </button>
-                        ))}
-                      </div>
-
-                      {/* Zoom controls */}
-                      <div className="flex bg-black/40 border border-white/5 p-1 rounded-lg shrink-0 gap-1 items-center">
+                  {/* Row 2: timeframes · zoom · mode */}
+                  <div className="relative z-20 mt-1.5 flex flex-wrap items-center gap-1.5">
+                    <div className="flex gap-0.5 flex-wrap">
+                      {TIMEFRAMES.map((tf) => (
                         <button
-                          type="button"
-                          onClick={handleZoomIn}
-                          className="p-1 rounded text-gray-500 hover:text-emerald-400 hover:bg-white/[0.04] transition-all cursor-pointer flex items-center justify-center"
-                          title="Zoom In Price Chart (focus on more recent days)"
+                          key={tf.label}
+                          onClick={() => handleTimeframeChange(tf)}
+                          className={cn(
+                            "px-1.5 py-0.5 rounded text-[9px] font-mono font-bold border cursor-pointer transition-all",
+                            timeframe === tf.label
+                              ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-400"
+                              : "bg-transparent border-transparent text-gray-500 hover:text-gray-300"
+                          )}
                         >
-                          <ZoomIn className="w-3.5 h-3.5" />
+                          {tf.label}
                         </button>
-                        <button
-                          type="button"
-                          onClick={handleZoomOut}
-                          className="p-1 rounded text-gray-500 hover:text-emerald-400 hover:bg-white/[0.04] transition-all cursor-pointer flex items-center justify-center"
-                          title="Zoom Out Price Chart (view previous days)"
-                        >
-                          <ZoomOut className="w-3.5 h-3.5" />
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-0.5 border border-white/5 rounded-md p-0.5 bg-black/30">
+                      <button type="button" onClick={handleZoomIn} title="Zoom in" className="p-0.5 text-gray-500 hover:text-emerald-400 cursor-pointer">
+                        <ZoomIn className="w-3 h-3" />
+                      </button>
+                      <button type="button" onClick={handleZoomOut} title="Zoom out" className="p-0.5 text-gray-500 hover:text-emerald-400 cursor-pointer">
+                        <ZoomOut className="w-3 h-3" />
+                      </button>
+                      {zoomRange !== null && (
+                        <button type="button" onClick={handleZoomReset} title="Reset zoom" className="px-1 text-[8px] font-mono font-bold text-gray-400 hover:text-white cursor-pointer">
+                          RST
                         </button>
-                        {(zoomRange !== null) && (
-                          <button
-                            type="button"
-                            onClick={handleZoomReset}
-                            className="px-1.5 py-0.5 rounded text-[8px] font-mono font-bold bg-white/5 text-gray-400 hover:text-white hover:bg-white/10 transition-all cursor-pointer"
-                            title="Reset Zoom to show full period"
-                          >
-                            RESET
-                          </button>
+                      )}
+                    </div>
+                    <div className="flex border border-white/5 rounded-md p-0.5 bg-black/30">
+                      <button
+                        type="button"
+                        onClick={() => setChartViewMode('standard')}
+                        className={cn(
+                          "px-1.5 py-0.5 rounded text-[8px] font-mono font-bold cursor-pointer",
+                          chartViewMode === 'standard' ? "bg-emerald-500/15 text-emerald-400" : "text-gray-500 hover:text-gray-300"
                         )}
-                      </div>
-
-                      {/* Chart Mode Selector */}
-                      <div className="flex bg-black/40 border border-white/5 p-1 rounded-lg shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => setChartViewMode('standard')}
-                          className={cn(
-                            "px-2.5 py-1 rounded text-[9px] font-mono font-bold transition-all cursor-pointer border",
-                            chartViewMode === 'standard' 
-                              ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-400 shadow-[0_2px_10px_rgba(16,185,129,0.05)]" 
-                              : "bg-transparent border-transparent text-gray-500 hover:text-gray-300"
-                          )}
-                        >
-                          STANDARD CHART
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setChartViewMode('comparison')}
-                          className={cn(
-                            "px-2.5 py-1 rounded text-[9px] font-mono font-bold transition-all flex items-center gap-1 cursor-pointer border",
-                            chartViewMode === 'comparison' 
-                              ? "bg-purple-950/25 border-purple-500/30 text-purple-400 font-extrabold shadow-[0_0_8px_rgba(168,85,247,0.15)]" 
-                              : "bg-transparent border-transparent text-gray-500 hover:text-gray-300"
-                          )}
-                          title="Unified Price Trend, RSI Trend, and Volume comparison"
-                        >
-                          <Activity className="w-3 h-3" />
-                          UNIFIED COMPARISON
-                        </button>
-                      </div>
+                      >
+                        STD
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setChartViewMode('comparison')}
+                        className={cn(
+                          "px-1.5 py-0.5 rounded text-[8px] font-mono font-bold cursor-pointer",
+                          chartViewMode === 'comparison' ? "bg-purple-500/15 text-purple-400" : "text-gray-500 hover:text-gray-300"
+                        )}
+                        title="Unified comparison"
+                      >
+                        CMP
+                      </button>
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-x-6 gap-y-3 p-3 bg-black/40 border border-white/5 rounded-xl max-w-full mt-4">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 p-1.5 bg-black/40 border border-white/5 rounded-lg max-w-full mt-1.5">
                       {/* One-Click Presets Switcher */}
                       <div className="flex items-center gap-2">
                         <span className="text-[10px] font-mono font-extrabold text-[#707080] uppercase tracking-widest">Preset:</span>
@@ -8365,101 +8737,188 @@ export default function App() {
                       {/* Main Toggle Dividers */}
                       <div className="h-4 w-[1px] bg-white/10 hidden lg:block" />
 
-                      {/* Optional Institutional Overlays */}
-                      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                        <span className="text-[10px] font-mono font-extrabold text-gray-500 uppercase tracking-widest">Overlays:</span>
+                      {/* Optional Institutional Overlays — collapsed menu */}
+                      <div className="relative flex flex-wrap items-center gap-x-3 gap-y-2">
+                        <div className="flex items-center gap-2.5 rounded-lg border border-white/5 bg-white/[0.02] px-2.5 py-1">
+                          <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold uppercase tracking-wider text-[#22c55e]">
+                            <span className="h-1.5 w-1.5 rounded-full bg-[#22c55e] shadow-[0_0_6px_#22c55e]" /> Buy
+                          </span>
+                          <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold uppercase tracking-wider text-[#38bdf8]">
+                            <span className="h-1.5 w-1.5 rounded-full bg-[#38bdf8] shadow-[0_0_6px_#38bdf8]" /> Hold
+                          </span>
+                          <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold uppercase tracking-wider text-[#f43f5e]">
+                            <span className="h-1.5 w-1.5 rounded-full bg-[#f43f5e] shadow-[0_0_6px_#f43f5e]" /> Sell
+                          </span>
+                        </div>
 
-                        {/* 1. AI Signals Toggle */}
-                        <label className="flex items-center gap-1.5 cursor-pointer select-none" title="Toggles high probability AI and model swing-based buy/sell signals">
-                          <input
-                            type="checkbox"
-                            checked={showSignals}
-                            onChange={(e) => {
-                              const val = e.target.checked;
-                              setShowSignals(val);
-                              setShowBuySellIndicators(val);
-                              setShowAiSellIndicator(val);
-                              setShowEntryExitIndicators(val);
-                              setShowHoldIndicator(val);
-                            }}
-                            className="w-3.5 h-3.5 rounded border-white/25 bg-[#0e0e11] text-emerald-500 focus:ring-0 focus:ring-offset-0 cursor-pointer accent-emerald-500"
-                          />
-                          <span className={cn("text-[10.5px] font-mono font-bold transition-colors", showSignals ? "text-amber-400 font-extrabold" : "text-gray-500 hover:text-gray-400")}>AI SIGNALS</span>
-                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setShowOverlaysMenu((v) => !v)}
+                          className={cn(
+                            "inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[11px] font-sans font-semibold uppercase tracking-wide transition-all cursor-pointer",
+                            showOverlaysMenu
+                              ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                              : "border-white/10 bg-white/[0.03] text-gray-300 hover:text-white hover:bg-white/[0.06]"
+                          )}
+                        >
+                          <Layers className="w-3.5 h-3.5" />
+                          Overlays
+                          <span className="rounded-full bg-white/10 px-1.5 py-0.5 text-[9px] font-mono text-gray-300">
+                            {[showSignals, showProjection, showSR, showNewsSentiment, showSmartMoney].filter(Boolean).length}
+                          </span>
+                          <ChevronDown className={cn("w-3.5 h-3.5 transition-transform", showOverlaysMenu && "rotate-180")} />
+                        </button>
 
-                        {/* 2. Forecast Toggle */}
-                        <label className="flex items-center gap-1.5 cursor-pointer select-none" title="Toggles visual neural outlook and projection range lines">
-                          <input
-                            type="checkbox"
-                            checked={showProjection}
-                            onChange={(e) => setShowProjection(e.target.checked)}
-                            className="w-3.5 h-3.5 rounded border-white/25 bg-[#0e0e11] text-emerald-500 focus:ring-0 focus:ring-offset-0 cursor-pointer accent-emerald-500"
-                          />
-                          <span className={cn("text-[10.5px] font-mono font-bold transition-colors", showProjection ? "text-purple-400 font-extrabold" : "text-gray-500 hover:text-gray-400")}>FORECAST</span>
-                        </label>
-
-                        {/* 3. Support & Resistance Toggle */}
-                        <label className="flex items-center gap-1.5 cursor-pointer select-none" title="Toggles key pricing floor and ceiling zones">
-                          <input
-                            type="checkbox"
-                            checked={showSR}
-                            onChange={(e) => setShowSR(e.target.checked)}
-                            className="w-3.5 h-3.5 rounded border-white/25 bg-[#0e0e11] text-emerald-500 focus:ring-0 focus:ring-offset-0 cursor-pointer accent-emerald-500"
-                          />
-                          <span className={cn("text-[10.5px] font-mono font-bold transition-colors", showSR ? "text-emerald-400 font-extrabold" : "text-gray-500 hover:text-gray-400")}>S&R LEVELS</span>
-                        </label>
-
-                        {/* S&R Source Toggle (Compact mini selection nested next to S&R) */}
-                        {showSR && (
-                          <div className="flex items-center bg-black/60 border border-white/10 rounded px-1.5 py-0.5 gap-1 shrink-0 select-none">
-                            <button
-                              type="button"
-                              onClick={() => setSrSource('AI')}
-                              className={cn(
-                                "px-1.5 py-0.5 rounded text-[8px] font-mono font-bold transition-all cursor-pointer",
-                                srSource === 'AI' ? "bg-emerald-500/15 text-emerald-400 font-extrabold" : "text-gray-650 hover:text-gray-450"
-                              )}
+                        <AnimatePresence>
+                          {showOverlaysMenu && (
+                            <motion.div
+                              initial={{ opacity: 0, y: -6 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={{ opacity: 0, y: -6 }}
+                              className="absolute top-full left-0 z-40 mt-2 w-[min(100vw-2rem,320px)] rounded-xl border border-white/10 bg-[#0e0e11] p-3 shadow-2xl"
                             >
-                              AI ORACLE
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setSrSource('Classic')}
-                              className={cn(
-                                "px-1.5 py-0.5 rounded text-[8px] font-mono font-bold transition-all cursor-pointer",
-                                srSource === 'Classic' ? "bg-emerald-500/15 text-emerald-400 font-extrabold" : "text-gray-655 hover:text-gray-455"
+                              <div className="mb-2 flex items-center justify-between">
+                                <span className="text-[11px] font-sans font-semibold text-gray-300">Chart overlays</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setShowOverlaysMenu(false)}
+                                  className="rounded p-1 text-gray-500 hover:bg-white/5 hover:text-white cursor-pointer"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                              <div className="space-y-1">
+                                {[
+                                  {
+                                    key: 'signals',
+                                    label: 'AI Signals',
+                                    checked: showSignals,
+                                    onChange: (val: boolean) => {
+                                      setShowSignals(val);
+                                      setShowBuySellIndicators(val);
+                                      setShowAiSellIndicator(val);
+                                      setShowEntryExitIndicators(val);
+                                      setShowHoldIndicator(val);
+                                    },
+                                    color: 'text-amber-400',
+                                  },
+                                  {
+                                    key: 'forecast',
+                                    label: 'Forecast',
+                                    checked: showProjection,
+                                    onChange: setShowProjection,
+                                    color: 'text-purple-400',
+                                  },
+                                  {
+                                    key: 'sr',
+                                    label: 'S&R Levels',
+                                    checked: showSR,
+                                    onChange: setShowSR,
+                                    color: 'text-emerald-400',
+                                  },
+                                  {
+                                    key: 'news',
+                                    label: 'News Sentiment',
+                                    checked: showNewsSentiment,
+                                    onChange: setShowNewsSentiment,
+                                    color: 'text-indigo-400',
+                                  },
+                                  {
+                                    key: 'smart',
+                                    label: 'Smart Money',
+                                    checked: showSmartMoney,
+                                    onChange: setShowSmartMoney,
+                                    color: 'text-pink-400',
+                                  },
+                                ].map((item) => (
+                                  <label
+                                    key={item.key}
+                                    className="flex cursor-pointer items-center justify-between rounded-lg px-2.5 py-2 hover:bg-white/[0.04]"
+                                  >
+                                    <span className={cn("text-[12px] font-sans font-medium", item.checked ? item.color : "text-gray-400")}>
+                                      {item.label}
+                                    </span>
+                                    <input
+                                      type="checkbox"
+                                      checked={item.checked}
+                                      onChange={(e) => item.onChange(e.target.checked)}
+                                      className="h-3.5 w-3.5 cursor-pointer rounded border-white/25 bg-[#0e0e11] accent-emerald-500"
+                                    />
+                                  </label>
+                                ))}
+                              </div>
+
+                              {showSR && (
+                                <div className="mt-2 flex items-center gap-1 rounded-lg border border-white/5 bg-black/40 p-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => setSrSource('AI')}
+                                    className={cn(
+                                      "flex-1 rounded-md px-2 py-1.5 text-[10px] font-sans font-semibold cursor-pointer",
+                                      srSource === 'AI' ? "bg-emerald-500/15 text-emerald-400" : "text-gray-500 hover:text-gray-300"
+                                    )}
+                                  >
+                                    AI Oracle
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setSrSource('Classic')}
+                                    className={cn(
+                                      "flex-1 rounded-md px-2 py-1.5 text-[10px] font-sans font-semibold cursor-pointer",
+                                      srSource === 'Classic' ? "bg-emerald-500/15 text-emerald-400" : "text-gray-500 hover:text-gray-300"
+                                    )}
+                                  >
+                                    Classic
+                                  </button>
+                                </div>
                               )}
-                            >
-                              CLASSIC
-                            </button>
-                          </div>
-                        )}
-
-                        {/* 4. News Sentiment Toggle */}
-                        <label className="flex items-center gap-1.5 cursor-pointer select-none" title="Toggles timeline indicators displaying news sentiment publish markers">
-                          <input
-                            type="checkbox"
-                            checked={showNewsSentiment}
-                            onChange={(e) => setShowNewsSentiment(e.target.checked)}
-                            className="w-3.5 h-3.5 rounded border-white/25 bg-[#0e0e11] text-emerald-500 focus:ring-0 focus:ring-offset-0 cursor-pointer accent-emerald-500"
-                          />
-                          <span className={cn("text-[10.5px] font-mono font-bold transition-colors", showNewsSentiment ? "text-indigo-400 font-extrabold" : "text-gray-500 hover:text-gray-400")}>NEWS SENTIMENT</span>
-                        </label>
-
-                        {/* 5. Smart Money Toggle */}
-                        <label className="flex items-center gap-1.5 cursor-pointer select-none" title="Highlights institutional orderflow footprints and Wyckoff accumulation channels">
-                          <input
-                            type="checkbox"
-                            checked={showSmartMoney}
-                            onChange={(e) => setShowSmartMoney(e.target.checked)}
-                            className="w-3.5 h-3.5 rounded border-white/25 bg-[#0e0e11] text-emerald-500 focus:ring-0 focus:ring-offset-0 cursor-pointer accent-emerald-500"
-                          />
-                          <span className={cn("text-[10.5px] font-mono font-bold transition-colors", showSmartMoney ? "text-pink-400 font-extrabold" : "text-gray-500 hover:text-gray-400")}>SMART MONEY</span>
-                        </label>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                       </div>
                     </div>
 
-                  {/* AI Price Projection Quantum Tuner */}
+                  {/* AI Price Projection title strip (mockup) */}
+                  {showProjection && (
+                    <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-purple-500/25 bg-[#121214]/90 backdrop-blur-xl glass-panel px-3 py-2.5 min-w-0 overflow-hidden shadow-[0_0_24px_rgba(168,85,247,0.1)]">
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <h3 className="text-[10px] sm:text-[11px] font-bold font-mono uppercase tracking-[0.12em] text-gray-100 min-w-0 break-words leading-tight">
+                          AI Price Projection
+                          <span className="text-purple-300/90 font-semibold normal-case tracking-normal">
+                            {' '}
+                            (3–10 Trading Days)
+                          </span>
+                        </h3>
+                        <span title="Short-term forecast — separate from medium-term Stock Score">
+                          <Info className="w-3.5 h-3.5 text-gray-500 shrink-0" />
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+                        {projectionMeta.baseCase != null && (
+                          <span className="rounded-md border border-purple-500/25 bg-purple-500/10 px-2 py-0.5 text-[9px] font-mono font-bold text-purple-300 max-w-full break-words">
+                            Base ${projectionMeta.baseCase.toFixed(2)}
+                          </span>
+                        )}
+                        {projectionMeta.bullCase != null && (
+                          <span className="rounded-md border border-emerald-500/25 bg-emerald-500/10 px-2 py-0.5 text-[9px] font-mono font-bold text-emerald-300 max-w-full break-words">
+                            Bull ${projectionMeta.bullCase.toFixed(2)}
+                          </span>
+                        )}
+                        {projectionMeta.bearCase != null && (
+                          <span className="rounded-md border border-rose-500/25 bg-rose-500/10 px-2 py-0.5 text-[9px] font-mono font-bold text-rose-300 max-w-full break-words">
+                            Bear ${projectionMeta.bearCase.toFixed(2)}
+                          </span>
+                        )}
+                        <span className="rounded-full border border-purple-500/35 bg-purple-500/15 px-2.5 py-0.5 text-[9px] font-mono font-bold text-purple-200 max-w-full break-words leading-tight">
+                          Confidence: {projectionMeta.shortConf}%
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Neural Projection + Support & Resistance — same row */}
+                  {(showProjection || showSR) && (
+                  <div className="flex flex-col sm:flex-row gap-1.5 mb-1.5 items-stretch">
                   <AnimatePresence mode="wait">
                     {showProjection && (
                       !expandProjectionTuner ? (
@@ -8470,21 +8929,18 @@ export default function App() {
                           exit={{ opacity: 0, y: -5 }}
                           transition={{ duration: 0.15 }}
                           onClick={() => setExpandProjectionTuner(true)}
-                          className="p-3 mb-4 border border-purple-500/10 bg-purple-950/[0.02] bg-gradient-to-r from-purple-500/[0.01] to-cyan-500/[0.005] rounded-xl flex items-center justify-between cursor-pointer hover:bg-purple-950/[0.06] hover:border-purple-500/25 transition-all select-none"
+                          className="flex-1 min-w-0 px-2 py-1.5 border border-purple-500/10 bg-purple-950/[0.02] rounded-lg flex items-center justify-between cursor-pointer hover:bg-purple-950/[0.06] hover:border-purple-500/25 transition-all select-none"
                         >
-                          <div className="flex items-center gap-2">
-                            <Sparkles className="w-3.5 h-3.5 text-purple-400 animate-pulse" />
-                            <span className="text-[10px] font-mono text-purple-400 font-extrabold uppercase tracking-widest">
-                              🔮 Neural Projection Core Tuner
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <Sparkles className="w-3 h-3 text-purple-400 shrink-0" />
+                            <span className="text-[9px] font-mono text-purple-400 font-bold uppercase tracking-wider truncate">
+                              Projection Tuner
                             </span>
-                            <span className="text-[8px] font-mono text-purple-400/60 bg-purple-400/5 px-1.5 py-0.25 rounded border border-purple-500/10">
-                              {projectionMode === 'hybrid' ? 'AI Hybrid' : projectionMode === 'gbm' ? 'Stochastic' : 'Regression'} · {projectionHorizon}D
+                            <span className="text-[8px] font-mono text-purple-400/60 bg-purple-400/5 px-1 py-0.5 rounded border border-purple-500/10 shrink-0">
+                              {projectionMode === 'hybrid' ? 'Hybrid' : projectionMode === 'gbm' ? 'GBM' : 'Regr'} · {projectionHorizon}D
                             </span>
                           </div>
-                          <div className="flex items-center gap-1 text-gray-500 hover:text-purple-400 transition-colors">
-                            <span className="text-[9px] font-mono uppercase tracking-wider">Configure</span>
-                            <ChevronDown className="w-3 h-3 text-purple-450" />
-                          </div>
+                          <ChevronDown className="w-3 h-3 text-purple-400/70 shrink-0" />
                         </motion.div>
                       ) : (
                         <motion.div
@@ -8493,96 +8949,59 @@ export default function App() {
                           animate={{ opacity: 1, y: 0, height: "auto" }}
                           exit={{ opacity: 0, y: -10, height: 0 }}
                           transition={{ duration: 0.2 }}
-                          className="overflow-hidden mb-4"
+                          className="flex-1 min-w-0 overflow-hidden"
                         >
-                          <div className="p-4 border border-purple-500/20 bg-purple-950/[0.04] bg-gradient-to-r from-purple-500/[0.02] to-cyan-500/[0.01] rounded-xl space-y-4 shadow-[inset_0_1px_1px_rgba(168,85,247,0.05)]">
-                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-white/[0.04]">
-                              <div className="space-y-0.5">
-                                <span className="text-[10px] font-mono text-purple-400 font-extrabold uppercase tracking-widest flex items-center gap-1.5">
-                                  <Sparkles className="w-3.5 h-3.5 animate-pulse text-purple-400" />
-                                  🔮 Neural Projection Core Tuner
-                                </span>
-                                <p className="text-[10px] text-gray-500 font-mono">Refine future price trajectory models, step horizons, and standard deviation bounds</p>
-                              </div>
-                              <div className="flex items-center gap-2 self-start sm:self-auto">
-                                <span className="text-[8.5px] font-mono text-purple-400/75 bg-purple-400/5 px-2 py-0.5 rounded border border-purple-500/10 uppercase font-bold">
-                                  Active Engine: {projectionMode === 'hybrid' ? 'AI Hybrid Guided' : projectionMode === 'gbm' ? 'Stochastic GBM Walk' : 'Trend Regression'}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => setExpandProjectionTuner(false)}
-                                  className="p-1 hover:bg-white/5 rounded text-gray-500 hover:text-purple-400 transition-colors flex items-center gap-1 text-[9px] font-mono uppercase cursor-pointer"
-                                >
-                                  <span>Hide</span>
-                                  <ChevronUp className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
+                          <div className="p-2.5 border border-purple-500/20 bg-purple-950/[0.04] rounded-lg space-y-2.5 h-full">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[9px] font-mono text-purple-400 font-bold uppercase tracking-wider flex items-center gap-1">
+                                <Sparkles className="w-3 h-3" /> Neural Projection
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setExpandProjectionTuner(false)}
+                                className="p-0.5 hover:bg-white/5 rounded text-gray-500 hover:text-purple-400 flex items-center gap-0.5 text-[8px] font-mono uppercase cursor-pointer"
+                              >
+                                Hide <ChevronUp className="w-3 h-3" />
+                              </button>
                             </div>
 
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                              {/* 1. Algorithm Selection */}
-                              <div className="space-y-2">
-                                <label className="text-[9.5px] font-mono font-bold text-gray-400 uppercase tracking-wider block">
-                                  Forecasting Algorithm
-                                </label>
-                                <div className="grid grid-cols-3 bg-black/40 border border-white/5 p-1 rounded-lg gap-1">
-                                  <button
-                                    type="button"
-                                    onClick={() => setProjectionMode('hybrid')}
-                                    className={cn(
-                                      "py-1.5 px-2 text-[9px] font-mono font-bold rounded transition-all cursor-pointer text-center",
-                                      projectionMode === 'hybrid'
-                                        ? "bg-purple-500/15 text-purple-300 font-black border border-purple-500/20 shadow-[0_1px_8px_rgba(168,85,247,0.05)]"
-                                        : "text-gray-500 hover:text-gray-300"
-                                    )}
-                                    title="AI-Guided (Uses calculated Gemini parsed limits or index forecast)"
-                                  >
-                                    AI-GUIDED
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setProjectionMode('gbm')}
-                                    className={cn(
-                                      "py-1.5 px-2 text-[9px] font-mono font-bold rounded transition-all cursor-pointer text-center",
-                                      projectionMode === 'gbm'
-                                        ? "bg-purple-500/15 text-purple-300 font-black border border-purple-500/20 shadow-[0_1px_8px_rgba(168,85,247,0.05)]"
-                                        : "text-gray-500 hover:text-gray-300"
-                                    )}
-                                    title="Geometric Brownian Motion (Generates risk-calibrated lognormal runs)"
-                                  >
-                                    STOCHASTIC
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setProjectionMode('regression')}
-                                    className={cn(
-                                      "py-1.5 px-2 text-[9px] font-mono font-bold rounded transition-all cursor-pointer text-center",
-                                      projectionMode === 'regression'
-                                        ? "bg-purple-500/15 text-purple-300 font-black border border-purple-500/20 shadow-[0_1px_8px_rgba(168,85,247,0.05)]"
-                                        : "text-gray-500 hover:text-gray-300"
-                                    )}
-                                    title="Linear Regression Extrapolative (Draws standard linear slope continuation)"
-                                  >
-                                    REGRESSION
-                                  </button>
+                            <div className="grid grid-cols-1 gap-2">
+                              <div className="space-y-1">
+                                <label className="text-[8px] font-mono font-bold text-gray-500 uppercase tracking-wider block">Algorithm</label>
+                                <div className="grid grid-cols-3 bg-black/40 border border-white/5 p-0.5 rounded-md gap-0.5">
+                                  {([
+                                    { id: 'hybrid' as const, label: 'AI' },
+                                    { id: 'gbm' as const, label: 'GBM' },
+                                    { id: 'regression' as const, label: 'REG' },
+                                  ]).map((m) => (
+                                    <button
+                                      key={m.id}
+                                      type="button"
+                                      onClick={() => setProjectionMode(m.id)}
+                                      className={cn(
+                                        "py-1 px-1 text-[8px] font-mono font-bold rounded cursor-pointer text-center",
+                                        projectionMode === m.id
+                                          ? "bg-purple-500/15 text-purple-300 border border-purple-500/20"
+                                          : "text-gray-500 hover:text-gray-300"
+                                      )}
+                                    >
+                                      {m.label}
+                                    </button>
+                                  ))}
                                 </div>
                               </div>
-
-                              {/* 2. Step Horizon */}
-                              <div className="space-y-2">
-                                <label className="text-[9.5px] font-mono font-bold text-gray-400 uppercase tracking-wider block">
-                                  Projection Horizon
-                                </label>
-                                <div className="grid grid-cols-5 bg-black/40 border border-white/5 p-1 rounded-lg gap-1">
+                              <div className="space-y-1">
+                                <label className="text-[8px] font-mono font-bold text-gray-500 uppercase tracking-wider block">Horizon</label>
+                                <div className="grid grid-cols-5 bg-black/40 border border-white/5 p-0.5 rounded-md gap-0.5">
                                   {[3, 5, 10, 15, 20].map((step) => (
                                     <button
                                       key={step}
                                       type="button"
                                       onClick={() => setProjectionHorizon(step)}
                                       className={cn(
-                                        "py-1.5 text-[9px] font-mono font-bold rounded transition-all cursor-pointer text-center",
+                                        "py-1 text-[8px] font-mono font-bold rounded cursor-pointer text-center",
                                         projectionHorizon === step
-                                          ? "bg-purple-500/15 text-purple-300 font-black border border-purple-500/20"
+                                          ? "bg-purple-500/15 text-purple-300 border border-purple-500/20"
                                           : "text-gray-500 hover:text-gray-300"
                                       )}
                                     >
@@ -8591,30 +9010,25 @@ export default function App() {
                                   ))}
                                 </div>
                               </div>
-
-                              {/* 3. Uncertainty Slices */}
-                              <div className="space-y-2">
-                                <label className="text-[9.5px] font-mono font-bold text-gray-400 uppercase tracking-wider block">
-                                  Corridor Confidence Band
-                                </label>
-                                <div className="grid grid-cols-4 bg-black/40 border border-white/5 p-1 rounded-lg gap-1">
+                              <div className="space-y-1">
+                                <label className="text-[8px] font-mono font-bold text-gray-500 uppercase tracking-wider block">Band</label>
+                                <div className="grid grid-cols-4 bg-black/40 border border-white/5 p-0.5 rounded-md gap-0.5">
                                   {[
-                                    { label: 'COV', val: 0.8, title: 'Narrow Corridor (Coverage ~50%)' },
-                                    { label: 'STD', val: 1.5, title: 'Standard corridor (Confidence ~86%)' },
-                                    { label: 'EXP', val: 2.0, title: 'Expanded Range (Confidence ~95%)' },
-                                    { label: 'STRESS', val: 2.7, title: 'Stress Scenario (Confidence ~99%)' }
+                                    { label: 'COV', val: 0.8 },
+                                    { label: 'STD', val: 1.5 },
+                                    { label: 'EXP', val: 2.0 },
+                                    { label: 'STR', val: 2.7 },
                                   ].map((item) => (
                                     <button
                                       key={item.label}
                                       type="button"
                                       onClick={() => setProjectionConfidence(item.val)}
                                       className={cn(
-                                        "py-1.5 text-[8.5px] font-mono font-bold rounded transition-all cursor-pointer text-center",
+                                        "py-1 text-[8px] font-mono font-bold rounded cursor-pointer text-center",
                                         projectionConfidence === item.val
-                                          ? "bg-purple-500/15 text-purple-300 font-black border border-purple-500/20"
+                                          ? "bg-purple-500/15 text-purple-300 border border-purple-500/20"
                                           : "text-gray-500 hover:text-gray-300"
                                       )}
-                                      title={item.title}
                                     >
                                       {item.label}
                                     </button>
@@ -8622,38 +9036,12 @@ export default function App() {
                                 </div>
                               </div>
                             </div>
-
-                            {/* Descriptive dynamic readouts */}
-                            <div className="p-3 border border-white/[0.02] bg-black/35 rounded-lg text-xs font-mono text-zinc-400">
-                              {projectionMode === 'hybrid' && (
-                                <TruncatedText
-                                  text="MODE INFO: AI Hybrid matches core Gemini predictions, indexing mathematical formulas, and historical linear regression lines to form paths. It aligns linearly to targets when Gemini reports strict price limits (ATR-adjusted)."
-                                  maxLines={5}
-                                  className="text-xs text-zinc-400 leading-relaxed font-mono"
-                                />
-                              )}
-                              {projectionMode === 'gbm' && (
-                                <TruncatedText
-                                  text="MODE INFO: Stochastic GBM computes log-normal asset drift and historical standard deviation returns. It executes live mathematical walks: S_t = S_0 * exp((drift - vol²/2)*t) ± (vol * √t * z-score)"
-                                  maxLines={5}
-                                  className="text-xs text-zinc-400 leading-relaxed font-mono"
-                                />
-                              )}
-                              {projectionMode === 'regression' && (
-                                <TruncatedText
-                                  text="MODE INFO: Trend Regression performs linear regression on the 90-day historic trading closes, computing standard coefficients to project a continuous mathematical trajectory line without sentiment influence."
-                                  maxLines={5}
-                                  className="text-xs text-zinc-400 leading-relaxed font-mono"
-                                />
-                              )}
-                            </div>
                           </div>
                         </motion.div>
                       )
                     )}
                   </AnimatePresence>
 
-                  {/* AI Support & Resistance Model Tuner */}
                   <AnimatePresence mode="wait">
                     {showSR && (
                       !expandSrTuner ? (
@@ -8664,21 +9052,18 @@ export default function App() {
                           exit={{ opacity: 0, y: -5 }}
                           transition={{ duration: 0.15 }}
                           onClick={() => setExpandSrTuner(true)}
-                          className="p-3 mb-4 border border-emerald-500/10 bg-[#0E1513]/40 bg-gradient-to-r from-emerald-500/[0.01] to-cyan-500/[0.005] rounded-xl flex items-center justify-between cursor-pointer hover:bg-[#0E1513]/80 hover:border-emerald-500/25 transition-all select-none"
+                          className="flex-1 min-w-0 px-2 py-1.5 border border-emerald-500/10 bg-[#0E1513]/40 rounded-lg flex items-center justify-between cursor-pointer hover:bg-[#0E1513]/80 hover:border-emerald-500/25 transition-all select-none"
                         >
-                          <div className="flex items-center gap-2">
-                            <Activity className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-                            <span className="text-[10px] font-mono text-emerald-400 font-extrabold uppercase tracking-widest">
-                              🛠️ Advanced Support & Resistance Tuner
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <Activity className="w-3 h-3 text-emerald-400 shrink-0" />
+                            <span className="text-[9px] font-mono text-emerald-400 font-bold uppercase tracking-wider truncate">
+                              Support & Resistance
                             </span>
-                            <span className="text-[8px] font-mono text-emerald-400/60 bg-emerald-400/5 px-1.5 py-0.25 rounded border border-emerald-500/10">
-                              {srSource === 'AI' ? 'AI Oracle' : srMethod === 'Swing' ? 'Swing Peaks' : srMethod === 'Pivot' ? 'Pivot' : srMethod === 'Fibo' ? 'Fibo' : 'Camarilla'} · {srSource === 'Classic' ? `${srLookback}b` : 'Continuous'}
+                            <span className="text-[8px] font-mono text-emerald-400/60 bg-emerald-400/5 px-1 py-0.5 rounded border border-emerald-500/10 shrink-0">
+                              {srSource === 'AI' ? 'AI' : srMethod} · {srSource === 'Classic' ? `${srLookback}b` : 'Live'}
                             </span>
                           </div>
-                          <div className="flex items-center gap-1 text-gray-500 hover:text-emerald-400 transition-colors">
-                            <span className="text-[9px] font-mono uppercase tracking-wider">Configure</span>
-                            <ChevronDown className="w-3 h-3 text-emerald-450" />
-                          </div>
+                          <ChevronDown className="w-3 h-3 text-emerald-400/70 shrink-0" />
                         </motion.div>
                       ) : (
                         <motion.div
@@ -8687,74 +9072,56 @@ export default function App() {
                           animate={{ opacity: 1, y: 0, height: "auto" }}
                           exit={{ opacity: 0, y: -10, height: 0 }}
                           transition={{ duration: 0.2 }}
-                          className="overflow-hidden mb-4 animate-fadeIn"
+                          className="flex-1 min-w-0 overflow-hidden"
                         >
-                          <div className="p-4 border border-emerald-500/20 bg-[#0E1513] bg-gradient-to-r from-emerald-500/[0.02] to-cyan-500/[0.01] rounded-xl space-y-4 shadow-[inset_0_1px_1px_rgba(16,185,129,0.05)]">
-                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-white/[0.04]">
-                              <div className="space-y-0.5">
-                                <span className="text-[10px] font-mono text-emerald-400 font-extrabold uppercase tracking-widest flex items-center gap-1.5">
-                                  <Activity className="w-3.5 h-3.5 animate-pulse text-emerald-400" />
-                                  🛠️ Advanced Support & Resistance Tuner
-                                </span>
-                                <p className="text-[10px] text-gray-500 font-mono">Select algorithms, tweak lookback ranges, and modify visual overlay representations</p>
-                              </div>
-                              <div className="flex items-center gap-2 self-start sm:self-auto">
-                                <span className="text-[8.5px] font-mono text-emerald-400/75 bg-emerald-400/5 px-2 py-0.5 rounded border border-emerald-500/10 uppercase font-bold">
-                                  Active Engine: {srSource === 'AI' ? 'AI Oracle' : srMethod === 'Swing' ? 'Swing Peaks Cluster' : srMethod === 'Pivot' ? 'Standard Pivot' : srMethod === 'Fibo' ? 'Fibonacci Retracement' : 'Camarilla Pivot'}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => setExpandSrTuner(false)}
-                                  className="p-1 hover:bg-white/5 rounded text-gray-500 hover:text-emerald-400 transition-colors flex items-center gap-1 text-[9px] font-mono uppercase cursor-pointer"
-                                >
-                                  <span>Hide</span>
-                                  <ChevronUp className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
+                          <div className="p-2.5 border border-emerald-500/20 bg-[#0E1513] rounded-lg space-y-2.5 h-full">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[9px] font-mono text-emerald-400 font-bold uppercase tracking-wider flex items-center gap-1">
+                                <Activity className="w-3 h-3" /> Support & Resistance
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setExpandSrTuner(false)}
+                                className="p-0.5 hover:bg-white/5 rounded text-gray-500 hover:text-emerald-400 flex items-center gap-0.5 text-[8px] font-mono uppercase cursor-pointer"
+                              >
+                                Hide <ChevronUp className="w-3 h-3" />
+                              </button>
                             </div>
 
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                              {/* 1. S&R Source & Method */}
-                              <div className="space-y-2">
-                                <label className="text-[9.5px] font-mono font-bold text-gray-400 uppercase tracking-wider block">
-                                  S&R Calculation Engine
-                                </label>
-                                <div className="grid grid-cols-2 bg-black/40 border border-white/5 p-1 rounded-lg gap-1">
+                            <div className="grid grid-cols-1 gap-2">
+                              <div className="space-y-1">
+                                <label className="text-[8px] font-mono font-bold text-gray-500 uppercase tracking-wider block">Engine</label>
+                                <div className="grid grid-cols-2 bg-black/40 border border-white/5 p-0.5 rounded-md gap-0.5">
                                   <button
                                     type="button"
                                     onClick={() => setSrSource('AI')}
                                     className={cn(
-                                      "py-1.5 text-[9px] font-mono font-bold rounded transition-all cursor-pointer text-center",
+                                      "py-1 text-[8px] font-mono font-bold rounded cursor-pointer text-center",
                                       srSource === 'AI'
-                                        ? "bg-emerald-500/15 text-emerald-300 font-black border border-emerald-500/20"
+                                        ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/20"
                                         : "text-gray-500 hover:text-gray-300"
                                     )}
-                                    title="Utilizes custom neural networks to detect key accumulation & distribution levels"
                                   >
-                                    AI ORACLE
+                                    AI
                                   </button>
                                   <button
                                     type="button"
                                     onClick={() => setSrSource('Classic')}
                                     className={cn(
-                                      "py-1.5 text-[9px] font-mono font-bold rounded transition-all cursor-pointer text-center",
+                                      "py-1 text-[8px] font-mono font-bold rounded cursor-pointer text-center",
                                       srSource === 'Classic'
-                                        ? "bg-emerald-500/15 text-emerald-300 font-black border border-emerald-500/20"
+                                        ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/20"
                                         : "text-gray-500 hover:text-gray-300"
                                     )}
-                                    title="Uses quantitative mathematical models based on historical OHLC candle data"
                                   >
-                                    CLASSIC QUANT
+                                    CLASSIC
                                   </button>
                                 </div>
                               </div>
 
-                              {/* 2. Algorithm Style (only relevant if source is Classic) */}
-                              <div className="space-y-2">
-                                <label className="text-[9.5px] font-mono font-bold text-gray-400 uppercase tracking-wider block">
-                                  Quantitative Method
-                                </label>
-                                <div className="grid grid-cols-4 bg-black/40 border border-white/5 p-1 rounded-lg gap-1">
+                              <div className="space-y-1">
+                                <label className="text-[8px] font-mono font-bold text-gray-500 uppercase tracking-wider block">Method</label>
+                                <div className="grid grid-cols-4 bg-black/40 border border-white/5 p-0.5 rounded-md gap-0.5">
                                   {(['Swing', 'Pivot', 'Fibo', 'Camarilla'] as const).map((method) => (
                                     <button
                                       key={method}
@@ -8762,32 +9129,23 @@ export default function App() {
                                       disabled={srSource === 'AI'}
                                       onClick={() => setSrMethod(method)}
                                       className={cn(
-                                        "py-1.5 text-[8.5px] font-mono font-bold rounded transition-all cursor-pointer text-center",
+                                        "py-1 text-[8px] font-mono font-bold rounded cursor-pointer text-center",
                                         srSource === 'AI' ? "opacity-30 cursor-not-allowed text-gray-700" : "",
                                         srMethod === method && srSource === 'Classic'
-                                          ? "bg-cyan-500/15 text-cyan-300 font-black border border-cyan-500/20"
+                                          ? "bg-cyan-500/15 text-cyan-300 border border-cyan-500/20"
                                           : "text-gray-500 hover:text-gray-300"
                                       )}
-                                      title={
-                                        method === 'Swing' ? 'Find swing points (peaks/valleys) and group by frequency touches' :
-                                        method === 'Pivot' ? 'Standard floor pivot points equation based on highs & lows' :
-                                        method === 'Fibo' ? 'Ratios mapped to lookback peak range boundaries' : 'Short-term Camarilla volatility lanes'
-                                      }
                                     >
-                                      {method.toUpperCase()}
+                                      {method === 'Camarilla' ? 'CAM' : method.slice(0, 3).toUpperCase()}
                                     </button>
                                   ))}
                                 </div>
                               </div>
 
-                              {/* 3. Parameter Customization (Lookback or Style) */}
-                              <div className="space-y-2">
-                                <label className="text-[9.5px] font-mono font-bold text-gray-400 uppercase tracking-wider block">
-                                  Lookback & Rendering Style
-                                </label>
-                                <div className="grid grid-cols-2 gap-2">
-                                  {/* Lookback Selector */}
-                                  <div className="flex bg-black/40 border border-white/5 p-1 rounded-lg gap-1">
+                              <div className="space-y-1">
+                                <label className="text-[8px] font-mono font-bold text-gray-500 uppercase tracking-wider block">Lookback / Style</label>
+                                <div className="grid grid-cols-2 gap-1">
+                                  <div className="flex bg-black/40 border border-white/5 p-0.5 rounded-md gap-0.5">
                                     {([50, 100, 200] as const).map((lb) => (
                                       <button
                                         key={lb}
@@ -8795,36 +9153,32 @@ export default function App() {
                                         disabled={srSource === 'AI'}
                                         onClick={() => setSrLookback(lb)}
                                         className={cn(
-                                          "flex-1 py-1 text-[8px] font-mono font-bold rounded transition-all text-center",
+                                          "flex-1 py-1 text-[8px] font-mono font-bold rounded text-center cursor-pointer",
                                           srSource === 'AI' ? "opacity-30 cursor-not-allowed text-gray-700" : "",
                                           srLookback === lb && srSource === 'Classic'
                                             ? "bg-amber-500/15 text-amber-300 border border-amber-500/20"
                                             : "text-gray-500 hover:text-gray-400"
                                         )}
-                                        title={`Calculate extremes across the last ${lb} candle bars`}
                                       >
-                                        {lb}b
+                                        {lb}
                                       </button>
                                     ))}
                                   </div>
-
-                                  {/* Style Selector */}
-                                  <div className="flex bg-black/40 border border-white/5 p-1 rounded-lg gap-1">
-                                    {[
-                                      { label: 'LINE', val: 'Line' as const, title: 'Clean precise reference line overlay' },
-                                      { label: 'ZONE', val: 'Zone' as const, title: 'Shaded volumetric buyer/seller corridor bands' }
-                                    ].map((style) => (
+                                  <div className="flex bg-black/40 border border-white/5 p-0.5 rounded-md gap-0.5">
+                                    {([
+                                      { label: 'LINE', val: 'Line' as const },
+                                      { label: 'ZONE', val: 'Zone' as const },
+                                    ]).map((style) => (
                                       <button
                                         key={style.label}
                                         type="button"
                                         onClick={() => setSrStyle(style.val)}
                                         className={cn(
-                                          "flex-1 py-1 text-[8px] font-mono font-bold rounded transition-all text-center",
+                                          "flex-1 py-1 text-[8px] font-mono font-bold rounded text-center cursor-pointer",
                                           srStyle === style.val
                                             ? "bg-[#0c4a6e]/40 text-[#38bdf8] border border-[#0284c7]/20"
                                             : "text-gray-500 hover:text-gray-400"
                                         )}
-                                        title={style.title}
                                       >
                                         {style.label}
                                       </button>
@@ -8833,152 +9187,112 @@ export default function App() {
                                 </div>
                               </div>
                             </div>
-
-                            {/* Dynamic detailed readouts / Explanations section */}
-                            <div className="p-3 border border-white/[0.02] bg-black/35 rounded-lg text-xs font-mono text-zinc-400">
-                              {srSource === 'AI' ? (
-                                <TruncatedText
-                                  text="MODE INFO: AI Oracle compiles multi-layered support and resistance nodes using machine learning models looking for structural peaks, distribution channels, and volume cluster footprints."
-                                  maxLines={5}
-                                  className="text-xs text-zinc-400 leading-relaxed font-mono"
-                                />
-                              ) : srMethod === 'Swing' ? (
-                                <TruncatedText
-                                  text="MODE INFO: Swing Peaks detects local maximums (Peaks) and local minimums (Troughs) over a left-and-right radius. It groups closely located price levels within a 1.8% threshold and calculates touch confirmation metrics based on historical price actions. *Touch confirmation counts how frequently the historical price crossed or touched the level's zone. More touches represent a level heavily tested and validated by market orders."
-                                  maxLines={5}
-                                  className="text-xs text-zinc-400 leading-relaxed font-mono"
-                                />
-                              ) : srMethod === 'Pivot' ? (
-                                <TruncatedText
-                                  text="MODE INFO: Standard Floor Pivot Points maps support and resistance levels using classical mathematical pivot points: PP = (High + Low + Close) / 3 | R1 = 2*PP - Low | S1 = 2*PP - High | R2 = PP + Range | S2 = PP - Range"
-                                  maxLines={5}
-                                  className="text-xs text-zinc-400 leading-relaxed font-mono"
-                                />
-                              ) : srMethod === 'Fibo' ? (
-                                <TruncatedText
-                                  text="MODE INFO: Fibonacci Retracements maps structural ratios across the range (High to Low) of the lookback period. It shows golden ratio boundaries (23.6%, 38.2%, 50%, 61.8%, 78.6%) corresponding to buyers absorbing or sellers defending retracements."
-                                  maxLines={5}
-                                  className="text-xs text-zinc-400 leading-relaxed font-mono"
-                                />
-                              ) : (
-                                <TruncatedText
-                                  text="MODE INFO: Camarilla Pivot Points focuses on intraday short-range trade channels. It computes tight support/resistance boundaries based on range expansion coefficients, prioritizing support buys and resistance sells at the outer margins."
-                                  maxLines={5}
-                                  className="text-xs text-zinc-400 leading-relaxed font-mono"
-                                />
-                              )}
-                            </div>
                           </div>
                         </motion.div>
                       )
                     )}
                   </AnimatePresence>
+                  </div>
+                  )}
 
                   {/* Chart Studio Tools Toolbar */}
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-6 p-4 bg-white/[0.02] border border-white/5 rounded-xl">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-bold font-mono text-gray-500 uppercase tracking-widest">Studio Tools:</span>
-                      <div className="flex bg-black/45 p-1 rounded-lg border border-white/5">
-                        <button
-                          type="button"
-                          onClick={() => setDrawMode('inspect')}
-                          title="Inspect Mode (Hover Tooltip)"
-                          className={cn(
-                            "px-2 py-1 rounded text-[10px] font-mono font-bold transition-all flex items-center gap-1",
-                            drawMode === 'inspect'
-                              ? "bg-emerald-500/15 text-emerald-400 font-extrabold"
-                              : "text-gray-500 hover:text-gray-300"
-                          )}
-                        >
-                          <MousePointer className="w-3.5 h-3.5" />
-                          <span>INSPECT</span>
-                        </button>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5 p-1 bg-white/[0.02] border border-white/5 rounded-lg">
+                    <span className="text-[8px] font-mono font-bold text-gray-600 uppercase tracking-wider px-1">Studio</span>
+                    <div className="flex bg-black/45 p-0.5 rounded-md border border-white/5">
+                      <button
+                        type="button"
+                        onClick={() => setDrawMode('inspect')}
+                        title="Inspect"
+                        className={cn(
+                          "px-1.5 py-0.5 rounded text-[8px] font-mono font-bold transition-all flex items-center gap-0.5 cursor-pointer",
+                          drawMode === 'inspect' ? "bg-emerald-500/15 text-emerald-400" : "text-gray-500 hover:text-gray-300"
+                        )}
+                      >
+                        <MousePointer className="w-3 h-3" />
+                        <span className="hidden sm:inline">INS</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDrawMode('trendline')}
+                        title="Trendline"
+                        className={cn(
+                          "px-1.5 py-0.5 rounded text-[8px] font-mono font-bold transition-all flex items-center gap-0.5 cursor-pointer",
+                          drawMode === 'trendline' ? "bg-amber-500/15 text-amber-400" : "text-gray-500 hover:text-gray-300"
+                        )}
+                      >
+                        <TrendingUp className="w-3 h-3" />
+                        <span className="hidden sm:inline">TL</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDrawMode('annotation')}
+                        title="Marker"
+                        className={cn(
+                          "px-1.5 py-0.5 rounded text-[8px] font-mono font-bold transition-all flex items-center gap-0.5 cursor-pointer",
+                          drawMode === 'annotation' ? "bg-blue-500/15 text-blue-400" : "text-gray-500 hover:text-gray-300"
+                        )}
+                      >
+                        <Tag className="w-3 h-3" />
+                        <span className="hidden sm:inline">MK</span>
+                      </button>
+                    </div>
 
-                        <button
-                          type="button"
-                          onClick={() => setDrawMode('trendline')}
-                          title="Trendline Mode (Click & Drag)"
-                          className={cn(
-                            "px-2 py-1 rounded text-[10px] font-mono font-bold transition-all flex items-center gap-1",
-                            drawMode === 'trendline'
-                              ? "bg-amber-500/15 text-amber-400 font-extrabold"
-                              : "text-gray-500 hover:text-gray-300"
-                          )}
-                        >
-                          <TrendingUp className="w-3.5 h-3.5" />
-                          <span>TRENDLINE</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => setDrawMode('annotation')}
-                          title="Annotation Marker Mode (Click chart)"
-                          className={cn(
-                            "px-2 py-1 rounded text-[10px] font-mono font-bold transition-all flex items-center gap-1",
-                            drawMode === 'annotation'
-                              ? "bg-blue-500/15 text-blue-400 font-extrabold"
-                              : "text-gray-500 hover:text-gray-300"
-                          )}
-                        >
-                          <Tag className="w-3.5 h-3.5" />
-                          <span>MARKER</span>
-                        </button>
+                    {drawMode !== 'inspect' && (
+                      <div className="flex items-center gap-1 bg-black/35 py-0.5 px-1.5 rounded-md border border-white/5">
+                        {['#f59e0b', '#3b82f6', '#10b981', '#ef4444', '#a855f7', '#ec4899'].map((c) => (
+                          <button
+                            key={c}
+                            type="button"
+                            onClick={() => setSelectedColor(c)}
+                            className={cn(
+                              "w-2.5 h-2.5 rounded-full border cursor-pointer",
+                              selectedColor === c ? "border-white scale-110" : "border-transparent opacity-60 hover:opacity-100"
+                            )}
+                            style={{ backgroundColor: c }}
+                          />
+                        ))}
                       </div>
-                    </div>
+                    )}
 
-                    <div className="flex items-center gap-4 justify-between sm:justify-end">
-                      {/* Color Picker */}
-                      {drawMode !== 'inspect' && (
-                        <div className="flex items-center gap-1.5 bg-black/35 py-1 px-2 rounded-lg border border-white/5">
-                          <span className="text-[9px] font-mono text-gray-500 uppercase">Color:</span>
-                          <div className="flex items-center gap-1">
-                            {['#f59e0b', '#3b82f6', '#10b981', '#ef4444', '#a855f7', '#ec4899'].map((c) => (
-                              <button
-                                key={c}
-                                type="button"
-                                onClick={() => setSelectedColor(c)}
-                                className={cn(
-                                  "w-3.5 h-3.5 rounded-full border transition-all",
-                                  selectedColor === c ? "border-white scale-110" : "border-transparent opacity-60 hover:opacity-100"
-                                )}
-                                style={{ backgroundColor: c }}
-                              />
-                            ))}
-                          </div>
-                        </div>
-                      )}
+                    {(trendlines.some(t => t.ticker === activeTicker || !t.ticker) || annotations.some(a => a.ticker === activeTicker || !a.ticker)) && (
+                      <button
+                        type="button"
+                        onClick={clearDrawings}
+                        className="ml-auto px-1.5 py-0.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded text-[8px] font-mono font-bold cursor-pointer"
+                      >
+                        CLEAR
+                      </button>
+                    )}
 
-                      {/* Clear Canvas */}
-                      {(trendlines.some(t => t.ticker === activeTicker || !t.ticker) || annotations.some(a => a.ticker === activeTicker || !a.ticker)) && (
-                        <button
-                          type="button"
-                          onClick={clearDrawings}
-                          className="px-2 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 tracking-tight rounded text-[9px] font-mono transition-all font-extrabold"
-                        >
-                          CLEAR CANVAS
-                        </button>
-                      )}
-                    </div>
-                  </div>
+                    <span className="text-[8px] font-mono text-gray-600 truncate max-w-[220px] sm:max-w-none">
+                      {drawMode === 'inspect' && "Hover for details"}
+                      {drawMode === 'trendline' && "Drag to draw trendline"}
+                      {drawMode === 'annotation' && "Click to place marker"}
+                    </span>
 
-                  {/* Help hint */}
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-[9px] font-mono text-gray-500 uppercase px-1 mt-1.5 pb-2 border-b border-white/[0.03]">
-                    <div>
-                      {drawMode === 'inspect' && "📌 INSPECTOR: Hover over data points to review pricing & metadata details."}
-                      {drawMode === 'trendline' && "✍️ TRENDLINE DRAWING ACTIVE: Click & hold a point, then drag & release to trace charts."}
-                      {drawMode === 'annotation' && "🏷️ MARKER PLACEMENT ACTIVE: Click anywhere along the price line to write dynamic notes."}
-                    </div>
                     {showOBOO && (
-                      <div className="flex items-center gap-3 self-end sm:self-auto shrink-0 bg-[#0D0D0F]/60 px-2 py-0.5 rounded border border-white/5">
-                        <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-[#ef4444]" /> OB: OVERBOUGHT (RSI &gt; 70)</span>
-                        <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-[#3b82f6]" /> NEUTRAL: (30-70)</span>
-                        <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-[#10b981]" /> OS: OVERSOLD (RSI &lt; 30)</span>
+                      <div className="flex items-center gap-2 ml-auto text-[8px] font-mono text-gray-500">
+                        <span className="flex items-center gap-1"><span className="w-1 h-1 rounded-full bg-[#ef4444]" />OB</span>
+                        <span className="flex items-center gap-1"><span className="w-1 h-1 rounded-full bg-[#3b82f6]" />N</span>
+                        <span className="flex items-center gap-1"><span className="w-1 h-1 rounded-full bg-[#10b981]" />OS</span>
                       </div>
                     )}
                   </div>
- 
+
                    {/* Chart Visualization */}
-                  <div id="quantum-price-chart-only" className={cn("w-full mt-2 relative transition-all duration-300", chartViewMode === 'comparison' ? "min-h-[460px] pb-4" : "h-80")}>
+                  <div id="quantum-price-chart-only" className={cn("w-full mt-1 relative transition-all duration-300 rounded-2xl border border-white/10 bg-[#0c0c0e]/60 glass-panel p-1 sm:p-1.5", chartViewMode === 'comparison' ? "min-h-[460px] pb-4" : "h-80")}>
+                    {/* Persistent signal color legend on chart */}
+                    <div className="absolute top-2 left-2 z-20 flex items-center gap-2 rounded-md border border-white/10 bg-[#0a0a0c]/85 px-2 py-1 backdrop-blur-sm pointer-events-none">
+                      <span className="inline-flex items-center gap-1 text-[9px] font-mono font-bold uppercase tracking-wider text-[#22c55e]">
+                        <span className="h-1.5 w-1.5 rounded-full bg-[#22c55e]" /> Buy
+                      </span>
+                      <span className="inline-flex items-center gap-1 text-[9px] font-mono font-bold uppercase tracking-wider text-[#38bdf8]">
+                        <span className="h-1.5 w-1.5 rounded-full bg-[#38bdf8]" /> Hold
+                      </span>
+                      <span className="inline-flex items-center gap-1 text-[9px] font-mono font-bold uppercase tracking-wider text-[#f43f5e]">
+                        <span className="h-1.5 w-1.5 rounded-full bg-[#f43f5e]" /> Sell
+                      </span>
+                    </div>
                     {loadingTimeframe && (
                       <div className="absolute inset-0 bg-[#0c0c0e]/80 backdrop-blur-sm flex flex-col items-center justify-center gap-2.5 z-50 rounded-xl transition-all duration-300">
                         <Loader2 className="w-6 h-6 animate-spin text-emerald-500" />
@@ -9856,14 +10170,14 @@ export default function App() {
                                         x={chartSignals.sellPoint.date} 
                                         y={chartSignals.sellPoint.close} 
                                         r={6} 
-                                        fill={getRecommendationTheme(aiStockScore?.totalScore || (chartSignals.confidence < 50 ? 'AVOID' : 'SELL')).accentColor} 
+                                        fill={getRecommendationTheme((aiStockScore?.totalScore ?? chartSignals.confidence) < 50 ? 'AVOID' : 'SELL').accentColor} 
                                         stroke="#111113" 
                                         strokeWidth={2}
                                       >
                                         <Label 
                                           value={`SELL EXIT (${(chartSignals.confidence * 0.95).toFixed(1)}%)`} 
                                           position="bottom" 
-                                          fill={getRecommendationTheme(aiStockScore?.totalScore || (chartSignals.confidence < 50 ? 'AVOID' : 'SELL')).accentColor} 
+                                          fill={getRecommendationTheme((aiStockScore?.totalScore ?? chartSignals.confidence) < 50 ? 'AVOID' : 'SELL').accentColor} 
                                           fontSize={10} 
                                           fontWeight="bold"
                                           fontFamily="monospace"
@@ -10740,31 +11054,102 @@ export default function App() {
                     </div>
 
                    <div className="bg-[#111113] border border-white/5 rounded-2xl p-4 sm:p-5 flex flex-col justify-between h-full w-full min-w-0">
+                      {(() => {
+                        const rsiScore = technicalBreakdown ? technicalBreakdown.scores.rsiScore : 45;
+                        const macdScore = technicalBreakdown ? technicalBreakdown.scores.macdScore : 65;
+                        const biasVal = technicalBreakdown ? technicalBreakdown.directionalBias : 85;
+                        const stochasticScore = technicalBreakdown ? technicalBreakdown.scores.stochasticScore : 50;
+                        const volumeScore = technicalBreakdown ? technicalBreakdown.scores.volumeScore : 70;
+
+                        const rawScores = [rsiScore, macdScore, biasVal, stochasticScore, volumeScore];
+                        const consensusRaw =
+                          biasVal * 0.35 +
+                          macdScore * 0.2 +
+                          rsiScore * 0.15 +
+                          stochasticScore * 0.15 +
+                          volumeScore * 0.15;
+                        const mean = rawScores.reduce((a, b) => a + b, 0) / rawScores.length;
+                        const variance = rawScores.reduce((sum, s) => sum + Math.pow(s - mean, 2), 0) / rawScores.length;
+                        const std = Math.sqrt(variance);
+                        const alignmentScore = Math.max(0, Math.min(100, Math.round(100 - std * 2.2)));
+                        // Pull consensus toward 50 when oscillators disagree (divergence dampens conviction)
+                        const resultScore = Math.max(
+                          0,
+                          Math.min(100, Math.round(50 + (consensusRaw - 50) * (alignmentScore / 100)))
+                        );
+                        const resultLabel =
+                          resultScore >= 70 ? 'Bullish' :
+                          resultScore >= 55 ? 'Lean Bullish' :
+                          resultScore <= 30 ? 'Bearish' :
+                          resultScore <= 45 ? 'Lean Bearish' :
+                          alignmentScore < 45 ? 'Divergent' : 'Neutral';
+                        const resultTone =
+                          resultScore >= 55 ? 'text-emerald-400 border-emerald-500/25 bg-emerald-500/10' :
+                          resultScore <= 45 ? 'text-rose-400 border-rose-500/25 bg-rose-500/10' :
+                          'text-zinc-300 border-zinc-500/20 bg-zinc-500/10';
+
+                        const indicatorsList = [
+                          { name: 'RSI', score: rsiScore, label: 'RSI Oscillator', color: rsiScore > 70 ? 'from-rose-500/30 to-rose-400/80 border-rose-500/40 shadow-rose-500/10' : rsiScore < 30 ? 'from-emerald-500/30 to-emerald-400/80 border-emerald-500/40 shadow-emerald-500/10' : 'from-cyan-500/20 to-cyan-400/70 border-cyan-500/30 shadow-cyan-500/5' },
+                          { name: 'MACD', score: macdScore, label: 'MACD Signal', color: macdScore > 50 ? 'from-emerald-500/30 to-emerald-400/80 border-emerald-500/40 shadow-emerald-500/10' : 'from-rose-500/30 to-rose-400/80 border-rose-500/40 shadow-rose-500/10' },
+                          { name: 'BIAS', score: Math.round(biasVal), label: 'Consensus Bias', color: biasVal >= 50 ? 'from-emerald-500/40 to-emerald-400/90 border-emerald-500/50 shadow-emerald-500/15' : 'from-rose-500/40 to-rose-400/90 border-rose-500/50 shadow-rose-500/15' },
+                          { name: 'STOCH', score: stochasticScore, label: 'Stochastics', color: stochasticScore > 70 ? 'from-rose-500/30 to-rose-400/80 border-rose-500/40 shadow-rose-500/10' : stochasticScore < 30 ? 'from-emerald-500/30 to-emerald-400/80 border-emerald-500/40 shadow-emerald-500/10' : 'from-blue-500/20 to-blue-400/70 border-blue-500/30 shadow-blue-500/5' },
+                          { name: 'VOL', score: volumeScore, label: 'Volume Score', color: volumeScore > 65 ? 'from-emerald-500/30 to-emerald-400/80 border-emerald-500/40 shadow-emerald-500/10' : 'from-zinc-500/20 to-zinc-400/70 border-zinc-500/30 shadow-zinc-500/5' }
+                        ];
+
+                        let diagnosisTitle = "Balanced Consolidating Flows";
+                        let diagnosisText = "Oscillation metrics are currently neutral. Price is establishing a short-term consolidation shelf before the next major directional expansion.";
+                        let diagnosisColor = "text-zinc-400 border-zinc-500/10 bg-zinc-950/[0.04]";
+                        let diagnosisBorder = "border border-zinc-500/10";
+                        let diagnosisHint = "No strong aligned pattern — consolidation / wait for a cleaner signal.";
+
+                        if (biasVal >= 65 && rsiScore >= 60 && macdScore >= 60) {
+                          diagnosisTitle = "Bullish Synergy Confirmed";
+                          diagnosisText = "Extremely strong momentum confirmation. Positive buy flow is fully aligned with bullish exponential MACD crossover and steady RSI runway expansion.";
+                          diagnosisColor = "text-emerald-400 border-emerald-500/10 bg-emerald-950/[0.04]";
+                          diagnosisBorder = "border border-emerald-500/10";
+                          diagnosisHint = "BIAS, RSI, and MACD all strong — momentum fully aligned bullish.";
+                        } else if (biasVal <= 35 && rsiScore <= 40 && macdScore <= 40) {
+                          diagnosisTitle = "Bearish Rejection Active";
+                          diagnosisText = "Heavy seller dominance detected. Downward liquidation vectors are compounding with negative MACD trends, suggesting near-term hedging or defensive stance.";
+                          diagnosisColor = "text-rose-400 border-rose-500/10 bg-rose-950/[0.04]";
+                          diagnosisBorder = "border border-rose-500/10";
+                          diagnosisHint = "BIAS, RSI, and MACD all weak — seller dominance / defensive lean.";
+                        } else if (volumeScore >= 75 && (rsiScore <= 35 || stochasticScore <= 35)) {
+                          diagnosisTitle = "Institutional Volume Accumulation";
+                          diagnosisText = "Substantial institutional volume flow is pouring in despite compressed momentum indicators. This signals heavy block buying and accumulation at discount levels.";
+                          diagnosisColor = "text-cyan-400 border-cyan-500/10 bg-cyan-950/[0.04]";
+                          diagnosisBorder = "border border-cyan-500/10";
+                          diagnosisHint = "Volume very high while RSI or Stoch is compressed — buying into weakness.";
+                        } else if (volumeScore >= 75 && rsiScore >= 75) {
+                          diagnosisTitle = "Climactic Exhaustion State";
+                          diagnosisText = "High-velocity volume breakout coinciding with overextended RSI momentum. Buy exhaustion may be nearing; proceed with capital preservation caution.";
+                          diagnosisColor = "text-amber-400 border-amber-500/10 bg-amber-950/[0.04]";
+                          diagnosisBorder = "border border-amber-500/10";
+                          diagnosisHint = "High volume + very high RSI — late-stage push; exhaustion risk.";
+                        }
+
+                        return (
+                          <>
                      <div>
-                       <div className="flex items-center justify-between mb-4">
-                         <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">Sentiment Divergence</h3>
-                         <span className="text-[8.5px] font-mono text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded uppercase tracking-wider border border-indigo-500/20">
-                           Oscillator Alignment
-                         </span>
+                       <div className="flex items-start justify-between gap-3 mb-3">
+                         <div>
+                           <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">Sentiment Divergence</h3>
+                           <span className="mt-1 inline-block text-[8.5px] font-mono text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded uppercase tracking-wider border border-indigo-500/20">
+                             Oscillator Alignment
+                           </span>
+                         </div>
+                         <div className={cn("shrink-0 text-right rounded-xl border px-2.5 py-1.5", resultTone)}>
+                           <div className="text-[8px] font-mono uppercase tracking-wider opacity-80">Result Score</div>
+                           <div className="text-2xl font-mono font-black leading-none tabular-nums">
+                             {resultScore}<span className="text-sm font-bold opacity-60"> / 100</span>
+                           </div>
+                           <div className="text-[8px] font-mono font-bold uppercase tracking-wider mt-0.5">{resultLabel}</div>
+                           <div className="text-[7.5px] font-mono opacity-70 mt-0.5">Align {alignmentScore} / 100</div>
+                         </div>
                        </div>
                        
-                       <div className="flex items-end justify-between gap-4 h-28 mb-4 pt-4 px-2">
-                          {(() => {
-                            const rsiScore = technicalBreakdown ? technicalBreakdown.scores.rsiScore : 45;
-                            const macdScore = technicalBreakdown ? technicalBreakdown.scores.macdScore : 65;
-                            const biasVal = technicalBreakdown ? technicalBreakdown.directionalBias : 85;
-                            const stochasticScore = technicalBreakdown ? technicalBreakdown.scores.stochasticScore : 50;
-                            const volumeScore = technicalBreakdown ? technicalBreakdown.scores.volumeScore : 70;
-
-                            const indicatorsList = [
-                              { name: 'RSI', score: rsiScore, label: 'RSI Oscillator', color: rsiScore > 70 ? 'from-rose-500/30 to-rose-400/80 border-rose-500/40 shadow-rose-500/10' : rsiScore < 30 ? 'from-emerald-500/30 to-emerald-400/80 border-emerald-500/40 shadow-emerald-500/10' : 'from-cyan-500/20 to-cyan-400/70 border-cyan-500/30 shadow-cyan-500/5' },
-                              { name: 'MACD', score: macdScore, label: 'MACD Signal', color: macdScore > 50 ? 'from-emerald-500/30 to-emerald-400/80 border-emerald-500/40 shadow-emerald-500/10' : 'from-rose-500/30 to-rose-400/80 border-rose-500/40 shadow-rose-500/10' },
-                              { name: 'BIAS', score: Math.round(biasVal), label: 'Consensus Bias', color: biasVal >= 50 ? 'from-emerald-500/40 to-emerald-400/90 border-emerald-500/50 shadow-emerald-500/15' : 'from-rose-500/40 to-rose-400/90 border-rose-500/50 shadow-rose-500/15' },
-                              { name: 'STOCH', score: stochasticScore, label: 'Stochastics', color: stochasticScore > 70 ? 'from-rose-500/30 to-rose-400/80 border-rose-500/40 shadow-rose-500/10' : stochasticScore < 30 ? 'from-emerald-500/30 to-emerald-400/80 border-emerald-500/40 shadow-emerald-500/10' : 'from-blue-500/20 to-blue-400/70 border-blue-500/30 shadow-blue-500/5' },
-                              { name: 'VOL', score: volumeScore, label: 'Volume Score', color: volumeScore > 65 ? 'from-emerald-500/30 to-emerald-400/80 border-emerald-500/40 shadow-emerald-500/10' : 'from-zinc-500/20 to-zinc-400/70 border-zinc-500/30 shadow-zinc-500/5' }
-                            ];
-
-                            return indicatorsList.map((ind) => (
+                       <div className="flex items-end justify-between gap-4 h-28 mb-4 pt-2 px-2">
+                            {indicatorsList.map((ind) => (
                               <div 
                                 key={ind.name}
                                 className="flex-1 flex flex-col justify-end items-center h-full relative group"
@@ -10797,96 +11182,111 @@ export default function App() {
                                   <span className="font-bold text-white">{ind.label}:</span> {ind.score}%
                                 </span>
                               </div>
-                            ));
-                          })()}
+                            ))}
+                       </div>
+
+                       {/* How to read Sentiment Divergence */}
+                       <div className="mt-1 mb-3 space-y-2 text-[9px] font-mono leading-relaxed text-zinc-500">
+                         <p className="text-zinc-400">
+                           <span className="text-zinc-300 font-bold">Result Score:</span> scored out of <span className="text-zinc-300 font-bold">100</span> (weighted consensus of RSI / MACD / BIAS / STOCH / VOL, dampened when bars disagree). ≥55 / 100 bullish lean, ≤45 / 100 bearish lean, near 50 / 100 = neutral or divergent. Align is also out of 100.
+                         </p>
+                         <p className="text-zinc-400">
+                           Higher bars ≈ stronger bullish / pressure in that channel; lower ≈ weaker or bearish. Use this panel to see if oscillators <span className="text-zinc-300">agree</span> or <span className="text-zinc-300">clash</span>.
+                         </p>
+                         <ul className="grid grid-cols-1 gap-1 text-[8.5px]">
+                           <li><span className="text-cyan-400 font-bold">RSI</span> — momentum stretch (≥70 overbought, ≤30 oversold)</li>
+                           <li><span className="text-emerald-400 font-bold">MACD</span> — trend / crossover bias (&gt;50 bullish, &lt;50 bearish)</li>
+                           <li><span className="text-indigo-400 font-bold">BIAS</span> — consensus blend of trend + oscillators + volume</li>
+                           <li><span className="text-blue-400 font-bold">STOCH</span> — fast overbought/oversold (extremes matter more)</li>
+                           <li><span className="text-zinc-300 font-bold">VOL</span> — relative volume (high = strong participation)</li>
+                         </ul>
+                         <p className="text-[8.5px] border-t border-white/5 pt-2 text-zinc-500">
+                           <span className="text-zinc-300 font-bold">Alignment:</span> bars clustered high or low together = oscillators agree.{' '}
+                           <span className="text-zinc-300 font-bold">Divergence:</span> mixed heights (e.g. VOL high while RSI/STOCH low) = signals out of sync — pause, trap, or early turn. Read BIAS first, then check RSI / MACD / STOCH / VOL for confirmation.
+                         </p>
                        </div>
                      </div>
 
                      {/* Dynamic Indicator Consensus Diagnosis Banner */}
-                     <div className="mt-4 pt-4 border-t border-white/5">
-                       {(() => {
-                         const rsiVal = technicalBreakdown ? technicalBreakdown.scores.rsiScore : 45;
-                         const macdVal = technicalBreakdown ? technicalBreakdown.scores.macdScore : 65;
-                         const biasVal = technicalBreakdown ? technicalBreakdown.directionalBias : 85;
-                         const stochVal = technicalBreakdown ? technicalBreakdown.scores.stochasticScore : 50;
-                         const volVal = technicalBreakdown ? technicalBreakdown.scores.volumeScore : 70;
-
-                         let diagnosisTitle = "Balanced Consolidating Flows";
-                         let diagnosisText = "Oscillation metrics are currently neutral. Price is establishing a short-term consolidation shelf before the next major directional expansion.";
-                         let diagnosisColor = "text-zinc-400 border-zinc-500/10 bg-zinc-950/[0.04]";
-                         let diagnosisBorder = "border border-zinc-500/10";
-
-                         if (biasVal >= 65 && rsiVal >= 60 && macdVal >= 60) {
-                           diagnosisTitle = "Bullish Synergy Confirmed";
-                           diagnosisText = "Extremely strong momentum confirmation. Positive buy flow is fully aligned with bullish exponential MACD crossover and steady RSI runway expansion.";
-                           diagnosisColor = "text-emerald-400 border-emerald-500/10 bg-emerald-950/[0.04]";
-                           diagnosisBorder = "border border-emerald-500/10";
-                         } else if (biasVal <= 35 && rsiVal <= 40 && macdVal <= 40) {
-                           diagnosisTitle = "Bearish Rejection Active";
-                           diagnosisText = "Heavy seller dominance detected. Downward liquidation vectors are compounding with negative MACD trends, suggesting near-term hedging or defensive stance.";
-                           diagnosisColor = "text-rose-400 border-rose-500/10 bg-rose-950/[0.04]";
-                           diagnosisBorder = "border border-rose-500/10";
-                         } else if (volVal >= 75 && (rsiVal <= 35 || stochVal <= 35)) {
-                           diagnosisTitle = "Institutional Volume Accumulation";
-                           diagnosisText = "Substantial institutional volume flow is pouring in despite compressed momentum indicators. This signals heavy block buying and accumulation at discount levels.";
-                           diagnosisColor = "text-cyan-400 border-cyan-500/10 bg-cyan-950/[0.04]";
-                           diagnosisBorder = "border border-cyan-500/10";
-                         } else if (volVal >= 75 && rsiVal >= 75) {
-                           diagnosisTitle = "Climactic Exhaustion State";
-                           diagnosisText = "High-velocity volume breakout coinciding with overextended RSI momentum. Buy exhaustion may be nearing; proceed with capital preservation caution.";
-                           diagnosisColor = "text-amber-400 border-amber-500/10 bg-amber-950/[0.04]";
-                           diagnosisBorder = "border border-amber-500/10";
-                         }
-
-                         return (
-                           <div className={cn("p-3 rounded-xl flex flex-col gap-1", diagnosisColor, diagnosisBorder)}>
-                             <div className="flex items-center gap-1.5 font-mono text-[10px] font-black uppercase tracking-wider">
-                               <Sparkles className="w-3.5 h-3.5" /> {diagnosisTitle}
+                     <div className="mt-2 pt-3 border-t border-white/5 space-y-2">
+                           <div className={cn("p-3 rounded-xl flex flex-col gap-1.5", diagnosisColor, diagnosisBorder)}>
+                             <div className="flex items-center justify-between gap-2">
+                               <div className="flex items-center gap-1.5 font-mono text-[10px] font-black uppercase tracking-wider">
+                                 <Sparkles className="w-3.5 h-3.5" /> {diagnosisTitle}
+                               </div>
+                               <span className="text-[9px] font-mono font-bold tabular-nums opacity-90">
+                                 Score {resultScore} / 100
+                               </span>
                              </div>
                              <p className="text-[9.5px] leading-relaxed opacity-90 font-mono">
                                {diagnosisText}
                              </p>
+                             <p className="text-[8px] leading-relaxed opacity-70 font-mono border-t border-current/10 pt-1.5">
+                               {diagnosisHint}
+                             </p>
                            </div>
-                         );
-                       })()}
                      </div>
+                          </>
+                        );
+                      })()}
                    </div>
                     {/* Card 3: Whale Accumulation Intelligence */}
-                    <div className="bg-[#111113] border border-white/5 rounded-2xl p-4 sm:p-5 flex flex-col justify-between h-full w-full min-w-0">
+                    <div className="bg-[#111113]/90 border border-white/10 rounded-2xl p-4 sm:p-5 flex flex-col h-full w-full min-w-0 glass-panel shadow-[0_0_28px_rgba(167,139,250,0.08)]">
+                      <div className="flex items-center gap-2 mb-3">
+                        <span className="text-base leading-none" aria-hidden>🐋</span>
+                        <h3 className="text-[10px] font-bold uppercase tracking-[0.14em] text-violet-200 font-mono">
+                          Whale Flow · Smart Money
+                        </h3>
+                      </div>
                       {(() => {
                         let scoreVal = whaleAccumulation ? whaleAccumulation.score : (cockpitData?.instAccumScore ?? 75);
                         if (isNaN(scoreVal)) {
                           scoreVal = 75;
                         }
-                        const classVal = whaleAccumulation ? whaleAccumulation.strengthClassification : (cockpitData?.instAccumClassification ?? "Strong Accumulation");
                         const whaleAct = whaleAccumulation ? `${whaleAccumulation.metrics.whaleVolumeVector}x Vol Vector` : (cockpitData?.whaleActivity ?? "High accumulation index (+24.2%)");
                         const blocks = whaleAccumulation ? `${whaleAccumulation.metrics.megaWhaleBlockTrades} Blocks` : (cockpitData?.blockTrades ?? "34 Active Mega-Whale Trades");
                         const darkPool = whaleAccumulation ? whaleAccumulation.metrics.darkPoolActivity : (cockpitData?.darkPoolStatus ?? "Active Dark Pool Position Building");
                         
-                        const flow5 = whaleAccumulation ? `+$${whaleAccumulation.metrics.institutionalFundFlow.toFixed(1)}M` : (cockpitData?.flow5Day ?? "+$124.5M");
-                        const flow20 = whaleAccumulation ? `+$${whaleAccumulation.metrics.netMoneyFlow.toFixed(1)}M` : (cockpitData?.flow20Day ?? "+$482.1M");
-                        const flow60 = whaleAccumulation ? `+$${(whaleAccumulation.metrics.netMoneyFlow * 2.8).toFixed(1)}M` : (cockpitData?.flow60Day ?? "+$1.14B");
+                        const flow5Num = whaleAccumulation?.metrics?.institutionalFundFlow ?? 124.5;
+                        const flow20Num = whaleAccumulation?.metrics?.netMoneyFlow ?? 482.1;
+                        const flow60Num = whaleAccumulation
+                          ? whaleAccumulation.metrics.netMoneyFlow * 2.8
+                          : 1140;
+                        const flow5 = formatSignedMillions(flow5Num);
+                        const flow20 = formatSignedMillions(flow20Num);
+                        const flow60 = formatSignedMillions(flow60Num);
+
+                        const inflowVal = whaleAccumulation?.metrics?.totalFlowIn ?? 184.5;
+                        const outflowVal = Math.abs(whaleAccumulation?.metrics?.totalFlowOut ?? 90.3);
+                        const flowNarrative = buildInstitutionalFlowNarrative({
+                          flow5: flow5Num,
+                          flow20: flow20Num,
+                          flow60: flow60Num,
+                          whaleIn: inflowVal,
+                          whaleOut: outflowVal,
+                        });
 
                         const assignedScore = whaleAccumulation ? whaleAccumulation.assignedScore : (scoreVal >= 75 ? 18 : scoreVal >= 55 ? 8 : 0);
                         const instSentiment = whaleAccumulation ? whaleAccumulation.institutionalSentiment : (scoreVal >= 65 ? "Bullish" : scoreVal >= 45 ? "Neutral" : "Bearish");
                         const buyProb = whaleAccumulation ? whaleAccumulation.buyProbability : 72;
                         const sellProb = whaleAccumulation ? whaleAccumulation.sellProbability : 15;
-                        const explanation = whaleAccumulation ? whaleAccumulation.explanation : "Institutional Whales show persistent accumulation index bias, supported by solid dark pool block flows.";
+                        const explanation = flowNarrative.explanation;
+                        const classVal = flowNarrative.trendStatus;
 
                         return (
                           <>
                             <div>
                               <div className="flex flex-col gap-1.5 mb-4">
-                                <div className="flex items-center justify-between">
+                                <div className="flex items-center justify-between gap-2">
                                   <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5 font-sans">
                                     <Gem className="w-3.5 h-3.5 text-cyan-400" /> Whale Flow Sentry
                                   </h3>
                                   <span className={cn(
-                                    "text-[8.5px] font-mono px-1.5 py-0.5 rounded uppercase tracking-wider border font-black",
-                                    (scoreVal >= 75) 
-                                      ? "text-cyan-400 bg-cyan-500/10 border-cyan-500/20" 
-                                      : (scoreVal >= 55)
-                                      ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
+                                    "text-[8.5px] font-mono px-1.5 py-0.5 rounded uppercase tracking-wider border font-black text-right",
+                                    flowNarrative.trendStatus.includes('Accumulation')
+                                      ? "text-cyan-400 bg-cyan-500/10 border-cyan-500/20"
+                                      : flowNarrative.trendStatus.includes('Distribution')
+                                      ? "text-rose-400 bg-rose-500/10 border-rose-500/20"
                                       : "text-amber-400 bg-amber-500/10 border-amber-500/20"
                                   )}>
                                     {classVal}
@@ -10959,6 +11359,32 @@ export default function App() {
                                 </div>
                               </div>
 
+                              {/* Alignment: Confidence + Trend Status */}
+                              <div className="grid grid-cols-2 gap-1.5 mb-4 font-mono text-[9px]">
+                                <div className="bg-white/[0.02] p-1.5 rounded-lg border border-white/5 flex flex-col items-center">
+                                  <span className="text-[7px] text-gray-400 uppercase font-bold">Confidence</span>
+                                  <span className={cn(
+                                    "font-black uppercase text-[10px] text-center leading-tight",
+                                    flowNarrative.confidence === 'Very High' || flowNarrative.confidence === 'High'
+                                      ? "text-emerald-400"
+                                      : flowNarrative.confidence === 'Moderate'
+                                      ? "text-amber-300"
+                                      : "text-rose-300"
+                                  )}>{flowNarrative.confidence}</span>
+                                </div>
+                                <div className="bg-white/[0.02] p-1.5 rounded-lg border border-white/5 flex flex-col items-center">
+                                  <span className="text-[7px] text-gray-400 uppercase font-bold">Trend Status</span>
+                                  <span className={cn(
+                                    "font-black uppercase text-[9px] text-center leading-tight",
+                                    flowNarrative.trendStatus.includes('Accumulation')
+                                      ? "text-cyan-400"
+                                      : flowNarrative.trendStatus.includes('Distribution')
+                                      ? "text-rose-400"
+                                      : "text-zinc-300"
+                                  )}>{flowNarrative.trendStatus}</span>
+                                </div>
+                              </div>
+
                               {/* Probabilities */}
                               <div className="grid grid-cols-2 gap-1.5 mb-4 font-mono text-[9px]">
                                 <div className="bg-white/[0.02] p-1.5 rounded-lg border border-white/5 flex flex-col items-center">
@@ -10971,10 +11397,20 @@ export default function App() {
                                 </div>
                               </div>
 
-                              {/* Explanation Thesis */}
+                              {/* Multi-timeframe AI explanation */}
                               <div className="mb-4 p-2.5 bg-white/[0.01] rounded-xl border border-white/[0.03]">
-                                <span className="text-[7px] text-gray-500 block uppercase font-bold tracking-wider mb-1">Institutional Thesis Summary</span>
-                                <p className="text-[9.5px] text-gray-400 leading-relaxed font-sans">{explanation}</p>
+                                <div className="flex items-center justify-between gap-2 mb-1.5">
+                                  <span className="text-[7px] text-gray-500 uppercase font-bold tracking-wider">AI Multi-Timeframe Read</span>
+                                  <span className={cn(
+                                    "text-[7px] font-mono font-black uppercase tracking-wider px-1.5 py-0.5 rounded border",
+                                    flowNarrative.aligned
+                                      ? "text-emerald-400 border-emerald-500/25 bg-emerald-500/10"
+                                      : "text-amber-300 border-amber-500/25 bg-amber-500/10"
+                                  )}>
+                                    {flowNarrative.aligned ? 'LT + ST Aligned' : 'LT ≠ ST (Normal)'}
+                                  </span>
+                                </div>
+                                <p className="text-[9.5px] text-gray-300 leading-relaxed font-sans">{explanation}</p>
                               </div>
 
                               {/* High-Fidelity Stats / Insights List */}
@@ -10996,37 +11432,109 @@ export default function App() {
                               </div>
                             </div>
 
-                            {/* Cumulative Capital Flow Badges */}
-                            <div className="mt-4 pt-3 border-t border-white/5">
-                              <div className="flex items-center justify-between text-[7.5px] font-mono text-gray-500 uppercase tracking-widest mb-1.5">
-                                <span>Institutional Net Capital Flow</span>
-                                <span className="text-cyan-400 font-bold">Live Stream</span>
-                              </div>
-                              <div className="grid grid-cols-3 gap-1.5 font-mono text-[9px] text-center">
-                                <div className="bg-black/30 p-1 rounded border border-white/5">
-                                  <span className="text-[7px] text-gray-500 block">5D Flow</span>
-                                  <span className={cn("font-bold text-[8.5px]", flow5.startsWith("+") ? "text-emerald-400" : "text-rose-400")}>{flow5}</span>
+                            {/* LONG-TERM: Historical Institutional Capital Flow */}
+                            <div className="mt-4 pt-4 border-t border-white/5 flex-1 flex flex-col min-h-[200px]">
+                              <div className="flex flex-col gap-1 mb-1.5">
+                                <div className="flex items-start justify-between gap-2">
+                                  <span className="text-[9px] font-mono text-zinc-300 font-bold uppercase tracking-widest flex items-center gap-1.5">
+                                    Historical Institutional Capital Flow
+                                    <span
+                                      className="inline-flex text-gray-500 hover:text-cyan-400 cursor-help"
+                                      title="Shows cumulative institutional buying/selling over the past 5, 20 and 60 trading days."
+                                    >
+                                      <HelpCircle className="w-3 h-3 shrink-0" />
+                                    </span>
+                                  </span>
+                                  <span className="text-[8px] font-mono text-cyan-400/90 font-bold uppercase tracking-wider whitespace-nowrap">
+                                    Long-Term Trend
+                                  </span>
                                 </div>
-                                <div className="bg-black/30 p-1 rounded border border-white/5">
-                                  <span className="text-[7px] text-gray-500 block">20D Flow</span>
-                                  <span className={cn("font-bold text-[8.5px]", flow20.startsWith("+") ? "text-emerald-400" : "text-rose-400")}>{flow20}</span>
-                                </div>
-                                <div className="bg-black/30 p-1 rounded border border-white/5">
-                                  <span className="text-[7px] text-gray-500 block">60D Flow</span>
-                                  <span className={cn("font-bold text-[8.5px]", flow60.startsWith("+") ? "text-emerald-400" : "text-rose-400")}>{flow60}</span>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Total Flow In / Flow Out Distribution */}
-                            <div className="mt-4 pt-3 border-t border-white/5 space-y-2">
-                              <div className="flex items-center justify-between text-[7.5px] font-mono text-gray-500 uppercase tracking-widest">
-                                <span>Whale Order Volume Balance</span>
-                                <span className="text-purple-400 font-bold font-sans">In vs Out</span>
+                                <p className="text-[8px] text-gray-500 font-sans leading-snug">
+                                  Cumulative net institutional money flow over the past <span className="text-gray-400">5 / 20 / 60</span> trading days.
+                                </p>
                               </div>
                               {(() => {
-                                const inflowVal = whaleAccumulation?.metrics?.totalFlowIn ?? 184.5;
-                                const outflowVal = whaleAccumulation?.metrics?.totalFlowOut ?? 90.3;
+                                const flows = [
+                                  { label: '5-Day', short: '5D', value: flow5, num: flow5Num },
+                                  { label: '20-Day', short: '20D', value: flow20, num: flow20Num },
+                                  { label: '60-Day', short: '60D', value: flow60, num: flow60Num },
+                                ];
+                                const maxAbs = Math.max(...flows.map(f => Math.abs(f.num)), 0.01);
+                                return (
+                                  <div className="grid grid-cols-3 gap-2.5 flex-1 min-h-[160px]">
+                                    {flows.map((f) => {
+                                      const positive = f.num >= 0;
+                                      const barPct = Math.max(10, Math.round((Math.abs(f.num) / maxAbs) * 100));
+                                      return (
+                                        <div
+                                          key={f.short}
+                                          className="bg-black/35 rounded-xl border border-white/5 p-2.5 flex flex-col min-w-0 overflow-hidden h-full"
+                                        >
+                                          <div className="shrink-0 mb-2 min-w-0 text-center">
+                                            <span className="text-[8px] text-gray-500 block uppercase font-bold tracking-wider mb-1">
+                                              {f.short}
+                                            </span>
+                                            <span
+                                              className={cn(
+                                                "font-mono font-black text-[11px] sm:text-xs leading-tight tabular-nums block truncate",
+                                                positive ? "text-emerald-400" : "text-rose-400"
+                                              )}
+                                              title={f.value}
+                                            >
+                                              {f.value}
+                                            </span>
+                                          </div>
+
+                                          <div className="flex-1 min-h-[88px] w-full flex items-end justify-center bg-white/[0.03] rounded-lg border border-white/[0.04] px-2 pt-2 pb-1.5 overflow-hidden">
+                                            <motion.div
+                                              initial={{ height: 0 }}
+                                              animate={{ height: `${barPct}%` }}
+                                              transition={{ duration: 0.7, ease: "easeOut" }}
+                                              className={cn(
+                                                "w-full max-w-[36px] rounded-t-md",
+                                                positive
+                                                  ? "bg-gradient-to-t from-emerald-700 via-emerald-500 to-emerald-300"
+                                                  : "bg-gradient-to-t from-rose-700 via-rose-500 to-rose-300"
+                                              )}
+                                            />
+                                          </div>
+
+                                          <span className={cn(
+                                            "mt-2 shrink-0 text-[7.5px] font-mono font-bold uppercase tracking-wider text-center",
+                                            positive ? "text-emerald-500/80" : "text-rose-500/80"
+                                          )}>
+                                            {positive ? 'Net Inflow' : 'Net Outflow'}
+                                          </span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                );
+                              })()}
+                            </div>
+
+                            {/* SHORT-TERM: Today's Whale Order Flow */}
+                            <div className="mt-4 pt-3 border-t border-white/5 space-y-2">
+                              <div className="flex flex-col gap-1">
+                                <div className="flex items-start justify-between gap-2">
+                                  <span className="text-[9px] font-mono text-zinc-300 font-bold uppercase tracking-widest flex items-center gap-1.5">
+                                    Today's Whale Order Flow
+                                    <span
+                                      className="inline-flex text-gray-500 hover:text-purple-400 cursor-help"
+                                      title="Shows today's large-order buying and selling activity only. This reflects current market sentiment and may differ from the longer-term trend."
+                                    >
+                                      <HelpCircle className="w-3 h-3 shrink-0" />
+                                    </span>
+                                  </span>
+                                  <span className="text-[8px] font-mono text-purple-400 font-bold uppercase tracking-wider whitespace-nowrap">
+                                    Short-Term Activity
+                                  </span>
+                                </div>
+                                <p className="text-[8px] text-gray-500 font-sans leading-snug">
+                                  Today's (current session) large-order buying vs selling only — not the multi-day cumulative trend.
+                                </p>
+                              </div>
+                              {(() => {
                                 const total = inflowVal + outflowVal;
                                 const inPercent = total > 0 ? (inflowVal / total) * 100 : 50;
                                 const outPercent = total > 0 ? (outflowVal / total) * 100 : 50;
@@ -11034,15 +11542,14 @@ export default function App() {
                                   <div className="space-y-1.5 font-mono text-[9px]">
                                     <div className="flex justify-between items-center">
                                       <div className="flex flex-col">
-                                        <span className="text-[7px] text-gray-500 uppercase">Total Flow In (Buy)</span>
+                                        <span className="text-[7px] text-gray-500 uppercase">Whale In (Buy)</span>
                                         <span className="text-emerald-400 font-black text-[9.5px]">+{inflowVal.toFixed(1)}M</span>
                                       </div>
                                       <div className="flex flex-col items-end">
-                                        <span className="text-[7px] text-gray-500 uppercase">Total Flow Out (Sell)</span>
-                                        <span className="text-rose-400 font-black text-[9.5px]">-{Math.abs(outflowVal).toFixed(1)}M</span>
+                                        <span className="text-[7px] text-gray-500 uppercase">Whale Out (Sell)</span>
+                                        <span className="text-rose-400 font-black text-[9.5px]">-{outflowVal.toFixed(1)}M</span>
                                       </div>
                                     </div>
-                                    {/* Visual Dual Progress Bar */}
                                     <div className="h-1.5 rounded-full bg-white/5 overflow-hidden flex">
                                       <div 
                                         style={{ width: `${inPercent}%` }} 
@@ -11054,8 +11561,8 @@ export default function App() {
                                       />
                                     </div>
                                     <div className="flex justify-between text-[7px] text-gray-500 font-black uppercase tracking-wider px-0.5">
-                                      <span className="text-emerald-400/80">{inPercent.toFixed(0)}% Inflow</span>
-                                      <span className="text-rose-400/80">{outPercent.toFixed(0)}% Outflow</span>
+                                      <span className="text-emerald-400/80">{inPercent.toFixed(0)}% In</span>
+                                      <span className="text-rose-400/80">{outPercent.toFixed(0)}% Out</span>
                                     </div>
                                   </div>
                                 );
@@ -11067,343 +11574,59 @@ export default function App() {
                     </div>
                 </div>
 
-                {/* Real-time Valuation Sentry & Historical P/E Corridor */}
                 {data && (
-                  <div className="bg-[#111113] border border-white/5 rounded-2xl p-4 sm:p-5 mt-6">
-                    <div className="flex flex-col lg:flex-row gap-8 items-stretch">
-                      {/* Metric & Info Panel */}
-                      <div className="w-full lg:w-1/3 flex flex-col justify-between">
-                        <div>
-                          <div className="flex items-center gap-2 mb-1">
-                            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5 font-sans">
-                              <Coins className="w-3.5 h-3.5 text-indigo-400" /> Valuation Sentry Intel
-                            </h3>
-                            <span className="text-[9px] font-mono font-black py-0.5 px-2 rounded-full bg-indigo-500/15 text-indigo-400 uppercase tracking-wider font-sans">
-                              {(() => {
-                                const { pe } = getStockPE(data.ticker, data.quote);
-                                if (pe < 15) return 'VALUE DISCOUNT';
-                                if (pe <= 35) return 'BALANCED CORE';
-                                return 'GROWTH PREMIUM';
-                              })()}
-                            </span>
-                          </div>
-                          <p className="text-[9px] font-mono text-gray-600 uppercase tracking-tighter mb-4">Real-Time Valuation Multiples & 6-Month Baseline Trend</p>
-                          
-                          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-2 gap-4 mt-4">
-                            {/* PE Card */}
-                            <div className="bg-black/30 border border-white/5 rounded-xl p-4 flex flex-col justify-center">
-                              <span className="text-[10px] text-gray-500 uppercase font-bold tracking-widest block mb-1">P/E Ratio (Trailing)</span>
-                              <div className="flex items-baseline gap-1.5">
-                                <span className="text-2xl font-mono text-white tracking-tight font-bold">
-                                  {(() => {
-                                    const { pe } = getStockPE(data.ticker, data.quote);
-                                    return pe.toFixed(2);
-                                  })()}
-                                </span>
-                                <span className="text-[10px] text-indigo-400/80 font-mono font-black uppercase">× earnings</span>
-                              </div>
-                            </div>
-
-                            {/* EPS Card */}
-                            <div className="bg-black/30 border border-white/5 rounded-xl p-4 flex flex-col justify-center">
-                              <span className="text-[10px] text-gray-500 uppercase font-bold tracking-widest block mb-1">EPS (Implied)</span>
-                              <div className="flex items-baseline gap-1.5">
-                                <span className="text-2xl font-mono text-white tracking-tight font-bold">
-                                  {(() => {
-                                    const { eps } = getStockPE(data.ticker, data.quote);
-                                    return eps.toFixed(2);
-                                  })()}
-                                </span>
-                                <span className="text-[10px] text-gray-400 font-mono font-black uppercase">{data.quote?.currency || 'USD'}</span>
-                              </div>
-                            </div>
-
-                            {/* Earnings Yield Card */}
-                            <div className="bg-black/30 border border-white/5 rounded-xl p-4 flex flex-col justify-center">
-                              <span className="text-[10px] text-gray-500 uppercase font-bold tracking-widest block mb-1">Earnings Yield</span>
-                              <div className="flex items-baseline gap-1.5">
-                                <span className="text-2xl font-mono text-emerald-400 tracking-tight font-bold">
-                                  {(() => {
-                                    const { pe } = getStockPE(data.ticker, data.quote);
-                                    return pe > 0 ? `${((1 / pe) * 100).toFixed(2)}%` : '---';
-                                  })()}
-                                </span>
-                                <span className="text-[10px] text-emerald-500/80 font-mono font-black uppercase">E/P Yield</span>
-                              </div>
-                            </div>
-
-                            {/* Share Yield (Interest Rate) Card */}
-                            <div className="bg-black/30 border border-white/5 rounded-xl p-4 flex flex-col justify-center">
-                              <span className="text-[10px] text-gray-500 uppercase font-bold tracking-widest block mb-1">Share Yield (Interest Rate)</span>
-                              <div className="flex items-baseline gap-1.5">
-                                <span className="text-2xl font-mono text-cyan-400 tracking-tight font-bold">
-                                  {technicalBreakdown?.advancedIndicators?.dividendStrength?.yieldPct ? `${technicalBreakdown.advancedIndicators.dividendStrength.yieldPct.toFixed(2)}%` : '1.34%'}
-                                </span>
-                                <span className="text-[10px] text-cyan-500/80 font-mono font-black uppercase">Dividend</span>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="mt-6 border-t border-white/5 pt-4">
-                          <p className="text-[10.5px] font-mono text-gray-500 leading-relaxed">
-                            {(() => {
-                              const { pe, isGenerated } = getStockPE(data.ticker, data.quote);
-                              
-                              let rationaleText = '';
-                              if (pe < 15) {
-                                rationaleText = `At a trailing PE multiple of ${pe.toFixed(1)}x, the security is trading at a significant asset premium discount. Earnings yield of ${((1/pe)*100).toFixed(1)}% indicates heavy fundamental support boundaries.`;
-                              } else if (pe <= 35) {
-                                rationaleText = `Trading within a balanced multiple corridor of ${pe.toFixed(1)}x, reflecting a steady Growth-at-Reasonable-Price (GARP) alignment, highly synchronized with historical moving averages.`;
-                              } else {
-                                rationaleText = `A high multiple of ${pe.toFixed(1)}x reflects substantial premium growth optimism and pricing structures of AI-moat expansion, expecting accelerating underlying earnings velocities.`;
-                              }
-                              
-                              if (isGenerated) {
-                                return `*Implied Valuation Sentry: ${rationaleText} Estimates computed against localized price-action data.`;
-                              }
-                              return `Market Valuation Corridor: ${rationaleText} Sourced dynamically from core exchange data pipelines.`;
-                            })()}
-                          </p>
-                        </div>
-
-                        {/* Interactive Share Interest Income Calculator */}
-                        <div className="mt-4 border-t border-white/5 pt-4">
-                          <button
-                            type="button"
-                            onClick={() => setExpandInterestCalculator(!expandInterestCalculator)}
-                            className="w-full flex items-center justify-between text-[11px] font-mono text-zinc-400 hover:text-white transition-colors cursor-pointer select-none"
-                          >
-                            <span className="flex items-center gap-1.5 font-bold uppercase tracking-wider">
-                              <Sparkles className="w-3.5 h-3.5 text-cyan-400" /> Share Interest & Income Calculator
-                            </span>
-                            <span className="text-[10px] bg-white/5 px-2 py-0.5 rounded border border-white/5 uppercase">
-                              {expandInterestCalculator ? 'Hide Panel' : 'Calculate Income'}
-                            </span>
-                          </button>
-
-                          <AnimatePresence initial={false}>
-                            {expandInterestCalculator && (
-                              <motion.div
-                                initial={{ opacity: 0, height: 0 }}
-                                animate={{ opacity: 1, height: "auto" }}
-                                exit={{ opacity: 0, height: 0 }}
-                                transition={{ duration: 0.2 }}
-                                className="overflow-hidden mt-4 space-y-4"
-                              >
-                                <div className="space-y-2">
-                                  <div className="flex items-center justify-between">
-                                    <label className="text-[10px] font-mono font-bold text-gray-400 uppercase tracking-wider block">
-                                      Simulated Principal
-                                    </label>
-                                    <div className="flex items-center gap-1.5">
-                                      <span className="text-[10px] text-gray-500 font-mono">$</span>
-                                      <input
-                                        type="number"
-                                        value={simulatedPrincipal}
-                                        onChange={(e) => {
-                                          const val = Math.max(0, parseInt(e.target.value) || 0);
-                                          setSimulatedPrincipal(val);
-                                        }}
-                                        className="w-24 bg-black/40 border border-white/10 rounded px-1.5 py-0.5 text-[10px] font-mono text-white text-right focus:border-cyan-500/50 outline-none"
-                                      />
-                                    </div>
-                                  </div>
-                                  
-                                  <input
-                                    type="range"
-                                    min="1000"
-                                    max="250000"
-                                    step="1000"
-                                    value={simulatedPrincipal}
-                                    onChange={(e) => setSimulatedPrincipal(parseInt(e.target.value))}
-                                    className="w-full accent-cyan-500 cursor-pointer h-1 bg-white/10 rounded-lg appearance-none"
-                                  />
-                                  <div className="flex justify-between text-[8px] text-gray-600 font-mono uppercase">
-                                    <span>$1k</span>
-                                    <span>$50k</span>
-                                    <span>$100k</span>
-                                    <span>$150k</span>
-                                    <span>$200k</span>
-                                    <span>$250k</span>
-                                  </div>
-                                </div>
-
-                                {(() => {
-                                  const yieldPct = technicalBreakdown?.advancedIndicators?.dividendStrength?.yieldPct || 1.34;
-                                  const bankYieldPct = 2.15; // 2.15% average bank interest rate
-                                  
-                                  const annualShareDividend = (simulatedPrincipal * yieldPct) / 100;
-                                  const monthlyShareDividend = annualShareDividend / 12;
-                                  
-                                  const annualBankInterest = (simulatedPrincipal * bankYieldPct) / 100;
-                                  const monthlyBankInterest = annualBankInterest / 12;
-                                  
-                                  const diffPercent = yieldPct - bankYieldPct;
-                                  const diffIncome = annualShareDividend - annualBankInterest;
-
-                                  return (
-                                    <div className="space-y-3">
-                                      <div className="grid grid-cols-2 gap-3">
-                                        {/* Share Dividend Card */}
-                                        <div className="p-3 rounded-lg border border-cyan-500/20 bg-cyan-950/[0.04] space-y-1.5">
-                                          <div className="flex items-center justify-between">
-                                            <span className="text-[8.5px] font-mono font-bold text-cyan-400 uppercase tracking-wider">Share Interest</span>
-                                            <span className="text-[8.5px] font-mono font-extrabold text-cyan-300 bg-cyan-500/10 px-1 rounded">
-                                              {yieldPct.toFixed(2)}%
-                                            </span>
-                                          </div>
-                                          <div className="space-y-0.5">
-                                            <div className="text-sm font-mono text-white font-bold">
-                                              ${annualShareDividend.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                              <span className="text-[8.5px] text-gray-500 font-normal ml-1">/yr</span>
-                                            </div>
-                                            <div className="text-[9px] font-mono text-zinc-400">
-                                              ${monthlyShareDividend.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/mo
-                                            </div>
-                                          </div>
-                                        </div>
-
-                                        {/* Bank Interest Card */}
-                                        <div className="p-3 rounded-lg border border-white/5 bg-white/[0.01] space-y-1.5">
-                                          <div className="flex items-center justify-between">
-                                            <span className="text-[8.5px] font-mono font-bold text-gray-500 uppercase tracking-wider">Bank Interest</span>
-                                            <span className="text-[8.5px] font-mono font-extrabold text-gray-400 bg-white/5 px-1 rounded">
-                                              {bankYieldPct.toFixed(2)}%
-                                            </span>
-                                          </div>
-                                          <div className="space-y-0.5">
-                                            <div className="text-sm font-mono text-gray-300 font-bold">
-                                              ${annualBankInterest.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                              <span className="text-[8.5px] text-gray-600 font-normal ml-1">/yr</span>
-                                            </div>
-                                            <div className="text-[9px] font-mono text-gray-500">
-                                              ${monthlyBankInterest.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/mo
-                                            </div>
-                                          </div>
-                                        </div>
-                                      </div>
-
-                                      {/* Outperformance Summary Banner */}
-                                      <div className="p-2.5 border border-emerald-500/10 bg-emerald-950/[0.04] rounded-lg text-[9.5px] font-mono leading-relaxed">
-                                        {diffIncome > 0 ? (
-                                          <p className="text-emerald-400">
-                                            ✨ <span className="font-bold uppercase">Yield Outperformance:</span> Holding <span className="font-bold">{data.ticker}</span> shares generates an interest premium of <span className="font-bold">+{diffPercent.toFixed(2)}%</span> over standard bank rates, yielding an additional <span className="font-bold">${diffIncome.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span> in simulated annual interest income.
-                                          </p>
-                                        ) : (
-                                          <p className="text-amber-400">
-                                            ⚠️ <span className="font-bold uppercase">Yield Deficit:</span> holding <span className="font-bold">{data.ticker}</span> shares has an interest rate of <span className="font-bold">{yieldPct.toFixed(2)}%</span>, which trails high-yield savings interest rates by <span className="font-bold">{Math.abs(diffPercent).toFixed(2)}%</span>. Investors prioritising cash-flow safety may prefer baseline bank vehicles.
-                                          </p>
-                                        )}
-                                      </div>
-                                    </div>
-                                  );
-                                })()}
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
-                        </div>
-                      </div>
-
-                      {/* Chart Panel */}
-                      <div className="flex-1 bg-black/40 border border-white/5 rounded-2xl p-6 flex flex-col justify-between min-h-[300px]">
-                        <div className="mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                          <div>
-                            <h4 className="text-xs font-bold text-gray-300 font-sans tracking-wide uppercase flex items-center gap-1">
-                              <ChartIcon className="w-3.5 h-3.5 text-indigo-400" /> Historical Valuation Corridor (PE Multiples Trend)
-                            </h4>
-                            <p className="text-[9px] font-mono text-gray-600 uppercase tracking-tighter mt-1 font-sans">Correlation of daily closing valuation metrics over the active period</p>
-                          </div>
-                          <div className="flex items-center gap-2 self-end sm:self-auto font-mono text-[9.5px]">
-                            <span className="flex items-center gap-1.5"><span className="w-2 h-0.5 bg-indigo-500" /> PE Multiple</span>
-                            <span className="flex items-center gap-1.5 text-gray-600">|</span>
-                            <span className="flex items-center gap-1.5"><span className="w-2 h-0.5 bg-gray-600" /> Market Price</span>
-                          </div>
-                        </div>
-
-                        <div className="h-56 w-full relative">
-                          {historicalPEData.length > 0 ? (
-                            <ResponsiveContainer width="100%" height="100%">
-                              <AreaChart data={historicalPEData}>
-                                <defs>
-                                  <linearGradient id="colorValuationPe" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.15}/>
-                                    <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0}/>
-                                  </linearGradient>
-                                </defs>
-                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.02)" />
-                                <XAxis 
-                                  dataKey="date" 
-                                  axisLine={false}
-                                  tickLine={false}
-                                  tick={{ fill: '#4b5563', fontSize: 9, fontFamily: 'monospace' }}
-                                  minTickGap={40}
-                                />
-                                <YAxis 
-                                  yAxisId="left"
-                                  domain={['auto', 'auto']}
-                                  axisLine={false}
-                                  tickLine={false}
-                                  tick={{ fill: '#8b5cf6', fontSize: 9, fontFamily: 'monospace' }}
-                                />
-                                <YAxis 
-                                  yAxisId="right"
-                                  orientation="right"
-                                  domain={['auto', 'auto']}
-                                  axisLine={false}
-                                  tickLine={false}
-                                  tick={{ fill: '#4b5563', fontSize: 9, fontFamily: 'monospace' }}
-                                />
-                                <Tooltip
-                                  contentStyle={{ backgroundColor: '#09090b', borderColor: 'rgba(255,255,255,0.08)', borderRadius: '12px' }}
-                                  labelStyle={{ color: '#9ca3af', fontFamily: 'monospace', fontSize: '10px', textTransform: 'uppercase' }}
-                                  itemStyle={{ fontFamily: 'monospace', fontSize: '11px', padding: '1px 0' }}
-                                  formatter={(value: any, name: any) => {
-                                    if (name === 'pe') return [ `${value}x`, 'P/E Multiple' ];
-                                    if (name === 'price') return [ `${data.quote?.currency === 'HKD' ? 'HK$' : '$'}${value}`, 'Market Price' ];
-                                    return [ value, name ];
-                                  }}
-                                />
-                                <Area 
-                                  yAxisId="left"
-                                  type="monotone" 
-                                  dataKey="pe" 
-                                  stroke="#8b5cf6" 
-                                  strokeWidth={2}
-                                  fillOpacity={1}
-                                  fill="url(#colorValuationPe)" 
-                                />
-                                <Line 
-                                  yAxisId="right"
-                                  type="monotone" 
-                                  dataKey="price" 
-                                  stroke="#4b5563" 
-                                  strokeWidth={1.5}
-                                  strokeDasharray="4 4"
-                                  dot={false}
-                                />
-                              </AreaChart>
-                            </ResponsiveContainer>
-                          ) : (
-                            <div className="absolute inset-0 flex items-center justify-center border border-white/5 bg-black/10 rounded-xl opacity-40">
-                              <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-gray-400">Awaiting historical price inputs correlation...</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
+                  <div className="mt-6 space-y-4">
+                    <HistoricalValuationDashboard
+                      data={historicalPEData}
+                      ticker={data.ticker}
+                      stockName={data.quote?.shortName || data.quote?.longName || ''}
+                      currentPe={getStockPE(data.ticker, data.quote).pe}
+                      currentPrice={
+                        Number(
+                          data.quote?.regularMarketPrice ||
+                            data.quote?.price ||
+                            (historicalPEData.length
+                              ? historicalPEData[historicalPEData.length - 1].price
+                              : 0)
+                        ) || 0
+                      }
+                      currency={data.quote?.currency || 'USD'}
+                      eps={getStockPE(data.ticker, data.quote).eps}
+                    />
                   </div>
                 )}
 
 </motion.div>
 
-              {/* Right Column: Prediction & AI */}
-              <motion.div 
+              {/* Right column: AI Stock Score, Advisory, PDF, alerts (continuous stack) */}
+              <motion.div
                 key={data.ticker + 'side'}
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
                 className="col-span-12 lg:col-span-5 space-y-6"
               >
+                <AiStockScoreCard
+                  scoreData={aiStockScore}
+                  ticker={data.ticker}
+                  stockName={data.quote?.shortName || data.quote?.longName || ''}
+                  currentPrice={
+                    Number(
+                      data.quote?.regularMarketPrice ||
+                        data.quote?.price ||
+                        projectionMeta.lastClose ||
+                        parseFloat(String(financials?.currentPrice || '').replace(/[$,]/g, '')) ||
+                        0
+                    ) || null
+                  }
+                  currency={data.quote?.currency}
+                  isLoading={predicting || (loading && !aiStockScore)}
+                  projectionTrend={projectionMeta.trend}
+                  projectionHorizonDays={Math.min(10, Math.max(3, projectionHorizon))}
+                  shortTermConfidence={showProjection ? projectionMeta.shortConf : null}
+                  mediumTermConfidence={confidence}
+                  variant="compact"
+                />
+
                 {/* AI Advisory System Card */}
                 <div className="bg-[#111113] border border-white/5 rounded-2xl p-4 sm:p-5 flex flex-col space-y-6">
                   <div className="flex justify-between items-start pb-4 border-b border-white/5">
@@ -11742,10 +11965,11 @@ export default function App() {
                               </div>
 
                               {/* Support & Resistance Weight */}
-                              <div className="bg-black/30 p-2 rounded-lg border border-white/[0.02] space-y-1">
-                                <div className="flex justify-between text-[8px] font-mono">
-                                  <span className="text-zinc-400">Support & Resistance</span>
+                              <div className="bg-black/30 p-2 rounded-lg border border-white/[0.02] space-y-1 min-w-0 overflow-hidden">
+                                <div className="flex justify-between gap-2 text-[8px] font-mono min-w-0">
+                                  <span className="text-zinc-400 min-w-0 break-words leading-tight">Support & Resistance</span>
                                   <span className={cn(
+                                    'shrink-0',
                                     weightSr === 1.0 ? "text-zinc-500" :
                                     weightSr > 1.0 ? "text-emerald-400 font-bold" : "text-amber-500"
                                   )}>{weightSr.toFixed(1)}x</span>
@@ -11762,10 +11986,11 @@ export default function App() {
                               </div>
 
                               {/* Volume Confirmation Weight */}
-                              <div className="bg-black/30 p-2 rounded-lg border border-white/[0.02] space-y-1">
-                                <div className="flex justify-between text-[8px] font-mono">
-                                  <span className="text-zinc-400">Volume Confirmation</span>
+                              <div className="bg-black/30 p-2 rounded-lg border border-white/[0.02] space-y-1 min-w-0 overflow-hidden">
+                                <div className="flex justify-between gap-2 text-[8px] font-mono min-w-0">
+                                  <span className="text-zinc-400 min-w-0 break-words leading-tight">Volume Confirmation</span>
                                   <span className={cn(
+                                    'shrink-0',
                                     weightVol === 1.0 ? "text-zinc-500" :
                                     weightVol > 1.0 ? "text-emerald-400 font-bold" : "text-amber-500"
                                   )}>{weightVol.toFixed(1)}x</span>
@@ -11782,10 +12007,11 @@ export default function App() {
                               </div>
 
                               {/* Institutional Flow Weight */}
-                              <div className="bg-black/30 p-2 rounded-lg border border-white/[0.02] space-y-1">
-                                <div className="flex justify-between text-[8px] font-mono">
-                                  <span className="text-zinc-400">Institutional Flow</span>
+                              <div className="bg-black/30 p-2 rounded-lg border border-white/[0.02] space-y-1 min-w-0 overflow-hidden">
+                                <div className="flex justify-between gap-2 text-[8px] font-mono min-w-0">
+                                  <span className="text-zinc-400 min-w-0 break-words leading-tight">Institutional Flow</span>
                                   <span className={cn(
+                                    'shrink-0',
                                     weightInst === 1.0 ? "text-zinc-500" :
                                     weightInst > 1.0 ? "text-emerald-400 font-bold" : "text-amber-500"
                                   )}>{weightInst.toFixed(1)}x</span>
@@ -12071,13 +12297,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* AI Stock Score Card (Weighted Scoring System) */}
-                <AiStockScoreCard 
-                  scoreData={aiStockScore} 
-                  ticker={data.ticker} 
-                  isLoading={loading} 
-                />
-
                 {/* PDF Report Export Button */}
                 <div className="bg-[#111113] border border-white/5 rounded-2xl p-6 flex flex-col items-center gap-3">
                   <div className="flex items-center gap-2 w-full pb-3 border-b border-white/5">
@@ -12109,104 +12328,94 @@ export default function App() {
                 </div>
 
                 {/* Real-time Alert Command Center */}
-                <div className="bg-[#111113] border border-white/5 rounded-2xl p-4 sm:p-5 flex flex-col space-y-6">
-                  <div className="flex justify-between items-start pb-4 border-b border-white/5">
-                    <div>
-                      <h3 className="text-xs font-bold text-gray-400 uppercase tracking-[0.15em] flex items-center gap-2">
-                        <Bell className="w-3.5 h-3.5 text-cyan-400 animate-pulse" /> Alert Command Center
-                      </h3>
-                      <p className="text-[9px] font-mono text-gray-600 uppercase tracking-tighter mt-1">
-                        Active Price & Indicator Sentinels
-                      </p>
-                    </div>
+                <div className="bg-[#111113] border border-white/5 rounded-xl p-2.5 sm:p-3 flex flex-col space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-[9px] font-bold text-cyan-400 uppercase tracking-wider flex items-center gap-1">
+                      <Bell className="w-3 h-3" /> Alerts
+                    </h3>
                     {alerts.filter(a => !a.isTriggered).length > 0 && (
-                      <span className="px-1.5 py-0.5 rounded text-[8px] font-mono bg-cyan-500/15 text-cyan-400 border border-cyan-500/20 font-bold uppercase tracking-wider animate-pulse">
-                        {alerts.filter(a => !a.isTriggered).length} Active
+                      <span className="px-1.5 py-0.5 rounded text-[8px] font-mono bg-cyan-500/15 text-cyan-400 border border-cyan-500/20 font-bold uppercase">
+                        {alerts.filter(a => !a.isTriggered).length} active
                       </span>
                     )}
                   </div>
 
-
-                  
-
-
-                  {/* Deploy New Price Sentinel Form */}
-                  <form onSubmit={handleAddAlert} className="bg-black/45 border border-white/5 rounded-xl p-4 space-y-3 shadow-inner">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-mono font-bold text-cyan-400 uppercase tracking-widest flex items-center gap-1.5">
-                        <Plus className="w-3 h-3 text-cyan-400" /> Deploy Price Sentinel
+                  <form onSubmit={handleAddAlert} className="bg-black/45 border border-white/5 rounded-lg p-2 space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[8px] font-mono font-bold text-cyan-400 uppercase tracking-wider flex items-center gap-1">
+                        <Plus className="w-2.5 h-2.5" /> New price alert
                       </span>
                       {data?.quote?.regularMarketPrice && (
-                        <span className="text-[8.5px] font-mono text-gray-400">
-                          Current {data.ticker}: <strong className="text-white">${data.quote.regularMarketPrice.toFixed(2)}</strong>
+                        <span className="text-[8px] font-mono text-gray-500">
+                          {data.ticker} <strong className="text-white">${data.quote.regularMarketPrice.toFixed(2)}</strong>
                         </span>
                       )}
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3 text-[9px] font-mono">
+                    <div className="grid grid-cols-2 gap-1.5 text-[8px] font-mono">
                       <div>
-                        <label className="text-gray-500 block mb-1 font-bold uppercase tracking-tight">Ticker Symbol</label>
+                        <label className="text-gray-500 block mb-0.5 font-bold uppercase">Ticker</label>
                         <input
                           type="text"
                           value={alertTicker}
                           onChange={(e) => setAlertTicker(e.target.value.toUpperCase())}
-                          placeholder="e.g. NVDA"
-                          className="w-full bg-black border border-white/10 rounded px-2.5 py-1.5 text-white uppercase focus:outline-none focus:border-cyan-500 text-xs font-semibold"
+                          placeholder="NVDA"
+                          className="w-full bg-black border border-white/10 rounded px-2 py-1 text-white uppercase focus:outline-none focus:border-cyan-500 text-[10px] font-semibold"
                           required
                         />
                       </div>
                       <div>
-                        <label className="text-gray-500 block mb-1 font-bold uppercase tracking-tight">Target Value ($)</label>
+                        <label className="text-gray-500 block mb-0.5 font-bold uppercase">Target $</label>
                         <input
                           type="number"
                           step="0.01"
                           min="0.01"
                           value={alertTargetPrice}
                           onChange={(e) => setAlertTargetPrice(e.target.value)}
-                          placeholder="Threshold Price"
-                          className="w-full bg-black border border-white/10 rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-cyan-500 text-xs font-semibold"
+                          placeholder="Price"
+                          className="w-full bg-black border border-white/10 rounded px-2 py-1 text-white focus:outline-none focus:border-cyan-500 text-[10px] font-semibold"
                           required
                         />
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3 text-[9px] font-mono">
+                    <div className="grid grid-cols-2 gap-1.5 text-[8px] font-mono">
                       <div>
-                        <label className="text-gray-500 block mb-1 font-bold uppercase tracking-tight">Crossing Filter</label>
+                        <label className="text-gray-500 block mb-0.5 font-bold uppercase">Condition</label>
                         <select
                           value={alertCondition}
                           onChange={(e) => setAlertCondition(e.target.value as 'ABOVE' | 'BELOW')}
-                          className="w-full bg-black border border-white/10 rounded px-2 py-1.5 text-gray-300 focus:outline-none focus:border-cyan-500 cursor-pointer text-[10px]"
+                          className="w-full bg-black border border-white/10 rounded px-1.5 py-1 text-gray-300 focus:outline-none focus:border-cyan-500 cursor-pointer text-[9px]"
                         >
-                          <option value="ABOVE">CROSSES ABOVE</option>
-                          <option value="BELOW">CROSSES BELOW</option>
+                          <option value="ABOVE">ABOVE</option>
+                          <option value="BELOW">BELOW</option>
                         </select>
                       </div>
                       <div>
-                        <label className="text-gray-500 block mb-1 font-bold uppercase tracking-tight">Sound Cue Selection</label>
-                        <div className="flex items-center gap-1.5">
+                        <label className="text-gray-500 block mb-0.5 font-bold uppercase">Sound</label>
+                        <div className="flex items-center gap-1">
                           <select
                             value={priceAlertSound}
                             onChange={(e) => {
                               setPriceAlertSound(e.target.value);
                               playAlertSound(e.target.value);
                             }}
-                            className="bg-black border border-white/10 rounded px-2 py-1.5 text-cyan-400 focus:outline-none focus:border-cyan-500 cursor-pointer text-[10px] flex-1 max-w-[calc(100%-24px)]"
+                            className="bg-black border border-white/10 rounded px-1.5 py-1 text-cyan-400 focus:outline-none focus:border-cyan-500 cursor-pointer text-[9px] flex-1 min-w-0"
                           >
-                            <option value="classic">🎵 Classic Chime</option>
-                            <option value="double_beep">🎵 Rapid Beeps</option>
-                            <option value="scifi">🎵 Sci-fi Sweep</option>
-                            <option value="warning">🎵 Warning Alarm</option>
-                            <option value="arpeggio">🎵 Arpeggio Run</option>
-                            <option value="cosmic">🎵 Cosmic Pulse</option>
+                            <option value="classic">Classic</option>
+                            <option value="double_beep">Beeps</option>
+                            <option value="scifi">Sci-fi</option>
+                            <option value="warning">Warning</option>
+                            <option value="arpeggio">Arpeggio</option>
+                            <option value="cosmic">Cosmic</option>
                           </select>
                           <button
                             type="button"
                             onClick={() => playAlertSound(priceAlertSound)}
-                            className="p-1 px-1.5 rounded bg-white/5 hover:bg-cyan-400/20 border border-white/10 hover:border-cyan-500/30 text-cyan-400 focus:outline-none transition-all cursor-pointer flex-shrink-0"
-                            title="Preview Sound Cue"
+                            className="p-1 rounded bg-white/5 hover:bg-cyan-400/20 border border-white/10 text-cyan-400 cursor-pointer shrink-0"
+                            title="Preview"
                           >
-                            <Volume2 className="w-3.5 h-3.5" />
+                            <Volume2 className="w-3 h-3" />
                           </button>
                         </div>
                       </div>
@@ -12214,22 +12423,19 @@ export default function App() {
 
                     <button
                       type="submit"
-                      className="w-full py-2 bg-cyan-500 hover:bg-cyan-400 text-black font-mono font-black text-[9px] tracking-widest uppercase rounded shadow-[0_0_12px_rgba(6,182,212,0.15)] hover:shadow-[0_0_16px_rgba(6,182,212,0.3)] transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                      className="w-full py-1.5 bg-cyan-500 hover:bg-cyan-400 text-black font-mono font-bold text-[8px] tracking-wider uppercase rounded cursor-pointer flex items-center justify-center gap-1"
                     >
-                      <Bell className="w-3 h-3 text-black font-black" /> DEPLOY PRICE SENTINEL
+                      <Bell className="w-3 h-3" /> Deploy
                     </button>
                   </form>
 
-                  {/* Active/Past toggle */}
-                  <div className="flex bg-[#0A0A0C] border border-white/5 rounded-lg p-1 text-[9px] font-mono uppercase font-extrabold grid grid-cols-2">
+                  <div className="grid grid-cols-2 gap-0.5 bg-[#0A0A0C] border border-white/5 rounded-md p-0.5 text-[8px] font-mono uppercase font-bold">
                     <button
                       type="button"
                       onClick={() => setAlertTab('ACTIVE')}
                       className={cn(
-                        "py-1 rounded-md transition-all cursor-pointer text-center",
-                        alertTab === 'ACTIVE'
-                          ? "bg-white/[0.05] text-cyan-300 shadow"
-                          : "text-gray-500 hover:text-gray-300"
+                        "py-0.5 rounded transition-all cursor-pointer text-center",
+                        alertTab === 'ACTIVE' ? "bg-white/[0.05] text-cyan-300" : "text-gray-500 hover:text-gray-300"
                       )}
                     >
                       Active ({alerts.filter(a => !a.isTriggered).length})
@@ -12238,23 +12444,21 @@ export default function App() {
                       type="button"
                       onClick={() => setAlertTab('HISTORY')}
                       className={cn(
-                        "py-1 rounded-md transition-all cursor-pointer text-center",
-                        alertTab === 'HISTORY'
-                          ? "bg-white/[0.05] text-cyan-300 shadow"
-                          : "text-gray-500 hover:text-gray-300"
+                        "py-0.5 rounded transition-all cursor-pointer text-center",
+                        alertTab === 'HISTORY' ? "bg-white/[0.05] text-cyan-300" : "text-gray-500 hover:text-gray-300"
                       )}
                     >
-                      Triggered ({alerts.filter(a => a.isTriggered).length})
+                      History ({alerts.filter(a => a.isTriggered).length})
                     </button>
                   </div>
 
-                  <div className="space-y-2.5 max-h-[300px] overflow-y-auto pr-1.5 scrollbar-hide">
+                  <div className="space-y-1.5 max-h-[220px] overflow-y-auto pr-1 scrollbar-hide">
                     {(() => {
                       const list = alerts.filter(a => alertTab === 'ACTIVE' ? !a.isTriggered : a.isTriggered);
                       if (list.length === 0) {
                         return (
-                          <div className="text-center py-8 text-gray-600 font-mono text-[10px] uppercase tracking-wider italic">
-                            No sentinel triggers in this registry
+                          <div className="text-center py-4 text-gray-600 font-mono text-[9px] uppercase tracking-wider">
+                            No alerts
                           </div>
                         );
                       }
@@ -12262,91 +12466,70 @@ export default function App() {
                         <div
                           key={alert.id}
                           className={cn(
-                            "group border rounded-xl p-3 flex flex-col gap-1 transition-all",
+                            "group border rounded-lg px-2 py-1.5 flex flex-col gap-0.5 transition-all",
                             alert.isTriggered
                               ? "bg-[#0c0c0e]/40 border-white/5"
                               : alert.alertType === 'RSI_DIVERGENCE'
-                                ? "bg-amber-950/[0.04] border-amber-500/15 hover:border-amber-500/30 shadow-[0_0_12px_rgba(245,158,11,0.03)]"
+                                ? "bg-amber-950/[0.04] border-amber-500/15"
                                 : alert.alertType === 'RSI'
-                                  ? "bg-cyan-950/[0.04] border-cyan-500/10 hover:border-cyan-500/20"
-                                  : "bg-emerald-950/[0.04] border-emerald-500/10 hover:border-emerald-500/20"
+                                  ? "bg-cyan-950/[0.04] border-cyan-500/10"
+                                  : "bg-emerald-950/[0.04] border-emerald-500/10"
                           )}
                         >
-                          <div className="flex justify-between items-center text-[10px] font-mono">
-                            <div className="flex items-center gap-1.5 font-extrabold pb-0.5">
-                              <span className="text-white uppercase font-black">{alert.ticker}</span>
+                          <div className="flex justify-between items-center text-[9px] font-mono">
+                            <div className="flex items-center gap-1 font-bold min-w-0">
+                              <span className="text-white uppercase">{alert.ticker}</span>
                               <span className={cn(
-                                "px-1.5 py-0.5 rounded text-[8px] font-mono font-black uppercase tracking-wider leading-none",
+                                "px-1 py-0.5 rounded text-[7px] font-mono font-bold uppercase leading-none shrink-0",
                                 alert.alertType === 'RSI_DIVERGENCE'
                                   ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
                                   : alert.alertType === 'RSI'
                                     ? "bg-cyan-500/10 text-cyan-400"
                                     : "bg-emerald-500/10 text-emerald-400"
                               )}>
-                                {alert.alertType === 'RSI_DIVERGENCE' ? `RSI ${alert.divergenceType} DIV (3B)` : (alert.alertType === 'RSI' ? (alert.rsiTargetType === 'TREND' ? 'RSI TREND' : 'RSI VALUE') : 'PRICE')}
+                                {alert.alertType === 'RSI_DIVERGENCE' ? 'DIV' : (alert.alertType === 'RSI' ? 'RSI' : 'PRICE')}
                               </span>
                             </div>
                             <button
                               type="button"
                               onClick={() => handleDeleteAlert(alert.id)}
-                              className="text-gray-500 hover:text-rose-400 transition-colors p-1 cursor-pointer"
-                              title="Delete Sentinel Alert"
+                              className="text-gray-500 hover:text-rose-400 p-0.5 cursor-pointer"
+                              title="Delete"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <Trash2 className="w-3 h-3" />
                             </button>
                           </div>
 
-                          <div className="flex justify-between items-baseline font-mono text-[9px] text-gray-500 mt-1">
-                            <div>
-                              <span>Condition:</span>{' '}
-                              <span className={cn(
-                                "font-bold",
-                                alert.condition === 'ABOVE' ? "text-amber-500" : "text-indigo-400"
-                              )}>
+                          <div className="flex justify-between items-baseline font-mono text-[8px] text-gray-500">
+                            <span>
+                              <span className={cn("font-bold", alert.condition === 'ABOVE' ? "text-amber-500" : "text-indigo-400")}>
                                 {alert.condition}
                               </span>
-                            </div>
-                            <div>
-                              <span>Target:</span>{' '}
-                              <span className="text-white font-extrabold">
-                                {alert.alertType === 'RSI_DIVERGENCE' ? `${alert.consecutiveBars} Bars` : (alert.alertType === 'RSI' ? alert.targetPrice.toFixed(0) : `$${alert.targetPrice.toFixed(2)}`)}
+                              {' '}
+                              <span className="text-white font-bold">
+                                {alert.alertType === 'RSI_DIVERGENCE' ? `${alert.consecutiveBars}B` : (alert.alertType === 'RSI' ? alert.targetPrice.toFixed(0) : `$${alert.targetPrice.toFixed(2)}`)}
                               </span>
-                            </div>
-                          </div>
-
-                          {/* Selected alert sound effect preview button */}
-                          <div className="flex justify-between items-center text-[8.5px] font-mono border-t border-white/[0.04] pt-2 mt-1.5 text-gray-400">
-                            <span className="flex items-center gap-1">
-                              <Volume2 className="w-2.5 h-2.5 text-cyan-400/80 animate-pulse" />
-                              <span>Cue: <strong className="text-cyan-400 uppercase text-[8px]">{alert.soundEffect || 'classic'}</strong></span>
                             </span>
                             <button
                               type="button"
                               onClick={() => playAlertSound(alert.soundEffect)}
-                              className="px-1.5 py-0.5 rounded bg-white/5 hover:bg-cyan-500/10 hover:text-cyan-400 text-gray-400 font-extrabold text-[7.5px] transition-colors uppercase cursor-pointer"
-                              title="Preview Tone"
+                              className="text-cyan-400/80 hover:text-cyan-300 cursor-pointer flex items-center gap-0.5"
+                              title="Play"
                             >
-                              Play Sound
+                              <Volume2 className="w-2.5 h-2.5" />
+                              <span className="uppercase">{alert.soundEffect || 'classic'}</span>
                             </button>
                           </div>
 
                           {alert.isTriggered && (
-                            <div className="border-t border-white/[0.03] pt-1.5 mt-1.5 flex flex-col gap-0.5 text-[8.5px] font-mono text-gray-500">
-                              <div className="flex justify-between">
-                                <span>{alert.alertType === 'RSI_DIVERGENCE' ? 'Pattern:' : (alert.alertType === 'RSI' ? (alert.rsiTargetType === 'TREND' ? 'Triggered Trend:' : 'Triggered RSI:') : 'Triggered Price:')}</span>
-                                <span className={cn(
-                                  "font-bold",
-                                  alert.alertType === 'RSI_DIVERGENCE' ? "text-amber-400" : (alert.alertType === 'RSI' ? "text-cyan-400" : "text-emerald-400")
-                                )}>
-                                  {alert.alertType === 'RSI_DIVERGENCE' ? `${alert.divergenceType} Divergence` : (alert.alertType === 'RSI' ? alert.triggeredPrice?.toFixed(1) : `$${alert.triggeredPrice?.toFixed(2)}`)}
-                                </span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span>Timestamp:</span>
-                                <span className="text-gray-400">
-                                  {alert.triggeredAt ? format(new Date(alert.triggeredAt), 'MM/dd HH:mm:ss') : 'N/A'}
-                                </span>
-                              </div>
+                            <div className="border-t border-white/[0.03] pt-1 flex justify-between text-[8px] font-mono text-gray-500">
+                              <span className={cn(
+                                "font-bold",
+                                alert.alertType === 'RSI_DIVERGENCE' ? "text-amber-400" : (alert.alertType === 'RSI' ? "text-cyan-400" : "text-emerald-400")
+                              )}>
+                                {alert.alertType === 'RSI_DIVERGENCE' ? `${alert.divergenceType}` : (alert.alertType === 'RSI' ? alert.triggeredPrice?.toFixed(1) : `$${alert.triggeredPrice?.toFixed(2)}`)}
+                              </span>
+                              <span>{alert.triggeredAt ? format(new Date(alert.triggeredAt), 'MM/dd HH:mm') : 'N/A'}</span>
                             </div>
                           )}
                         </div>
@@ -12358,9 +12541,9 @@ export default function App() {
                     <button
                       type="button"
                       onClick={handleClearTriggeredAlerts}
-                      className="w-full py-1.5 rounded bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 text-rose-400 hover:text-rose-300 text-[10px] font-mono uppercase font-extrabold transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                      className="w-full py-1 rounded bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 text-rose-400 text-[8px] font-mono uppercase font-bold cursor-pointer flex items-center justify-center gap-1"
                     >
-                      <Trash2 className="w-3 h-3" /> Clear Trigger History
+                      <Trash2 className="w-3 h-3" /> Clear history
                     </button>
                   )}
                 </div>
@@ -12370,35 +12553,123 @@ export default function App() {
 
 
             </motion.div>
+          ) : error ? (
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0 }}
+              className="mt-20 max-w-lg mx-auto bg-rose-500/5 border border-rose-500/20 p-8 rounded-2xl text-center"
+            >
+              <Info className="w-12 h-12 text-rose-500 mx-auto mb-4" />
+              <h3 className="text-xl font-bold mb-2">Interface Failure</h3>
+              <p className="text-gray-400 font-mono text-sm mb-6">{error}</p>
+              <button 
+                onClick={() => {
+                  const tf = getActiveTimeframeParams();
+                  void fetchStock(ticker || 'NVDA', tf.range, tf.interval, true, true, true);
+                }}
+                className="bg-rose-500 hover:bg-rose-600 text-white font-mono font-bold text-xs uppercase px-5 py-2.5 rounded-lg flex items-center justify-center gap-1.5 transition-all mx-auto shadow-[0_0_15px_rgba(244,63,94,0.15)] cursor-pointer"
+              >
+                Re-Initialize Sequence
+              </button>
+            </motion.div>
+          ) : loading ? (
+            <div className="col-span-12 py-6 sm:py-10 space-y-6">
+              <div className="flex items-end justify-between gap-4 flex-wrap">
+                <div>
+                  <p className="text-[10px] font-mono text-emerald-500/70 uppercase tracking-[0.25em]">
+                    Loading telemetry
+                  </p>
+                  <h2 className="mt-2 text-3xl sm:text-4xl font-mono font-bold tracking-tight text-white">
+                    {(ticker || '—').toUpperCase()}
+                  </h2>
+                  <p className="mt-2 text-xs font-mono text-gray-500 uppercase tracking-wider">
+                    Establishing data uplink · synchronizing exchange nodes
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 rounded-full border border-emerald-500/20 bg-emerald-500/5 px-3 py-1.5">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-400" />
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-emerald-400">
+                    Syncing
+                  </span>
+                </div>
+              </div>
+            </div>
           ) : (
-            <div className="flex flex-col items-center justify-center py-40 gap-8">
-               <div className="relative">
-                 <Loader2 className="w-16 h-16 animate-spin text-emerald-500" />
-                 <div className="absolute inset-0 bg-emerald-500/20 blur-xl animate-pulse rounded-full" />
-               </div>
-               <div className="text-center space-y-2">
-                 <p className="font-mono text-sm tracking-[0.5em] uppercase text-emerald-500/50">Establishing Data Uplink</p>
-                 <p className="text-[10px] font-mono text-gray-600 uppercase">Synchronizing with Global Exchange Nodes...</p>
-               </div>
+            <div className="col-span-12 py-16 sm:py-24 flex flex-col items-center justify-center text-center px-6">
+              <Search className="w-10 h-10 text-emerald-500/50 mb-4" />
+              <h2 className="text-xl font-sans font-bold text-white mb-2">Search a ticker to begin</h2>
+              <p className="text-sm text-gray-500 max-w-md">
+                No API calls until you press <span className="text-emerald-400 font-mono">Enter</span> in the search bar.
+              </p>
+              <p className="mt-3 text-[11px] text-gray-600 font-mono uppercase tracking-wider">
+                Timeframe changes apply on next search
+              </p>
             </div>
           )}
         </AnimatePresence>
       </main>
 
       {/* Footer */}
-      <footer className="mt-12 py-8 px-10 border-t border-white/5 flex flex-col md:flex-row items-center justify-between text-[9px] font-mono text-gray-600 uppercase tracking-[0.3em] gap-4 relative z-10">
-        <div className="flex gap-8">
-          <span>Session: {sessionId}</span>
-          <span className="hidden md:inline">Latency: <span className="text-emerald-500/50">12.4ms</span></span>
-          <span className="hidden md:inline">Region: <span className="text-blue-500/50">US_EAST_01</span></span>
+      <footer className="mt-12 py-8 px-6 sm:px-10 border-t border-white/5 flex flex-col md:flex-row items-center justify-between text-[11px] font-sans text-gray-500 gap-4 relative z-10 mb-16 lg:mb-0">
+        <div className="flex flex-wrap justify-center gap-x-6 gap-y-2">
+          <span className="font-mono text-gray-400">Session: {sessionId}</span>
+          <span className="hidden md:inline">Latency: <span className="text-emerald-400/80 font-mono">12.4ms</span></span>
+          <span className="hidden md:inline">Region: <span className="text-blue-400/80 font-mono">US_EAST_01</span></span>
         </div>
-        <div className="text-center md:text-right">
-          Design Concept: Immersive Quantum // Powered by Google Gemini
+        <div className="flex flex-col md:items-end gap-2 text-center md:text-right">
+          <span className="text-gray-500">Quantum Node · Powered by Google Gemini</span>
+          <LegalLinks className="justify-center md:justify-end" />
         </div>
       </footer>
 
+      {/* Mobile bottom navigation */}
+      <nav className="lg:hidden fixed bottom-0 inset-x-0 z-50 border-t border-white/10 bg-[#0a0a0c]/95 backdrop-blur-xl pb-[env(safe-area-inset-bottom)]">
+        <div className="grid grid-cols-3 gap-1 px-2 py-2">
+          <button
+            type="button"
+            onClick={() => setActivePage('DASHBOARD')}
+            className={cn(
+              "flex flex-col items-center gap-1 rounded-xl px-2 py-2.5 text-[11px] font-sans font-semibold transition-all cursor-pointer",
+              activePage === 'DASHBOARD'
+                ? "bg-emerald-500 text-black shadow-[0_0_18px_rgba(16,185,129,0.35)]"
+                : "text-gray-400 hover:text-white hover:bg-white/[0.04]"
+            )}
+          >
+            <Activity className="w-4 h-4" />
+            Dashboard
+          </button>
+          <button
+            type="button"
+            onClick={() => setActivePage('NEWS_CENTER')}
+            className={cn(
+              "flex flex-col items-center gap-1 rounded-xl px-2 py-2.5 text-[11px] font-sans font-semibold transition-all cursor-pointer",
+              activePage === 'NEWS_CENTER'
+                ? "bg-blue-500 text-white shadow-[0_0_18px_rgba(59,130,246,0.3)]"
+                : "text-gray-400 hover:text-white hover:bg-white/[0.04]"
+            )}
+          >
+            <Newspaper className="w-4 h-4" />
+            News
+          </button>
+          <button
+            type="button"
+            onClick={() => setActivePage('SELF_LEARNING')}
+            className={cn(
+              "flex flex-col items-center gap-1 rounded-xl px-2 py-2.5 text-[11px] font-sans font-semibold transition-all cursor-pointer",
+              activePage === 'SELF_LEARNING'
+                ? "bg-indigo-500 text-white shadow-[0_0_18px_rgba(99,102,241,0.3)]"
+                : "text-gray-400 hover:text-white hover:bg-white/[0.04]"
+            )}
+          >
+            <Brain className="w-4 h-4" />
+            Learning
+          </button>
+        </div>
+      </nav>
+
       {/* Floating Price Alerts Toasts Viewport */}
-      <div className="fixed bottom-6 right-6 z-[999] flex flex-col gap-3 max-w-sm w-full pointer-events-none">
+      <div className="fixed bottom-24 lg:bottom-6 right-4 sm:right-6 z-[999] flex flex-col gap-3 max-w-sm w-full pointer-events-none">
         <AnimatePresence>
           {toasts.map(toast => (
             <motion.div

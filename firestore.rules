@@ -1,0 +1,49 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwnerEmail(userEmail) {
+      return isSignedIn()
+        && request.auth.token.email != null
+        && request.auth.token.email.lower() == userEmail.lower();
+    }
+
+    function isOwnerUid(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function lockedSubscriptionFieldsUnchanged() {
+      return !request.resource.data.diff(resource.data).affectedKeys()
+        .hasAny([
+          'subscriptionStatus',
+          'subscriptionPlan',
+          'subscriptionEndsAt',
+          'stripeCustomerId',
+          'stripeSubscriptionId'
+        ]);
+    }
+
+    match /users/{userId} {
+      // Email-keyed or uid-keyed user docs
+      allow read: if isOwnerEmail(userId) || isOwnerUid(userId)
+        || (isSignedIn()
+            && resource.data.email is string
+            && resource.data.email.lower() == request.auth.token.email.lower());
+
+      allow create: if isOwnerEmail(userId) || isOwnerUid(userId);
+
+      // Clients may sync app data, but not billing fields (Stripe webhook / admin only)
+      allow update: if (isOwnerEmail(userId) || isOwnerUid(userId)
+          || (resource.data.email is string
+              && resource.data.email.lower() == request.auth.token.email.lower()))
+        && lockedSubscriptionFieldsUnchanged();
+
+      match /{document=**} {
+        allow read, write: if isOwnerEmail(userId) || isOwnerUid(userId);
+      }
+    }
+  }
+}
