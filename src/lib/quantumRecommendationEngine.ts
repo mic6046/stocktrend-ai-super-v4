@@ -1,6 +1,7 @@
 /**
- * QuantumNode Master AI Recommendation Engine
- * One internally consistent recommendation for the selected Investment Horizon.
+ * QuantumNode Consensus AI — Institutional Investment Decision Engine
+ * Mission: most consistent, transparent, explainable, professionally defensible recommendation.
+ * NOT maximize BUY. Never display contradictory conclusions on the same horizon.
  */
 
 import type { HorizonKey } from '../components/analysis/analysisTheme';
@@ -9,22 +10,89 @@ import { HORIZON_OPTIONS } from '../components/analysis/analysisTheme';
 export type RecommendationLabel =
   | 'STRONG BUY'
   | 'BUY'
-  | 'MODERATE BUY'
   | 'HOLD'
+  | 'REDUCE'
   | 'SELL'
-  | 'STRONG SELL';
+  | 'AVOID NEW POSITION';
+
+export type SuggestedAction =
+  | 'Buy'
+  | 'Accumulate'
+  | 'Hold'
+  | 'Take Partial Profit'
+  | 'Reduce'
+  | 'Exit';
+
+export type SignalClass =
+  | 'BUY SIGNAL'
+  | 'ACCUMULATION'
+  | 'ADD POSITION'
+  | 'HOLD'
+  | 'TAKE PARTIAL PROFIT'
+  | 'REDUCE POSITION'
+  | 'EXIT POSITION'
+  | 'CAUTION SIGNAL';
 
 export type RiskLevel = 'Very Low' | 'Low' | 'Medium' | 'High' | 'Very High';
+export type ChartStance = 'bull' | 'bear' | 'neutral';
+export type CommitteeSeat = 'Technical' | 'Fundamental' | 'Whale' | 'Risk' | 'Momentum' | 'Sentiment';
 
 export type EngineZoneBand = { lo: number; hi: number };
+
+export type FactorItem = {
+  label: string;
+  weight: number;
+  polarity: 'bull' | 'bear' | 'neutral';
+};
+
+export type ExplainedSignal = {
+  title: string;
+  signalClass: SignalClass;
+  confidence: number;
+  reasons: string[];
+  suggestedAction: string;
+  expectedProbability: number;
+  polarity: 'bull' | 'bear' | 'neutral';
+  trigger: string;
+  risk: string;
+  maxDownside: string;
+  potentialUpside: string;
+  holdingPeriod: string;
+};
+
+export type CommitteeMember = {
+  seat: CommitteeSeat;
+  score: number;
+  recommendation: RecommendationLabel;
+  reason: string;
+  weight: number;
+};
+
+export type ComponentScores = {
+  technical: number;
+  fundamental: number;
+  whale: number;
+  news: number;
+  risk: number;
+  momentum: number;
+  overall: number;
+};
+
+/** Consensus weights (Step 3) */
+export const COMMITTEE_WEIGHTS: Record<CommitteeSeat, number> = {
+  Technical: 0.2,
+  Fundamental: 0.25,
+  Whale: 0.2,
+  Risk: 0.15,
+  Momentum: 0.1,
+  Sentiment: 0.1,
+};
 
 export type QuantumEngineInput = {
   horizon: HorizonKey;
   currentPrice: number;
-  /** Base AI score 0–100 if available */
   baseScore?: number | null;
   baseConfidence?: number | null;
-  /** Scenario targets from projection / cockpit */
   baseTarget?: number | null;
   bullTarget?: number | null;
   bearTarget?: number | null;
@@ -43,6 +111,12 @@ export type QuantumEngineInput = {
     trend?: string | null;
     volatility?: number | null;
     adx?: number | null;
+    emaBias?: 'bull' | 'bear' | 'neutral' | null;
+    smaBias?: 'bull' | 'bear' | 'neutral' | null;
+    bollingerBias?: 'oversold' | 'overbought' | 'mid' | null;
+    atrPct?: number | null;
+    volumeBias?: 'high' | 'low' | 'normal' | null;
+    obvBias?: 'bull' | 'bear' | 'neutral' | null;
   };
   levels?: { s1?: number; s2?: number; r1?: number; r2?: number } | null;
   whaleScore?: number | null;
@@ -50,6 +124,9 @@ export type QuantumEngineInput = {
   sentimentScore?: number | null;
   momentumScore?: number | null;
   newsBias?: 'bull' | 'bear' | 'neutral' | null;
+  smartMoneyScore?: number | null;
+  fundFlowBias?: 'inflow' | 'outflow' | 'neutral' | null;
+  sectorBias?: 'leader' | 'laggard' | 'neutral' | null;
   stopLossHint?: number | null;
   ticker?: string;
 };
@@ -76,14 +153,43 @@ export type QuantumEngineOutput = {
   takeProfitZone: EngineZoneBand;
   stopLoss: number;
   takeProfit: number;
-  /** Compatibility aliases for existing UI */
   bullCase: number;
   bearCase: number;
   zoneScale: number;
   keyReasons: string[];
   summaryLead: string;
   explanation: string;
+  chartStance: ChartStance;
+  finalVerdict: RecommendationLabel;
   validationStatus: '✓ Internal Consistency Passed' | '✗ Recalculate';
+
+  componentScores: ComponentScores;
+  bullishFactors: FactorItem[];
+  bearishFactors: FactorItem[];
+  neutralFactors: FactorItem[];
+  whyWins: string;
+  rejectedOpposite: string;
+  suggestedAction: SuggestedAction;
+  invalidationLevel: string;
+  nextReviewTrigger: string;
+  supportHoldProbability: number;
+  resistanceBreakProbability: number;
+  explainedSignals: ExplainedSignal[];
+  decisionWeightNote: string;
+
+  /** Consensus AI extensions */
+  committee: CommitteeMember[];
+  bullishScore: number;
+  bearishScore: number;
+  supportFailureProbability: number;
+  resistanceRejectionProbability: number;
+  entryZone: EngineZoneBand;
+  supportLevels: number[];
+  resistanceLevels: number[];
+  target1: number;
+  target2: number;
+  target3: number;
+  consensusNote: string;
 };
 
 const HORIZON_DAYS: Record<HorizonKey, number> = {
@@ -124,27 +230,58 @@ function mapApiRow(
   return { price, ret, vol };
 }
 
-/** STEP 4 — recommendation strictly from expected return table */
 export function recommendationFromReturn(expectedReturn: number): RecommendationLabel {
   if (expectedReturn >= 20) return 'STRONG BUY';
   if (expectedReturn >= 10) return 'BUY';
-  if (expectedReturn >= 3) return 'MODERATE BUY';
+  if (expectedReturn >= 3) return 'BUY';
   if (expectedReturn > -3) return 'HOLD';
-  if (expectedReturn > -10) return 'SELL';
-  return 'STRONG SELL';
+  if (expectedReturn > -10) return 'REDUCE';
+  if (expectedReturn > -20) return 'SELL';
+  return 'AVOID NEW POSITION';
 }
 
-/** STEP 5 — AI score aligned with recommendation attractiveness */
+export function chartStanceFromRecommendation(rec: RecommendationLabel): ChartStance {
+  if (rec === 'STRONG BUY' || rec === 'BUY') return 'bull';
+  if (rec === 'SELL' || rec === 'AVOID NEW POSITION' || rec === 'REDUCE') return 'bear';
+  return 'neutral';
+}
+
+export function isBullishRecommendation(rec: RecommendationLabel): boolean {
+  return chartStanceFromRecommendation(rec) === 'bull';
+}
+
+export function isBearishRecommendation(rec: RecommendationLabel): boolean {
+  return chartStanceFromRecommendation(rec) === 'bear';
+}
+
+function recFromScore(score: number): RecommendationLabel {
+  if (score >= 85) return 'STRONG BUY';
+  if (score >= 68) return 'BUY';
+  if (score >= 48) return 'HOLD';
+  if (score >= 38) return 'REDUCE';
+  if (score >= 28) return 'SELL';
+  return 'AVOID NEW POSITION';
+}
+
+/** Risk AI: high risk score → defensive recommendation */
+function recFromRiskScore(riskScore: number): RecommendationLabel {
+  if (riskScore >= 80) return 'AVOID NEW POSITION';
+  if (riskScore >= 68) return 'SELL';
+  if (riskScore >= 55) return 'REDUCE';
+  if (riskScore >= 40) return 'HOLD';
+  if (riskScore >= 25) return 'BUY';
+  return 'STRONG BUY';
+}
+
 function scoreFromRecommendation(rec: RecommendationLabel, expectedReturn: number, bias: number): number {
   const baseByRec: Record<RecommendationLabel, number> = {
     'STRONG BUY': 92,
     BUY: 78,
-    'MODERATE BUY': 68,
     HOLD: 55,
-    SELL: 42,
-    'STRONG SELL': 28,
+    REDUCE: 45,
+    SELL: 38,
+    'AVOID NEW POSITION': 25,
   };
-  // Fine-tune within band using return magnitude
   const fine = clamp(expectedReturn * 0.35, -8, 8);
   return Math.round(clamp(baseByRec[rec] + fine + bias * 0.15, 1, 99));
 }
@@ -165,182 +302,570 @@ function liquidityLabel(score: number, whale: number | null): string {
   return 'Tight';
 }
 
-type SignalBag = {
-  direction: number; // -1..+1
-  agreement: number; // 0..1
-  reasonsBull: string[];
-  reasonsBear: string[];
+function holdingPeriodFor(horizon: HorizonKey): string {
+  return (
+    {
+      '1W': '3–7 trading days',
+      '1M': '2–6 weeks',
+      '3M': '1–3 months',
+      '1Y': '3–12 months',
+    } as const
+  )[horizon];
+}
+
+type EvidenceBag = {
+  bullish: FactorItem[];
+  bearish: FactorItem[];
+  neutral: FactorItem[];
+  netWeight: number;
+  bullWeight: number;
+  bearWeight: number;
+  scores: ComponentScores;
+  supportHoldProbability: number;
+  supportFailureProbability: number;
+  resistanceBreakProbability: number;
+  resistanceRejectionProbability: number;
+  explainedSignals: ExplainedSignal[];
+  buyGatePass: boolean;
+  sellGatePass: boolean;
+  buyGateFails: string[];
+  sellGateFails: string[];
+  committee: CommitteeMember[];
+  bullishScore: number;
+  bearishScore: number;
 };
 
-function collectSignals(input: QuantumEngineInput): SignalBag {
-  const reasonsBull: string[] = [];
-  const reasonsBear: string[] = [];
-  const votes: number[] = [];
+function pushSignal(
+  list: ExplainedSignal[],
+  partial: Omit<ExplainedSignal, 'holdingPeriod'> & { holdingPeriod?: string },
+  horizon: HorizonKey
+) {
+  list.push({
+    ...partial,
+    holdingPeriod: partial.holdingPeriod ?? holdingPeriodFor(horizon),
+  });
+}
 
+/**
+ * STEP 1–2: Collect evidence and form AI Investment Committee votes.
+ * Conflicting signals are retained — never forced to agree.
+ */
+function collectEvidence(input: QuantumEngineInput): EvidenceBag {
+  const bullish: FactorItem[] = [];
+  const bearish: FactorItem[] = [];
+  const neutral: FactorItem[] = [];
+  const explainedSignals: ExplainedSignal[] = [];
+  const horizon = input.horizon;
+
+  const px = input.currentPrice;
   const rsi = input.technical?.rsi;
+  const vol = input.technical?.volatility ?? 22;
+  const s1 = input.levels?.s1;
+  const s2 = input.levels?.s2;
+  const r1 = input.levels?.r1;
+  const r2 = input.levels?.r2;
+
+  let technical = 55;
+  let fundamental = input.baseScore != null ? clamp(input.baseScore, 1, 99) : 60;
+  let whale = input.whaleScore != null ? clamp(input.whaleScore, 1, 99) : 50;
+  let news = input.sentimentScore != null ? clamp(input.sentimentScore, 1, 99) : 55;
+  let momentum = input.momentumScore != null ? clamp(input.momentumScore, 1, 99) : 55;
+  let risk = 50;
+
+  // --- Technical stack ---
   if (rsi != null && Number.isFinite(rsi)) {
     if (rsi < 35) {
-      votes.push(0.7);
-      reasonsBull.push('RSI recovering from oversold');
+      technical = Math.max(technical, 72);
+      bullish.push({ label: 'RSI recovering from oversold', weight: 0.55, polarity: 'bull' });
+      pushSignal(
+        explainedSignals,
+        {
+          title: 'BUY SIGNAL · RSI Oversold Recovery',
+          signalClass: 'BUY SIGNAL',
+          confidence: Math.round(clamp(70 + (35 - rsi), 60, 92)),
+          reasons: [`RSI at ${Math.round(rsi)}`, 'Mean-reversion setup forming'],
+          suggestedAction: 'Accumulate near support — not chase',
+          expectedProbability: Math.round(clamp(58 + (35 - rsi), 55, 78)),
+          polarity: 'bull',
+          trigger: `RSI ${Math.round(rsi)} < 35`,
+          risk: 'Failed bounce / continued downtrend',
+          maxDownside: '3–6% if support fails',
+          potentialUpside: '4–9% mean reversion',
+        },
+        horizon
+      );
     } else if (rsi > 70) {
-      votes.push(-0.7);
-      reasonsBear.push('RSI overbought');
+      technical = Math.min(technical, 38);
+      bearish.push({ label: 'RSI overbought', weight: 0.5, polarity: 'bear' });
+      pushSignal(
+        explainedSignals,
+        {
+          title: 'TAKE PARTIAL PROFIT · RSI Overbought',
+          signalClass: 'TAKE PARTIAL PROFIT',
+          confidence: Math.round(clamp(68 + (rsi - 70), 60, 90)),
+          reasons: [`RSI at ${Math.round(rsi)}`, 'Short-term exhaustion risk'],
+          suggestedAction: 'Take partial profit (~30%) — not full exit by default',
+          expectedProbability: Math.round(clamp(55 + (rsi - 70), 52, 75)),
+          polarity: 'bear',
+          trigger: `RSI ${Math.round(rsi)} > 70`,
+          risk: 'Trend continuation squeezes shorts',
+          maxDownside: 'Opportunity cost if breakout continues',
+          potentialUpside: 'Lock 30% gains; keep core if trend intact',
+        },
+        horizon
+      );
     } else if (rsi >= 45 && rsi <= 60) {
-      votes.push(0.25);
-      reasonsBull.push('RSI in constructive mid-range');
-    } else if (rsi > 60 && rsi <= 70) {
-      votes.push(0.15);
+      technical = Math.max(technical, 62);
+      bullish.push({ label: 'RSI in constructive mid-range', weight: 0.25, polarity: 'bull' });
     } else {
-      votes.push(-0.15);
+      neutral.push({ label: `RSI neutral (${Math.round(rsi)})`, weight: 0.15, polarity: 'neutral' });
     }
   }
 
   if (input.technical?.macdBullish === true) {
-    votes.push(0.65);
-    reasonsBull.push('MACD bullish crossover');
+    technical = Math.max(technical, 75);
+    momentum = Math.max(momentum, 72);
+    bullish.push({ label: 'MACD bullish crossover', weight: 0.6, polarity: 'bull' });
   } else if (input.technical?.macdBullish === false) {
-    votes.push(-0.65);
-    reasonsBear.push('MACD bearish crossover');
+    technical = Math.min(technical, 40);
+    momentum = Math.min(momentum, 38);
+    bearish.push({ label: 'MACD bearish crossover', weight: 0.6, polarity: 'bear' });
   }
 
   const trend = String(input.technical?.trend || '').toUpperCase();
   if (trend.includes('BULL')) {
-    votes.push(0.7);
-    reasonsBull.push('Uptrend structure intact');
+    technical = Math.max(technical, 80);
+    bullish.push({ label: 'Uptrend structure intact', weight: 0.7, polarity: 'bull' });
   } else if (trend.includes('BEAR')) {
-    votes.push(-0.7);
-    reasonsBear.push('Downtrend pressure');
+    technical = Math.min(technical, 35);
+    bearish.push({ label: 'Downtrend pressure', weight: 0.7, polarity: 'bear' });
+  } else {
+    neutral.push({ label: 'Trend lacks decisive breakout', weight: 0.2, polarity: 'neutral' });
   }
 
-  const whale = input.whaleScore;
-  if (whale != null) {
-    if (whale >= 60) {
-      votes.push(0.55);
-      reasonsBull.push('Whale accumulation detected');
-    } else if (whale < 40) {
-      votes.push(-0.55);
-      reasonsBear.push('Whale distribution');
+  if (input.technical?.emaBias === 'bull') {
+    technical = Math.max(technical, 70);
+    bullish.push({ label: 'Price above key EMAs', weight: 0.45, polarity: 'bull' });
+  } else if (input.technical?.emaBias === 'bear') {
+    technical = Math.min(technical, 42);
+    bearish.push({ label: 'Price below key EMAs', weight: 0.45, polarity: 'bear' });
+  }
+
+  if (input.technical?.smaBias === 'bull') {
+    bullish.push({ label: 'SMA structure supportive', weight: 0.35, polarity: 'bull' });
+  } else if (input.technical?.smaBias === 'bear') {
+    bearish.push({ label: 'SMA structure pressuring price', weight: 0.35, polarity: 'bear' });
+  }
+
+  if (input.technical?.bollingerBias === 'oversold') {
+    technical = Math.max(technical, 68);
+    bullish.push({ label: 'Bollinger oversold pierce', weight: 0.4, polarity: 'bull' });
+  } else if (input.technical?.bollingerBias === 'overbought') {
+    technical = Math.min(technical, 42);
+    bearish.push({ label: 'Bollinger upper-band stretch', weight: 0.4, polarity: 'bear' });
+  }
+
+  if (input.technical?.adx != null && input.technical.adx >= 25) {
+    if (trend.includes('BULL')) {
+      bullish.push({ label: `ADX trend strength (${Math.round(input.technical.adx)})`, weight: 0.4, polarity: 'bull' });
+    } else if (trend.includes('BEAR')) {
+      bearish.push({ label: `ADX confirms bearish trend (${Math.round(input.technical.adx)})`, weight: 0.4, polarity: 'bear' });
+    } else {
+      neutral.push({ label: `ADX elevated (${Math.round(input.technical.adx)}) without clear direction`, weight: 0.2, polarity: 'neutral' });
     }
   }
 
-  const inst = input.institutionalScore;
-  if (inst != null) {
-    if (inst >= 60) {
-      votes.push(0.6);
-      reasonsBull.push('Institutional accumulation detected');
-    } else if (inst < 40) {
-      votes.push(-0.55);
-      reasonsBear.push('Institutional selling');
+  if (input.technical?.obvBias === 'bull') {
+    bullish.push({ label: 'OBV / volume accumulation', weight: 0.4, polarity: 'bull' });
+  } else if (input.technical?.obvBias === 'bear') {
+    bearish.push({ label: 'OBV / volume distribution', weight: 0.4, polarity: 'bear' });
+  }
+
+  if (input.technical?.volumeBias === 'high') {
+    neutral.push({ label: 'Elevated volume — confirmation required', weight: 0.15, polarity: 'neutral' });
+  }
+
+  // --- Money flow ---
+  if (input.institutionalScore != null) {
+    if (input.institutionalScore >= 60) {
+      bullish.push({ label: 'Institutional accumulation detected', weight: 0.9, polarity: 'bull' });
+      pushSignal(
+        explainedSignals,
+        {
+          title: 'ACCUMULATION · Institutional Buying',
+          signalClass: 'ACCUMULATION',
+          confidence: Math.round(clamp(input.institutionalScore, 60, 95)),
+          reasons: ['Smart-money flow constructive', 'Institutional buying detected'],
+          suggestedAction: 'Accumulate gradually',
+          expectedProbability: Math.round(clamp(input.institutionalScore * 0.85, 55, 88)),
+          polarity: 'bull',
+          trigger: `Institutional score ${Math.round(input.institutionalScore)}`,
+          risk: 'False accumulation / delayed reaction',
+          maxDownside: '2–5% noise risk while building',
+          potentialUpside: 'Aligned with horizon target',
+        },
+        horizon
+      );
+    } else if (input.institutionalScore < 40) {
+      bearish.push({ label: 'Institutional selling / distribution', weight: 0.85, polarity: 'bear' });
+      pushSignal(
+        explainedSignals,
+        {
+          title: 'REDUCE POSITION · Institutional Distribution',
+          signalClass: 'REDUCE POSITION',
+          confidence: Math.round(clamp(100 - input.institutionalScore, 60, 92)),
+          reasons: ['Institutional selling pressure', 'Smart money de-risking'],
+          suggestedAction: 'Reduce exposure',
+          expectedProbability: Math.round(clamp(100 - input.institutionalScore, 55, 85)),
+          polarity: 'bear',
+          trigger: `Institutional score ${Math.round(input.institutionalScore)} < 40`,
+          risk: 'Short squeeze if news flips',
+          maxDownside: 'Full position risk if distribution continues',
+          potentialUpside: 'Preserve capital for better entry',
+        },
+        horizon
+      );
     }
   }
 
-  const mom = input.momentumScore;
-  if (mom != null) {
-    if (mom >= 60) {
-      votes.push(0.4);
-      reasonsBull.push('Positive momentum');
-    } else if (mom < 40) {
-      votes.push(-0.4);
-      reasonsBear.push('Weak momentum');
+  if (input.whaleScore != null) {
+    if (input.whaleScore >= 60) {
+      whale = Math.max(whale, input.whaleScore);
+      bullish.push({ label: 'Whale accumulation detected', weight: 0.85, polarity: 'bull' });
+    } else if (input.whaleScore < 40) {
+      whale = Math.min(whale, input.whaleScore);
+      bearish.push({ label: 'Whale distribution', weight: 0.8, polarity: 'bear' });
     }
   }
 
-  const sent = input.sentimentScore;
-  if (sent != null) {
-    if (sent >= 65) {
-      votes.push(0.35);
-      reasonsBull.push('Positive news / sentiment flow');
-    } else if (sent < 40) {
-      votes.push(-0.35);
-      reasonsBear.push('Negative news sentiment');
+  if (input.smartMoneyScore != null) {
+    if (input.smartMoneyScore >= 65) {
+      whale = Math.max(whale, input.smartMoneyScore * 0.9);
+      bullish.push({ label: 'Smart money index constructive', weight: 0.7, polarity: 'bull' });
+    } else if (input.smartMoneyScore < 40) {
+      bearish.push({ label: 'Smart money index weak', weight: 0.65, polarity: 'bear' });
+    }
+  }
+
+  if (input.fundFlowBias === 'inflow') {
+    bullish.push({ label: 'Fund / capital inflow', weight: 0.5, polarity: 'bull' });
+  } else if (input.fundFlowBias === 'outflow') {
+    bearish.push({ label: 'Fund / capital outflow', weight: 0.5, polarity: 'bear' });
+  }
+
+  if (input.momentumScore != null) {
+    if (input.momentumScore >= 60) {
+      momentum = Math.max(momentum, input.momentumScore);
+      bullish.push({ label: 'Positive momentum', weight: 0.45, polarity: 'bull' });
+    } else if (input.momentumScore < 40) {
+      momentum = Math.min(momentum, input.momentumScore);
+      bearish.push({ label: 'Weak short-term momentum', weight: 0.45, polarity: 'bear' });
+    }
+  }
+
+  if (input.sentimentScore != null) {
+    if (input.sentimentScore >= 65) {
+      news = Math.max(news, input.sentimentScore);
+      bullish.push({ label: 'Positive news / sentiment flow', weight: 0.4, polarity: 'bull' });
+    } else if (input.sentimentScore < 40) {
+      news = Math.min(news, input.sentimentScore);
+      bearish.push({ label: 'Negative news sentiment', weight: 0.4, polarity: 'bear' });
     }
   }
 
   if (input.newsBias === 'bull') {
-    votes.push(0.3);
-    reasonsBull.push('News bias constructive');
+    bullish.push({ label: 'News bias constructive', weight: 0.3, polarity: 'bull' });
   } else if (input.newsBias === 'bear') {
-    votes.push(-0.3);
-    reasonsBear.push('News bias defensive');
+    bearish.push({ label: 'News bias defensive', weight: 0.3, polarity: 'bear' });
   }
 
-  const px = input.currentPrice;
-  if (px > 0 && input.levels?.r1 && input.levels.r1 > px * 1.02) {
-    // room to resistance = bullish room
-    votes.push(0.15);
-  }
-  if (px > 0 && input.levels?.s1 && input.levels.s1 < px * 0.97) {
-    votes.push(0.1);
-    reasonsBull.push('Support cushion below spot');
+  if (input.sectorBias === 'leader') {
+    bullish.push({ label: 'Sector leadership / rotation favor', weight: 0.35, polarity: 'bull' });
+  } else if (input.sectorBias === 'laggard') {
+    bearish.push({ label: 'Sector lagging rotation', weight: 0.35, polarity: 'bear' });
   }
 
   if (input.baseScore != null && input.baseScore >= 75) {
-    votes.push(0.35);
-    reasonsBull.push('Composite AI score constructive');
+    fundamental = Math.max(fundamental, input.baseScore);
+    bullish.push({ label: 'Composite fundamentals constructive', weight: 0.55, polarity: 'bull' });
   } else if (input.baseScore != null && input.baseScore < 50) {
-    votes.push(-0.35);
-    reasonsBear.push('Composite AI score weak');
+    fundamental = Math.min(fundamental, input.baseScore);
+    bearish.push({ label: 'Composite fundamentals weak', weight: 0.55, polarity: 'bear' });
   }
 
-  const direction =
-    votes.length === 0 ? 0 : clamp(votes.reduce((a, b) => a + b, 0) / votes.length, -1, 1);
-  const agreement =
-    votes.length === 0
-      ? 0.45
-      : clamp(
-          1 -
-            votes.map((v) => Math.abs(v - direction)).reduce((a, b) => a + b, 0) /
-              Math.max(1, votes.length),
-          0.25,
-          0.98
-        );
+  // --- Support / Resistance probabilities (Step 5) ---
+  let supportHoldProbability = 55;
+  let resistanceBreakProbability = 45;
+  if (px > 0 && s1 != null && Number.isFinite(s1)) {
+    const distToS1 = (px - s1) / px;
+    if (distToS1 >= 0 && distToS1 < 0.03) {
+      supportHoldProbability = clamp(
+        78 + (input.whaleScore ?? 50) * 0.08 + (input.institutionalScore ?? 50) * 0.08,
+        55,
+        92
+      );
+      bullish.push({ label: 'Price near support (S1)', weight: 0.65, polarity: 'bull' });
+      pushSignal(
+        explainedSignals,
+        {
+          title: 'ADD POSITION · Near Support',
+          signalClass: 'ADD POSITION',
+          confidence: Math.round(supportHoldProbability),
+          reasons: ['Price near S1', `Support holding probability ~${Math.round(supportHoldProbability)}%`],
+          suggestedAction: 'Accumulate slowly',
+          expectedProbability: Math.round(supportHoldProbability),
+          polarity: 'bull',
+          trigger: 'Spot within 3% of S1',
+          risk: 'Support failure / breakdown',
+          maxDownside: `To S2 ~${s2 != null ? round2(s2) : 'lower structure'}`,
+          potentialUpside: 'Bounce toward mid-range / R1',
+        },
+        horizon
+      );
+    } else if (distToS1 < 0) {
+      supportHoldProbability = clamp(28 - Math.abs(distToS1) * 200, 12, 45);
+      bearish.push({ label: 'Support broken / price below S1', weight: 0.75, polarity: 'bear' });
+    } else {
+      supportHoldProbability = clamp(60 + (1 - Math.min(distToS1, 0.08) / 0.08) * 15, 45, 80);
+      neutral.push({ label: 'Support cushion below spot', weight: 0.2, polarity: 'neutral' });
+    }
+  }
+  if (px > 0 && r1 != null && Number.isFinite(r1)) {
+    const distToR1 = (r1 - px) / px;
+    if (distToR1 >= 0 && distToR1 < 0.025) {
+      resistanceBreakProbability = clamp(35 + momentum * 0.25, 25, 70);
+      bearish.push({ label: 'Resistance nearby (R1)', weight: 0.45, polarity: 'bear' });
+      pushSignal(
+        explainedSignals,
+        {
+          title: 'CAUTION SIGNAL · Resistance Nearby',
+          signalClass: 'CAUTION SIGNAL',
+          confidence: Math.round(100 - resistanceBreakProbability),
+          reasons: [
+            'Price approaching R1',
+            `Resistance break probability ~${Math.round(resistanceBreakProbability)}%`,
+            'Resistance is NOT automatic SELL',
+          ],
+          suggestedAction: 'Wait for breakout confirmation or trim if extended',
+          expectedProbability: Math.round(100 - resistanceBreakProbability),
+          polarity: 'bear',
+          trigger: 'Spot within 2.5% of R1',
+          risk: 'Rejection pullback',
+          maxDownside: '3–7% if rejected',
+          potentialUpside: 'Continuation if resistance breaks with volume',
+        },
+        horizon
+      );
+    } else if (distToR1 < 0) {
+      resistanceBreakProbability = clamp(72 + Math.abs(distToR1) * 100, 60, 90);
+      bullish.push({ label: 'Price above resistance (breakout)', weight: 0.55, polarity: 'bull' });
+    } else {
+      resistanceBreakProbability = clamp(40 + (1 - Math.min(distToR1, 0.1) / 0.1) * 20, 30, 65);
+    }
+  }
 
-  return { direction, agreement, reasonsBull, reasonsBear };
+  const supportFailureProbability = 100 - Math.round(supportHoldProbability);
+  const resistanceRejectionProbability = 100 - Math.round(resistanceBreakProbability);
+
+  if (vol > 35) {
+    risk = clamp(70 + (vol - 35), 70, 92);
+    bearish.push({ label: 'Elevated volatility / market risk', weight: 0.35, polarity: 'bear' });
+  } else if (vol < 15) {
+    risk = clamp(30, 20, 40);
+    neutral.push({ label: 'Volatility contained', weight: 0.2, polarity: 'neutral' });
+  } else {
+    risk = clamp(45 + vol * 0.4, 35, 65);
+  }
+
+  const bullWeight = bullish.reduce((a, f) => a + f.weight, 0);
+  const bearWeight = bearish.reduce((a, f) => a + f.weight, 0);
+  const total = bullWeight + bearWeight || 1;
+  const netWeight = clamp((bullWeight - bearWeight) / total, -1, 1);
+
+  // --- STEP 2: AI Committee ---
+  const techReason =
+    bullish.find((f) => /RSI|MACD|Uptrend|EMA|SMA|Bollinger|ADX|OBV|Trend/i.test(f.label))?.label ||
+    bearish.find((f) => /RSI|MACD|Downtrend|EMA|SMA|Bollinger|ADX|OBV/i.test(f.label))?.label ||
+    'Mixed technical tape';
+  const fundReason =
+    bullish.find((f) => /fundamental/i.test(f.label))?.label ||
+    bearish.find((f) => /fundamental/i.test(f.label))?.label ||
+    'Composite fundamental posture';
+  const whaleReason =
+    bullish.find((f) => /Whale|Institutional|Smart money|Fund/i.test(f.label))?.label ||
+    bearish.find((f) => /Whale|Institutional|Smart money|Fund/i.test(f.label))?.label ||
+    'Neutral money-flow posture';
+  const momReason =
+    bullish.find((f) => /momentum|MACD/i.test(f.label))?.label ||
+    bearish.find((f) => /momentum|MACD/i.test(f.label))?.label ||
+    'Momentum neither extreme';
+  const sentReason =
+    bullish.find((f) => /news|sentiment|Sector/i.test(f.label))?.label ||
+    bearish.find((f) => /news|sentiment|Sector/i.test(f.label))?.label ||
+    'Sentiment balanced';
+
+  const committee: CommitteeMember[] = [
+    {
+      seat: 'Technical',
+      score: Math.round(technical),
+      recommendation: recFromScore(technical),
+      reason: techReason,
+      weight: COMMITTEE_WEIGHTS.Technical,
+    },
+    {
+      seat: 'Fundamental',
+      score: Math.round(fundamental),
+      recommendation: recFromScore(fundamental),
+      reason: fundReason,
+      weight: COMMITTEE_WEIGHTS.Fundamental,
+    },
+    {
+      seat: 'Whale',
+      score: Math.round(whale),
+      recommendation: recFromScore(whale),
+      reason: whaleReason,
+      weight: COMMITTEE_WEIGHTS.Whale,
+    },
+    {
+      seat: 'Risk',
+      score: Math.round(risk),
+      recommendation: recFromRiskScore(risk),
+      reason:
+        risk >= 68
+          ? 'Elevated risk warrants defensive sizing'
+          : risk <= 35
+            ? 'Risk contained — room for constructive stance'
+            : 'Risk moderate — require confirmation',
+      weight: COMMITTEE_WEIGHTS.Risk,
+    },
+    {
+      seat: 'Momentum',
+      score: Math.round(momentum),
+      recommendation: recFromScore(momentum),
+      reason: momReason,
+      weight: COMMITTEE_WEIGHTS.Momentum,
+    },
+    {
+      seat: 'Sentiment',
+      score: Math.round(news),
+      recommendation: recFromScore(news),
+      reason: sentReason,
+      weight: COMMITTEE_WEIGHTS.Sentiment,
+    },
+  ];
+
+  // STEP 3 — weighted overall (Risk inverted into quality score for blend)
+  const overall = Math.round(
+    clamp(
+      technical * COMMITTEE_WEIGHTS.Technical +
+        fundamental * COMMITTEE_WEIGHTS.Fundamental +
+        whale * COMMITTEE_WEIGHTS.Whale +
+        (100 - risk) * COMMITTEE_WEIGHTS.Risk +
+        momentum * COMMITTEE_WEIGHTS.Momentum +
+        news * COMMITTEE_WEIGHTS.Sentiment,
+      1,
+      99
+    )
+  );
+
+  const bullishScore = Math.round(clamp((bullWeight / total) * 100, 0, 100));
+  const bearishScore = Math.round(clamp((bearWeight / total) * 100, 0, 100));
+
+  // STEP 8 — BUY / SELL gates
+  const buyGateFails: string[] = [];
+  if (supportHoldProbability < 45 && !(input.institutionalScore != null && input.institutionalScore >= 65)) {
+    buyGateFails.push('Support hold probability too low');
+  }
+  const hasAccum =
+    (input.whaleScore != null && input.whaleScore >= 55) ||
+    (input.institutionalScore != null && input.institutionalScore >= 55) ||
+    (input.smartMoneyScore != null && input.smartMoneyScore >= 60);
+  if (!hasAccum && netWeight < 0.35) {
+    buyGateFails.push('No clear whale/institutional accumulation');
+  }
+  if (netWeight < 0.08) buyGateFails.push('Bullish evidence not stronger than bearish');
+  if (!trend.includes('BULL') && !trend.includes('BEAR') && netWeight < 0.25 && technical < 60) {
+    buyGateFails.push('Trend not acceptable for aggressive BUY');
+  }
+  const buyGatePass = buyGateFails.length === 0 && netWeight > 0.12;
+
+  const sellGateFails: string[] = [];
+  const supportBroken = px > 0 && s1 != null && px < s1;
+  const instSelling = input.institutionalScore != null && input.institutionalScore < 40;
+  const momCollapsed = input.momentumScore != null && input.momentumScore < 35;
+  const trendReversed = trend.includes('BEAR');
+  if (!supportBroken && !instSelling && !momCollapsed && !trendReversed && netWeight > -0.35) {
+    sellGateFails.push('No confirmed support break, institutional selling, momentum collapse, or trend reversal');
+  }
+  if (netWeight > -0.12) sellGateFails.push('Bearish evidence not dominant');
+  const sellGatePass = sellGateFails.length === 0 && netWeight < -0.12;
+
+  return {
+    bullish,
+    bearish,
+    neutral,
+    netWeight,
+    bullWeight,
+    bearWeight,
+    scores: {
+      technical: Math.round(technical),
+      fundamental: Math.round(fundamental),
+      whale: Math.round(whale),
+      news: Math.round(news),
+      risk: Math.round(risk),
+      momentum: Math.round(momentum),
+      overall,
+    },
+    supportHoldProbability: Math.round(supportHoldProbability),
+    supportFailureProbability,
+    resistanceBreakProbability: Math.round(resistanceBreakProbability),
+    resistanceRejectionProbability,
+    explainedSignals,
+    buyGatePass,
+    sellGatePass,
+    buyGateFails,
+    sellGateFails,
+    committee,
+    bullishScore,
+    bearishScore,
+  };
 }
 
-function fairTargetPrice(input: QuantumEngineInput, direction: number): number {
+function fairTargetPrice(input: QuantumEngineInput, netWeight: number): number {
   const px = input.currentPrice;
   const days = HORIZON_DAYS[input.horizon];
   const api = mapApiRow(input.forecastHorizons, input.horizon);
-
-  // Evidence-weighted target candidates
   const candidates: number[] = [];
 
   if (api.price != null && api.price > 0) candidates.push(api.price);
   if (api.ret != null) candidates.push(px * (1 + api.ret / 100));
 
   if (input.baseTarget != null && Number.isFinite(input.baseTarget)) {
-    // Scale base (≈1M) to selected horizon
     const monthMove = (input.baseTarget - px) / px;
     const scale = days / 21;
-    candidates.push(px * (1 + monthMove * Math.sqrt(scale) * (scale >= 1 ? 0.85 + 0.15 * Math.min(scale, 4) / 4 : scale)));
+    candidates.push(
+      px * (1 + monthMove * Math.sqrt(scale) * (scale >= 1 ? 0.85 + (0.15 * Math.min(scale, 4)) / 4 : scale))
+    );
   }
-
-  if (input.bullTarget != null && direction > 0.15) {
+  if (input.bullTarget != null && netWeight > 0.15) {
     const mix = input.horizon === '1W' ? 0.25 : input.horizon === '1M' ? 0.45 : input.horizon === '3M' ? 0.65 : 0.8;
     candidates.push(px + (input.bullTarget - px) * mix);
   }
-  if (input.bearTarget != null && direction < -0.15) {
+  if (input.bearTarget != null && netWeight < -0.15) {
     const mix = input.horizon === '1W' ? 0.3 : input.horizon === '1M' ? 0.5 : input.horizon === '3M' ? 0.7 : 0.85;
     candidates.push(px + (input.bearTarget - px) * mix);
   }
-
   if (input.baseReturn != null) {
     const scale = days / 21;
     candidates.push(px * (1 + (input.baseReturn / 100) * Math.sqrt(Math.max(0.25, scale))));
   }
 
-  // Directional drift if little evidence
   const vol = input.technical?.volatility ?? 22;
-  const drift = direction * (vol / 100) * Math.sqrt(days / 252) * 1.8;
+  const drift = netWeight * (vol / 100) * Math.sqrt(days / 252) * 1.8;
   candidates.push(px * (1 + drift));
 
-  // Weighted average with slight pull toward directional candidate
   const avg = candidates.reduce((a, b) => a + b, 0) / candidates.length;
-  // Blend with pure directional drift to avoid random jumps
   const blended = avg * 0.75 + px * (1 + drift) * 0.25;
-
-  // Clamp extreme moves by horizon
   const maxAbs =
     input.horizon === '1W' ? 0.12 : input.horizon === '1M' ? 0.28 : input.horizon === '3M' ? 0.55 : 1.1;
   const move = clamp((blended - px) / px, -maxAbs, maxAbs);
@@ -354,23 +879,13 @@ function buildZones(
   levels: QuantumEngineInput['levels'],
   stopHint: number | null | undefined,
   vol: number | null
-): {
-  buyZone: EngineZoneBand;
-  addZone: EngineZoneBand;
-  holdZone: EngineZoneBand;
-  takeProfitZone: EngineZoneBand;
-  stopLoss: number;
-  takeProfit: number;
-} {
-  const atrPct = (vol ?? 22) / 100 / Math.sqrt(252); // rough daily
+) {
+  const atrPct = (vol ?? 22) / 100 / Math.sqrt(252);
   const band = Math.max(px * 0.008, px * atrPct * 3);
-
   const s2 = levels?.s2 && Number.isFinite(levels.s2) ? levels.s2 : px * 0.94;
   const s1 = levels?.s1 && Number.isFinite(levels.s1) ? levels.s1 : px * 0.97;
   const r1 = levels?.r1 && Number.isFinite(levels.r1) ? levels.r1 : px * 1.03;
-
-  const bullish = rec === 'STRONG BUY' || rec === 'BUY' || rec === 'MODERATE BUY';
-  const bearish = rec === 'SELL' || rec === 'STRONG SELL';
+  const bullish = rec === 'STRONG BUY' || rec === 'BUY';
 
   let buyLo: number;
   let buyHi: number;
@@ -384,28 +899,26 @@ function buildZones(
   let takeProfit: number;
 
   if (bullish || rec === 'HOLD') {
-    // Buy zones below target (and typically at/under spot)
     buyHi = Math.min(px, s1);
     buyLo = Math.min(s2, buyHi - band);
     if (buyLo >= buyHi) buyLo = buyHi * 0.985;
-
     addHi = Math.min(px, (buyHi + px) / 2);
     addLo = Math.min(buyHi, addHi - band * 0.6);
     if (addLo >= addHi) addLo = addHi * 0.99;
-
     holdLo = Math.min(px * 0.995, r1);
     holdHi = Math.max(px * 1.005, Math.min(r1, target * 0.98));
     if (holdLo > holdHi) [holdLo, holdHi] = [holdHi * 0.99, holdHi];
-
     takeProfit = Math.max(target, px * 1.01);
     tpLo = Math.min(Math.max(r1, px * 1.01), takeProfit);
     tpHi = Math.max(takeProfit * 1.02, tpLo + band * 0.5);
-
     const hint = stopHint != null && Number.isFinite(stopHint) ? stopHint : buyLo * 0.97;
     stop = Math.min(hint, buyLo * 0.995);
     if (!(stop < buyLo)) stop = buyLo * 0.97;
+    if (bullish && buyHi >= target) {
+      buyHi = target * 0.97;
+      buyLo = Math.min(buyLo, buyHi * 0.985);
+    }
   } else {
-    // Bearish: "buy zone" reframed as re-entry only on deep discount; TP toward lower target
     buyHi = Math.min(s1, px * 0.96);
     buyLo = Math.min(s2, buyHi - band);
     addHi = buyHi;
@@ -415,24 +928,8 @@ function buildZones(
     takeProfit = Math.min(target, px * 0.99);
     tpLo = Math.min(takeProfit, px * 0.98);
     tpHi = Math.max(tpLo, Math.min(px * 0.995, takeProfit * 1.01));
-    stop = Math.max(stopHint ?? px * 1.04, px * 1.02); // protective stop above for shorts / exit
-    // For long-book UI consistency: keep stop below for holders exiting weakness
-    if (bearish) {
-      stop = Math.min(buyLo * 0.97, px * 0.92);
-      if (!(stop < buyLo)) stop = buyLo * 0.96;
-    }
-  }
-
-  // Rule 7–9 enforce
-  if (bullish) {
-    if (buyHi >= target) {
-      buyHi = target * 0.97;
-      buyLo = Math.min(buyLo, buyHi * 0.985);
-    }
-    takeProfit = Math.max(target, takeProfit);
-    tpHi = Math.max(tpHi, takeProfit);
-    tpLo = Math.min(tpLo, takeProfit);
-    if (!(stop < buyLo)) stop = buyLo * 0.97;
+    stop = Math.min(buyLo * 0.97, px * 0.92);
+    if (!(stop < buyLo)) stop = buyLo * 0.96;
   }
 
   return {
@@ -445,167 +942,325 @@ function buildZones(
   };
 }
 
-function pickReasons(rec: RecommendationLabel, bag: SignalBag): string[] {
-  const bullish = rec === 'STRONG BUY' || rec === 'BUY' || rec === 'MODERATE BUY';
-  const bearish = rec === 'SELL' || rec === 'STRONG SELL';
-  const src = bullish ? bag.reasonsBull : bearish ? bag.reasonsBear : [...bag.reasonsBull.slice(0, 3), ...bag.reasonsBear.slice(0, 3)];
-  const fallbackBull = [
-    'Institutional accumulation detected',
-    'Positive money flow',
-    'RSI recovering from oversold',
-    'MACD bullish crossover',
-    'Price structure above key averages',
-    'Earnings outlook improving',
-  ];
-  const fallbackBear = [
-    'Institutional selling',
-    'Whale distribution',
-    'Weak momentum',
-    'MACD bearish crossover',
-    'RSI overbought',
-    'Resistance rejection',
-  ];
-  const fallbackHold = [
-    'Balanced risk/reward near fair value',
-    'Mixed institutional signals',
-    'Trend lacks decisive breakout',
-    'Volatility contained',
-    'Await confirmation at key levels',
-    'Position sizing discipline preferred',
-  ];
-  const pool = src.length >= 4 ? src : bullish ? fallbackBull : bearish ? fallbackBear : fallbackHold;
-  const out: string[] = [];
-  for (const r of pool) {
-    if (!out.includes(r)) out.push(r);
-    if (out.length >= 6) break;
+function buildTargets(px: number, primary: number, rec: RecommendationLabel, levels: QuantumEngineInput['levels']) {
+  const r1 = levels?.r1 && Number.isFinite(levels.r1) ? levels.r1 : px * 1.03;
+  const r2 = levels?.r2 && Number.isFinite(levels.r2) ? levels.r2 : px * 1.06;
+  const bullish = rec === 'STRONG BUY' || rec === 'BUY';
+  const bearish = rec === 'SELL' || rec === 'AVOID NEW POSITION' || rec === 'REDUCE';
+
+  if (bullish) {
+    const t1 = round2(Math.min(primary, Math.max(px * 1.02, (px + primary) / 2)));
+    const t2 = round2(Math.max(primary, r1));
+    const t3 = round2(Math.max(t2 * 1.03, r2, primary * 1.04));
+    return { target1: t1, target2: t2, target3: t3 };
   }
-  while (out.length < 6) {
-    const fb = bullish ? fallbackBull : bearish ? fallbackBear : fallbackHold;
-    out.push(fb[out.length % fb.length]);
+  if (bearish) {
+    const t1 = round2(Math.max(primary, Math.min(px * 0.98, (px + primary) / 2)));
+    const t2 = round2(Math.min(primary, px * 0.95));
+    const t3 = round2(Math.min(t2 * 0.97, primary * 0.96));
+    return { target1: t1, target2: t2, target3: t3 };
   }
-  return out.slice(0, 6);
+  return {
+    target1: round2(px * 1.015),
+    target2: round2(Math.max(r1, px * 1.03)),
+    target3: round2(Math.max(r2, px * 1.05)),
+  };
 }
 
-function buildSummary(
-  horizonLabel: string,
+function suggestedActionFor(rec: RecommendationLabel, evidence: EvidenceBag): SuggestedAction {
+  if (rec === 'STRONG BUY' || rec === 'BUY') {
+    return evidence.bearish.some((b) => /overbought|resistance/i.test(b.label)) ? 'Accumulate' : 'Buy';
+  }
+  if (rec === 'HOLD') return 'Hold';
+  if (rec === 'REDUCE') return 'Take Partial Profit';
+  if (rec === 'SELL') return 'Reduce';
+  return 'Exit';
+}
+
+function buildWhyWins(rec: RecommendationLabel, evidence: EvidenceBag): string {
+  const topBull = [...evidence.bullish].sort((a, b) => b.weight - a.weight).slice(0, 4);
+  const topBear = [...evidence.bearish].sort((a, b) => b.weight - a.weight).slice(0, 3);
+  if (rec === 'STRONG BUY' || rec === 'BUY') {
+    const winners = topBull.map((f) => f.label).join(', ');
+    const outweighed = topBear.length ? topBear.map((f) => f.label).join(', ') : 'no dominant bearish blockers';
+    return `Although opposing signals existed (${outweighed}), the committee weighted ${winners || 'bullish evidence'} higher — especially whale/institutional and support-hold odds (${evidence.supportHoldProbability}%). Therefore ${rec}.`;
+  }
+  if (rec === 'SELL' || rec === 'AVOID NEW POSITION' || rec === 'REDUCE') {
+    const winners = topBear.map((f) => f.label).join(', ');
+    const outweighed = topBull.length ? topBull.map((f) => f.label).join(', ') : 'no dominant bullish confirmation';
+    return `Although ${outweighed} appeared constructive, ${winners || 'bearish evidence'} carried higher committee weight with failed BUY gates / passed defensive gates. Therefore ${rec}.`;
+  }
+  return 'Committee votes are split and neither BUY nor SELL validation cleared — HOLD is the professionally defensible stance.';
+}
+
+function buildRejectedOpposite(rec: RecommendationLabel, evidence: EvidenceBag): string {
+  if (rec === 'STRONG BUY' || rec === 'BUY') {
+    const rejected = evidence.bearish.slice(0, 5).map((f) => `• ${f.label}`);
+    if (!rejected.length) return 'No material opposite (bearish) signals required rejection.';
+    return `Although bearish signals existed:\n${rejected.join('\n')}\nConsensus did not issue SELL because institutional/whale weight and support-hold probability outweighed short-term technical caution, and SELL gates were not met.`;
+  }
+  if (rec === 'SELL' || rec === 'AVOID NEW POSITION' || rec === 'REDUCE') {
+    const rejected = evidence.bullish.slice(0, 5).map((f) => `• ${f.label}`);
+    if (!rejected.length) return 'No material opposite (bullish) signals required rejection.';
+    return `Although bullish signals existed:\n${rejected.join('\n')}\nConsensus did not issue BUY because distribution/support-failure/momentum risks dominated and BUY gates failed.`;
+  }
+  return 'Neither side cleared a decisive BUY or SELL gate — HOLD avoids forcing a directional call.';
+}
+
+function invalidationFor(
   rec: RecommendationLabel,
-  expectedReturn: number,
-  confidence: number,
-  risk: RiskLevel,
-  reasons: string[]
+  px: number,
+  zones: ReturnType<typeof buildZones>,
+  evidence: EvidenceBag
 ): string {
-  const upside = expectedReturn >= 0;
-  const moveWord = upside ? 'upside' : 'downside';
-  const abs = Math.abs(expectedReturn).toFixed(1);
-  const support = reasons.slice(0, 3).join(', ');
-  const verb = upside ? 'support' : 'reinforce';
-  return `QuantumNode expects approximately ${abs}% ${moveWord} over the next ${horizonLabel.toLowerCase()}. ${support} ${verb} a ${rec} recommendation with ${confidence}% confidence and ${risk} risk.`;
+  if (rec === 'STRONG BUY' || rec === 'BUY') {
+    return `Daily close below ${zones.stopLoss.toFixed(2)} (stop / support failure ≈ ${evidence.supportFailureProbability}%) or clear institutional distribution.`;
+  }
+  if (rec === 'SELL' || rec === 'AVOID NEW POSITION' || rec === 'REDUCE') {
+    return `Reclaim and hold above ${(px * 1.03).toFixed(2)} with renewed whale/institutional accumulation (support hold > ${Math.max(70, evidence.supportHoldProbability)}%).`;
+  }
+  return `Breakout above resistance with accumulation, or breakdown below ${zones.stopLoss.toFixed(2)}.`;
+}
+
+function nextReviewFor(horizonLabel: string, evidence: EvidenceBag): string {
+  return `Reassess on next earnings, decisive S/R break, or whale/institutional flow shift. Horizon: ${horizonLabel}. Support-hold ${evidence.supportHoldProbability}% · Support-fail ${evidence.supportFailureProbability}% · Resist-break ${evidence.resistanceBreakProbability}% · Resist-reject ${evidence.resistanceRejectionProbability}%.`;
+}
+
+function consensusNote(committee: CommitteeMember[], rec: RecommendationLabel): string {
+  const agree = committee.filter((c) => {
+    const s = chartStanceFromRecommendation(c.recommendation);
+    const t = chartStanceFromRecommendation(rec);
+    if (t === 'neutral') return c.recommendation === 'HOLD' || c.recommendation === 'REDUCE';
+    return s === t || (t === 'bull' && c.recommendation === 'HOLD' && c.score >= 55);
+  }).length;
+  return `Consensus from AI Investment Committee (${agree}/${committee.length} aligned or non-blocking). Weights: Tech 20% · Fund 25% · Whale 20% · Risk 15% · Mom 10% · Sent 10%.`;
 }
 
 function validate(out: QuantumEngineOutput): boolean {
-  const { currentPrice: px, targetPrice: tp, expectedReturn: er, ratingLabel: rec, buyZone, stopLoss, takeProfit } = out;
+  const { currentPrice: px, targetPrice: tp, expectedReturn: er, ratingLabel: rec, buyZone, stopLoss, takeProfit } =
+    out;
   const calcEr = ((tp - px) / px) * 100;
   if (Math.abs(calcEr - er) > 0.15) return false;
   if (tp > px && er <= 0) return false;
   if (tp < px && er >= 0) return false;
-  if (er > 0 && (rec === 'SELL' || rec === 'STRONG SELL')) return false;
-  if (er < 0 && (rec === 'BUY' || rec === 'STRONG BUY' || rec === 'MODERATE BUY')) return false;
+  if (er > 0 && (rec === 'SELL' || rec === 'AVOID NEW POSITION')) return false;
+  if (er < 0 && (rec === 'BUY' || rec === 'STRONG BUY')) return false;
   if (er >= 3 && rec === 'HOLD') return false;
   if (er <= -3 && rec === 'HOLD') return false;
-  if (buyZone.hi >= tp && (rec === 'STRONG BUY' || rec === 'BUY' || rec === 'MODERATE BUY')) return false;
-  if (!(stopLoss < buyZone.lo) && (rec === 'STRONG BUY' || rec === 'BUY' || rec === 'MODERATE BUY' || rec === 'HOLD')) {
+  if (buyZone.hi >= tp && (rec === 'STRONG BUY' || rec === 'BUY')) return false;
+  if (!(stopLoss < buyZone.lo) && (rec === 'STRONG BUY' || rec === 'BUY' || rec === 'HOLD' || rec === 'REDUCE')) {
     return false;
   }
-  if (rec === 'STRONG BUY' || rec === 'BUY' || rec === 'MODERATE BUY') {
-    if (takeProfit < tp * 0.98) return false;
-  }
+  if ((rec === 'STRONG BUY' || rec === 'BUY') && takeProfit < tp * 0.98) return false;
+  if (out.finalVerdict !== rec) return false;
+  if (out.chartStance !== chartStanceFromRecommendation(rec)) return false;
+  if (!out.whyWins || !out.suggestedAction) return false;
+  if (!out.committee?.length) return false;
+  if (out.target1 <= 0 || out.entryZone.hi <= 0) return false;
+  if (Math.abs(out.supportHoldProbability + out.supportFailureProbability - 100) > 1) return false;
+  if (Math.abs(out.resistanceBreakProbability + out.resistanceRejectionProbability - 100) > 1) return false;
   return true;
 }
 
-/**
- * Master entry — runs analysis → target → return → recommendation → score/confidence/risk/zones/summary
- * and recalculates until validation passes (or max attempts).
- */
+function decideRecommendation(evidence: EvidenceBag, rawReturn: number): RecommendationLabel {
+  const fromReturn = recommendationFromReturn(rawReturn);
+  const fromCommittee = recFromScore(evidence.scores.overall);
+
+  // Blend return-implied and committee-implied, then gate
+  let candidate = fromReturn;
+  if (chartStanceFromRecommendation(fromReturn) !== chartStanceFromRecommendation(fromCommittee)) {
+    // Prefer committee overall when conflict — transparency over return chase
+    if (Math.abs(evidence.netWeight) > 0.25) {
+      candidate = evidence.netWeight > 0 ? (fromReturn === 'STRONG BUY' ? 'STRONG BUY' : fromCommittee) : fromCommittee;
+      if (evidence.netWeight > 0 && (fromCommittee === 'BUY' || fromCommittee === 'STRONG BUY')) {
+        candidate = fromCommittee === 'STRONG BUY' ? 'STRONG BUY' : 'BUY';
+      }
+      if (evidence.netWeight < 0 && (fromCommittee === 'SELL' || fromCommittee === 'REDUCE' || fromCommittee === 'AVOID NEW POSITION')) {
+        candidate = fromCommittee;
+      }
+      if (Math.abs(evidence.netWeight) < 0.35 && fromReturn === 'HOLD') candidate = 'HOLD';
+    } else {
+      candidate = 'HOLD';
+    }
+  }
+
+  if ((candidate === 'BUY' || candidate === 'STRONG BUY') && !evidence.buyGatePass) {
+    if (evidence.netWeight > 0.05) return 'HOLD';
+    if (evidence.netWeight < -0.05) return evidence.sellGatePass ? 'REDUCE' : 'HOLD';
+    return 'HOLD';
+  }
+
+  if ((candidate === 'SELL' || candidate === 'AVOID NEW POSITION') && !evidence.sellGatePass) {
+    if (evidence.netWeight < -0.2) return 'REDUCE';
+    return 'HOLD';
+  }
+
+  if (candidate === 'BUY' && evidence.netWeight > 0.55 && evidence.buyGatePass && evidence.scores.overall >= 85) {
+    return 'STRONG BUY';
+  }
+  if (candidate === 'SELL' && evidence.netWeight < -0.55 && evidence.sellGatePass) {
+    return evidence.scores.overall < 35 ? 'AVOID NEW POSITION' : 'SELL';
+  }
+
+  return candidate;
+}
+
+function emptyOutput(horizon: HorizonKey, horizonLabel: string, input: QuantumEngineInput): QuantumEngineOutput {
+  const emptyScores: ComponentScores = {
+    technical: 50,
+    fundamental: 50,
+    whale: 50,
+    news: 50,
+    risk: 50,
+    momentum: 50,
+    overall: 50,
+  };
+  const emptyCommittee: CommitteeMember[] = (Object.keys(COMMITTEE_WEIGHTS) as CommitteeSeat[]).map((seat) => ({
+    seat,
+    score: 50,
+    recommendation: 'HOLD',
+    reason: 'Awaiting price data',
+    weight: COMMITTEE_WEIGHTS[seat],
+  }));
+  return {
+    horizon,
+    horizonLabel,
+    score: 50,
+    ratingLabel: 'HOLD',
+    confidence: 40,
+    currentPrice: 0,
+    targetPrice: 0,
+    expectedReturn: 0,
+    riskLevel: 'Medium',
+    riskScore: 50,
+    riskLabel: 'Medium',
+    volatility: input.technical?.volatility ?? null,
+    liquidityLabel: 'Moderate',
+    drawdown: -5,
+    sharpe: 0,
+    buyZone: { lo: 0, hi: 0 },
+    addZone: { lo: 0, hi: 0 },
+    holdZone: { lo: 0, hi: 0 },
+    takeProfitZone: { lo: 0, hi: 0 },
+    stopLoss: 0,
+    takeProfit: 0,
+    bullCase: 0,
+    bearCase: 0,
+    zoneScale: 1,
+    keyReasons: ['Awaiting price data'],
+    summaryLead: 'Awaiting price data to generate a QuantumNode Consensus recommendation.',
+    explanation: `All metrics are locked to the ${horizonLabel} Investment Horizon.`,
+    chartStance: 'neutral',
+    finalVerdict: 'HOLD',
+    validationStatus: '✗ Recalculate',
+    componentScores: emptyScores,
+    bullishFactors: [],
+    bearishFactors: [],
+    neutralFactors: [],
+    whyWins: 'Insufficient price data.',
+    rejectedOpposite: '',
+    suggestedAction: 'Hold',
+    invalidationLevel: 'N/A',
+    nextReviewTrigger: `Reassess when live price data is available (${horizonLabel}).`,
+    supportHoldProbability: 50,
+    resistanceBreakProbability: 50,
+    explainedSignals: [],
+    decisionWeightNote: 'No decision weight available.',
+    committee: emptyCommittee,
+    bullishScore: 50,
+    bearishScore: 50,
+    supportFailureProbability: 50,
+    resistanceRejectionProbability: 50,
+    entryZone: { lo: 0, hi: 0 },
+    supportLevels: [],
+    resistanceLevels: [],
+    target1: 0,
+    target2: 0,
+    target3: 0,
+    consensusNote: 'Committee inactive — no price.',
+  };
+}
+
 export function runQuantumRecommendationEngine(input: QuantumEngineInput): QuantumEngineOutput {
   const horizonLabel = HORIZON_OPTIONS.find((o) => o.key === input.horizon)?.label ?? input.horizon;
   const px = input.currentPrice > 0 ? input.currentPrice : 0;
-  if (!(px > 0)) {
-    return {
-      horizon: input.horizon,
-      horizonLabel,
-      score: 50,
-      ratingLabel: 'HOLD',
-      confidence: 40,
-      currentPrice: 0,
-      targetPrice: 0,
-      expectedReturn: 0,
-      riskLevel: 'Medium',
-      riskScore: 50,
-      riskLabel: 'Medium',
-      volatility: input.technical?.volatility ?? null,
-      liquidityLabel: 'Moderate',
-      drawdown: -5,
-      sharpe: 0,
-      buyZone: { lo: 0, hi: 0 },
-      addZone: { lo: 0, hi: 0 },
-      holdZone: { lo: 0, hi: 0 },
-      takeProfitZone: { lo: 0, hi: 0 },
-      stopLoss: 0,
-      takeProfit: 0,
-      bullCase: 0,
-      bearCase: 0,
-      zoneScale: 1,
-      keyReasons: pickReasons('HOLD', { direction: 0, agreement: 0.4, reasonsBull: [], reasonsBear: [] }),
-      summaryLead: 'Awaiting price data to generate a QuantumNode recommendation.',
-      explanation: `All metrics are locked to the ${horizonLabel} Investment Horizon.`,
-      validationStatus: '✗ Recalculate',
-    };
-  }
+
+  if (!(px > 0)) return emptyOutput(input.horizon, horizonLabel, input);
 
   let attempt = 0;
   let last: QuantumEngineOutput | null = null;
+  const evidence = collectEvidence(input);
 
-  while (attempt < 4) {
+  while (attempt < 5) {
     attempt += 1;
-    const signals = collectSignals(input);
-    // On retry, nudge direction toward consistency with prior return sign if needed
-    let direction = signals.direction;
+    let net = evidence.netWeight;
     if (last && attempt > 1) {
-      if (last.expectedReturn > 0 && direction < 0) direction = Math.abs(direction) * 0.5 + 0.25;
-      if (last.expectedReturn < 0 && direction > 0) direction = -Math.abs(direction) * 0.5 - 0.25;
+      if (last.expectedReturn > 0 && net < 0) net = Math.abs(net) * 0.35;
+      if (last.expectedReturn < 0 && net > 0) net = -Math.abs(net) * 0.35;
     }
 
-    let target = fairTargetPrice({ ...input, currentPrice: px }, direction);
+    let target = fairTargetPrice(input, net);
     let expectedReturn = round2(((target - px) / px) * 100);
-
-    // Force mathematical link: if API return exists and agrees with direction, blend it in
     const api = mapApiRow(input.forecastHorizons, input.horizon);
-    if (
-      api.ret != null &&
-      Math.abs(api.ret) > 0.2 &&
-      (attempt === 1 || Math.sign(api.ret) === Math.sign(direction || expectedReturn) || direction === 0)
-    ) {
-      const blendedRet = expectedReturn * 0.55 + api.ret * 0.45;
-      expectedReturn = round2(blendedRet);
+    if (api.ret != null && Math.abs(api.ret) > 0.2) {
+      if (Math.sign(api.ret) === Math.sign(net) || Math.abs(net) < 0.1) {
+        expectedReturn = round2(expectedReturn * 0.55 + api.ret * 0.45);
+        target = round2(px * (1 + expectedReturn / 100));
+      }
+    }
+    expectedReturn = round2(((target - px) / px) * 100);
+
+    let rec = decideRecommendation(evidence, expectedReturn);
+
+    if ((rec === 'BUY' || rec === 'STRONG BUY') && expectedReturn < 3) {
+      expectedReturn = round2(clamp(Math.max(3.2, Math.abs(expectedReturn) || 5), 3.2, 18));
       target = round2(px * (1 + expectedReturn / 100));
     }
-
-    // Recompute expected return strictly from target (Rule 12)
-    expectedReturn = round2(((target - px) / px) * 100);
-    let rec = recommendationFromReturn(expectedReturn);
-
-    // If HOLD but zones need a slight non-zero target noise, keep HOLD band tight
-    if (Math.abs(expectedReturn) < 3) {
-      // Snap into HOLD band with tiny target drift for UX clarity
+    if ((rec === 'SELL' || rec === 'AVOID NEW POSITION') && expectedReturn > -3) {
+      expectedReturn = round2(-clamp(Math.max(3.2, Math.abs(expectedReturn) || 6), 3.2, 22));
+      target = round2(px * (1 + expectedReturn / 100));
+    }
+    if (rec === 'HOLD') {
       expectedReturn = round2(clamp(expectedReturn, -2.9, 2.9));
       target = round2(px * (1 + expectedReturn / 100));
-      rec = 'HOLD';
+    }
+    if (rec === 'REDUCE' && expectedReturn > -3) {
+      expectedReturn = round2(-clamp(Math.max(3.5, Math.abs(expectedReturn) || 5), 3.5, 9.5));
+      target = round2(px * (1 + expectedReturn / 100));
     }
 
-    const score = scoreFromRecommendation(rec, expectedReturn, signals.direction * 10);
-    const baseConf = input.baseConfidence != null && Number.isFinite(input.baseConfidence) ? input.baseConfidence : 62;
+    expectedReturn = round2(((target - px) / px) * 100);
+    rec = decideRecommendation(evidence, expectedReturn);
+    if ((rec === 'BUY' || rec === 'STRONG BUY') && !evidence.buyGatePass) rec = 'HOLD';
+    if ((rec === 'SELL' || rec === 'AVOID NEW POSITION') && !evidence.sellGatePass) {
+      rec = evidence.netWeight < -0.2 ? 'REDUCE' : 'HOLD';
+      if (rec === 'HOLD') {
+        expectedReturn = round2(clamp(expectedReturn, -2.9, 2.9));
+        target = round2(px * (1 + expectedReturn / 100));
+      }
+    }
+
+    // Positive R/R gate for BUY
+    if ((rec === 'BUY' || rec === 'STRONG BUY') && expectedReturn <= 0) {
+      rec = 'HOLD';
+      expectedReturn = round2(clamp(expectedReturn, -2.9, 2.9));
+      target = round2(px * (1 + expectedReturn / 100));
+    }
+
+    const score = scoreFromRecommendation(rec, expectedReturn, evidence.netWeight * 10);
+    const baseConf =
+      input.baseConfidence != null && Number.isFinite(input.baseConfidence) ? input.baseConfidence : 62;
+    const decisive = Math.abs(evidence.bullishScore - evidence.bearishScore) / 100;
     const confidence = Math.round(
-      clamp(baseConf * 0.35 + signals.agreement * 100 * 0.65 + Math.abs(signals.direction) * 8, 32, 96)
+      clamp(
+        baseConf * 0.2 +
+          Math.abs(evidence.netWeight) * 40 +
+          evidence.scores.overall * 0.28 +
+          (evidence.buyGatePass || evidence.sellGatePass ? 8 : 0) +
+          decisive * 12,
+        38,
+        94
+      )
     );
 
     const vol =
@@ -613,22 +1268,47 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
       api.vol ??
       (input.horizon === '1W' ? 26 : input.horizon === '1Y' ? 17 : 21);
     const risk = riskFromVolatility(vol, input.horizon);
-
     const zones = buildZones(px, target, rec, input.levels, input.stopLossHint, vol);
-    const reasons = pickReasons(rec, signals);
-    const summaryLead = buildSummary(horizonLabel, rec, expectedReturn, confidence, risk.level, reasons);
+    const targets = buildTargets(px, target, rec, input.levels);
+
+    const topFactors =
+      rec === 'STRONG BUY' || rec === 'BUY'
+        ? evidence.bullish
+        : rec === 'SELL' || rec === 'AVOID NEW POSITION' || rec === 'REDUCE'
+          ? evidence.bearish
+          : [...evidence.bullish.slice(0, 2), ...evidence.bearish.slice(0, 2), ...evidence.neutral.slice(0, 2)];
+    const keyReasons = topFactors
+      .sort((a, b) => b.weight - a.weight)
+      .map((f) => f.label)
+      .filter((v, i, a) => a.indexOf(v) === i)
+      .slice(0, 6);
+    while (keyReasons.length < 3) keyReasons.push('Mixed evidence — position sizing discipline preferred');
+
+    const whyWins = buildWhyWins(rec, evidence);
+    const rejectedOpposite = buildRejectedOpposite(rec, evidence);
+    const suggestedAction = suggestedActionFor(rec, evidence);
+    const note = consensusNote(evidence.committee, rec);
+    const summaryLead = `Consensus AI · ${horizonLabel}: ${rec} (${confidence}% confidence). Expected return ${expectedReturn >= 0 ? '+' : ''}${expectedReturn.toFixed(1)}%. ${whyWins}`;
 
     const drawdown = round2(-Math.max(2, Math.abs(expectedReturn) * 0.55 + (vol ?? 20) * 0.12));
     const sharpe =
-      vol > 0 ? round2((expectedReturn / vol) * (input.horizon === '1Y' ? 1.1 : input.horizon === '1W' ? 0.45 : 0.75)) : 0;
-
+      vol > 0
+        ? round2((expectedReturn / vol) * (input.horizon === '1Y' ? 1.1 : input.horizon === '1W' ? 0.45 : 0.75))
+        : 0;
     const zoneScale =
       input.horizon === '1W' ? 0.55 : input.horizon === '1M' ? 1 : input.horizon === '3M' ? 1.35 : 1.85;
+
+    const supportLevels = [input.levels?.s1, input.levels?.s2]
+      .filter((v): v is number => v != null && Number.isFinite(v))
+      .map(round2);
+    const resistanceLevels = [input.levels?.r1, input.levels?.r2]
+      .filter((v): v is number => v != null && Number.isFinite(v))
+      .map(round2);
 
     last = {
       horizon: input.horizon,
       horizonLabel,
-      score,
+      score: Math.round((score + evidence.scores.overall) / 2),
       ratingLabel: rec,
       confidence,
       currentPrice: round2(px),
@@ -650,54 +1330,54 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
       bullCase: zones.takeProfit,
       bearCase: zones.stopLoss,
       zoneScale,
-      keyReasons: reasons,
+      keyReasons,
       summaryLead,
-      explanation: `All scores, targets, trade zones, and risk metrics are generated exclusively for the ${horizonLabel} Investment Horizon by the QuantumNode Master Recommendation Engine.`,
+      explanation: `Consensus process for ${horizonLabel}: committee votes weighed, conflicts shown, gates enforced. ${note}`,
+      chartStance: chartStanceFromRecommendation(rec),
+      finalVerdict: rec,
       validationStatus: '✗ Recalculate',
+      componentScores: evidence.scores,
+      bullishFactors: evidence.bullish.sort((a, b) => b.weight - a.weight),
+      bearishFactors: evidence.bearish.sort((a, b) => b.weight - a.weight),
+      neutralFactors: evidence.neutral,
+      whyWins,
+      rejectedOpposite,
+      suggestedAction,
+      invalidationLevel: invalidationFor(rec, px, zones, evidence),
+      nextReviewTrigger: nextReviewFor(horizonLabel, evidence),
+      supportHoldProbability: evidence.supportHoldProbability,
+      resistanceBreakProbability: evidence.resistanceBreakProbability,
+      explainedSignals: evidence.explainedSignals,
+      decisionWeightNote: note,
+      committee: evidence.committee,
+      bullishScore: evidence.bullishScore,
+      bearishScore: evidence.bearishScore,
+      supportFailureProbability: evidence.supportFailureProbability,
+      resistanceRejectionProbability: evidence.resistanceRejectionProbability,
+      entryZone: zones.buyZone,
+      supportLevels,
+      resistanceLevels,
+      target1: targets.target1,
+      target2: targets.target2,
+      target3: targets.target3,
+      consensusNote: note,
     };
 
     if (validate(last)) {
       last.validationStatus = '✓ Internal Consistency Passed';
       return last;
     }
-
-    // Soft-correct target toward recommendation table midpoints on retry
-    const mid: Record<RecommendationLabel, number> = {
-      'STRONG BUY': 24,
-      BUY: 15,
-      'MODERATE BUY': 6.5,
-      HOLD: 0,
-      SELL: -6.5,
-      'STRONG SELL': -14,
-    };
-    // Flip: choose rec from signals, then force return midpoint
-    const forcedRec =
-      direction > 0.35 ? 'BUY' : direction > 0.12 ? 'MODERATE BUY' : direction < -0.35 ? 'SELL' : direction < -0.12 ? 'SELL' : 'HOLD';
-    expectedReturn = mid[forcedRec as RecommendationLabel];
-    target = round2(px * (1 + expectedReturn / 100));
-    // seed next loop via mutating a synthetic last
-    last.expectedReturn = expectedReturn;
-    last.targetPrice = target;
-    last.ratingLabel = forcedRec as RecommendationLabel;
   }
 
   if (last) {
-    // Final hard reconcile
     last.expectedReturn = round2(((last.targetPrice - last.currentPrice) / last.currentPrice) * 100);
-    last.ratingLabel = recommendationFromReturn(last.expectedReturn);
-    last.score = scoreFromRecommendation(last.ratingLabel, last.expectedReturn, 0);
-    last.summaryLead = buildSummary(
-      horizonLabel,
-      last.ratingLabel,
-      last.expectedReturn,
-      last.confidence,
-      last.riskLevel,
-      last.keyReasons
-    );
+    last.finalVerdict = last.ratingLabel;
+    last.chartStance = chartStanceFromRecommendation(last.ratingLabel);
+    last.supportFailureProbability = 100 - last.supportHoldProbability;
+    last.resistanceRejectionProbability = 100 - last.resistanceBreakProbability;
     last.validationStatus = validate(last) ? '✓ Internal Consistency Passed' : '✗ Recalculate';
     return last;
   }
 
-  // Unreachable, but TypeScript-safe
-  throw new Error('QuantumNode engine failed to produce output');
+  throw new Error('QuantumNode Consensus engine failed to produce output');
 }

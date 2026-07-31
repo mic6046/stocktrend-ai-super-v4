@@ -13,6 +13,7 @@ import {
   TradeZonesPanel,
   RiskMeterPanel,
   MetricRadialRow,
+  DecisionBriefPanel,
   type HorizonKey,
 } from './components/analysis';
 import { buildHorizonView } from './lib/horizonView';
@@ -5210,131 +5211,6 @@ export default function App() {
     ];
   }, [news, data?.ticker]);
 
-  const chartSignals = React.useMemo(() => {
-    const chartHistory = visibleBaseHistory;
-    if (!chartHistory || chartHistory.length === 0) return null;
-
-    let minIdx = 0;
-    let maxIdx = 0;
-    let minPrice = Infinity;
-    let maxPrice = -Infinity;
-
-    chartHistory.forEach((h, idx) => {
-      if (h.close < minPrice) {
-        minPrice = h.close;
-        minIdx = idx;
-      }
-      if (h.close > maxPrice) {
-        maxPrice = h.close;
-        maxIdx = idx;
-      }
-    });
-
-    const changePerc = data?.quote?.regularMarketChangePercent || 0;
-    // Determine bullishness strictly from our multi-scale quantitative directionalBias score (SMA200 + MACD + RSI + Stochastic + Vol)
-    const isBullish = technicalBreakdown 
-      ? (technicalBreakdown.directionalBias >= 50) 
-      : (changePerc > 0);
-    const baseConfidence = technicalBreakdown ? technicalBreakdown.compositeConfidence : (confidence || 75.0);
-
-    // Calculate real backtest indicator accuracy over historical chart periods using an elegant profit target vs stop loss simulation
-    let totalSignals = 0;
-    let accurateSignals = 0;
-
-    if (decoratedChartData && decoratedChartData.length > 0) {
-      decoratedChartData.forEach((item: any, idx: number) => {
-        if (item.isProjectionPoint) return;
-        const currentPrice = item.close;
-        if (currentPrice === null || currentPrice === undefined || currentPrice <= 0) return;
-
-        const lookAheadDays = 8; // Wider window to allow the swing trade to play out
-
-        // Verify buy signals accuracy (simulated take-profit vs stop-loss)
-        if (item.buySignalPrice !== undefined && item.buySignalPrice !== null) {
-          totalSignals++;
-          let isAccurate = false;
-          const targetPrice = currentPrice * 1.015; // 1.5% profit target
-          const stopPrice = currentPrice * 0.985;   // 1.5% protective stop
-          
-          for (let k = 1; k <= lookAheadDays; k++) {
-            const nextItem = decoratedChartData[idx + k];
-            if (nextItem && !nextItem.isProjectionPoint && nextItem.close !== null && nextItem.close !== undefined) {
-              if (nextItem.close >= targetPrice) {
-                isAccurate = true;
-                break;
-              }
-              if (nextItem.close <= stopPrice) {
-                isAccurate = false;
-                break;
-              }
-            }
-          }
-          // Fallback check: if neither was hit, check end state
-          if (!isAccurate) {
-            const finalItem = decoratedChartData[idx + lookAheadDays];
-            if (finalItem && finalItem.close && finalItem.close > currentPrice) {
-              isAccurate = true;
-            }
-          }
-          if (isAccurate) {
-            accurateSignals++;
-          }
-        }
-
-        // Verify sell signals accuracy (simulated protection / downside drop capture)
-        if (item.sellSignalPrice !== undefined && item.sellSignalPrice !== null) {
-          totalSignals++;
-          let isAccurate = false;
-          const targetPrice = currentPrice * 0.985; // 1.5% downside drop (profit/avoidance success)
-          const stopPrice = currentPrice * 1.015;   // 1.5% upside stop loss
-          
-          for (let k = 1; k <= lookAheadDays; k++) {
-            const nextItem = decoratedChartData[idx + k];
-            if (nextItem && !nextItem.isProjectionPoint && nextItem.close !== null && nextItem.close !== undefined) {
-              if (nextItem.close <= targetPrice) {
-                isAccurate = true;
-                break;
-              }
-              if (nextItem.close >= stopPrice) {
-                isAccurate = false;
-                break;
-              }
-            }
-          }
-          if (!isAccurate) {
-            const finalItem = decoratedChartData[idx + lookAheadDays];
-            if (finalItem && finalItem.close && finalItem.close < currentPrice) {
-              isAccurate = true;
-            }
-          }
-          if (isAccurate) {
-            accurateSignals++;
-          }
-        }
-      });
-    }
-
-    // Dynamic smoothing fallback using technical oscillator noise coefficients for premium precision
-    const noiseCoefficient = technicalBreakdown ? (technicalBreakdown.indicators.volatility || 0.02) * 50 : 1.0;
-    const modelDrift = Math.abs(baseConfidence - 80) / 10;
-    const standardBaseline = Math.max(81.4, Math.min(94.8, 88.6 + modelDrift - noiseCoefficient));
-
-    const finalAccuracy = totalSignals > 0 
-      ? (accurateSignals / totalSignals) * 100 
-      : standardBaseline;
-
-    return {
-      buyPoint: chartHistory[minIdx],
-      sellPoint: chartHistory[maxIdx],
-      latestPoint: chartHistory[chartHistory.length - 1],
-      isBullish,
-      confidence: baseConfidence,
-      accuracy: finalAccuracy,
-      signal: isBullish ? 'BUY' : 'SELL',
-      color: isBullish ? '#10b981' : '#f43f5e'
-    };
-  }, [visibleBaseHistory, data, confidence, technicalBreakdown, decoratedChartData]);
-
   const historicalPEData = React.useMemo(() => {
     const chartHistory = visibleBaseHistory;
     if (!data || !chartHistory || chartHistory.length === 0) return [];
@@ -7004,6 +6880,41 @@ export default function App() {
             : null,
         trend: technicalBreakdown?.quantumRefinement?.trendStrength?.status ?? null,
         volatility: technicalBreakdown?.indicators?.volatility ?? null,
+        emaBias:
+          technicalBreakdown?.indicators?.ema20 != null && lastClose > 0
+            ? lastClose > technicalBreakdown.indicators.ema20
+              ? 'bull'
+              : 'bear'
+            : null,
+        smaBias:
+          technicalBreakdown?.indicators?.sma50 != null && lastClose > 0
+            ? lastClose > technicalBreakdown.indicators.sma50
+              ? 'bull'
+              : 'bear'
+            : null,
+        bollingerBias:
+          technicalBreakdown?.indicators?.bollinger?.percent != null
+            ? technicalBreakdown.indicators.bollinger.percent <= 0.2
+              ? 'oversold'
+              : technicalBreakdown.indicators.bollinger.percent >= 0.8
+                ? 'overbought'
+                : 'mid'
+            : null,
+        atrPct: technicalBreakdown?.indicators?.atr != null && lastClose > 0
+          ? (technicalBreakdown.indicators.atr / lastClose) * 100
+          : null,
+        volumeBias:
+          (technicalBreakdown?.quantumRefinement?.rvol?.ratio ?? 1) >= 1.4
+            ? 'high'
+            : (technicalBreakdown?.quantumRefinement?.rvol?.ratio ?? 1) <= 0.7
+              ? 'low'
+              : 'normal',
+        obvBias:
+          technicalBreakdown?.quantumRefinement?.accumulationDistribution?.status === 'ACCUMULATION'
+            ? 'bull'
+            : technicalBreakdown?.quantumRefinement?.accumulationDistribution?.status === 'DISTRIBUTION'
+              ? 'bear'
+              : 'neutral',
       },
       levels: activeLevels,
       whaleScore,
@@ -7011,6 +6922,19 @@ export default function App() {
       sentimentScore: cockpitData?.sentimentScore ?? null,
       momentumScore: cockpitData?.momentumScore ?? null,
       newsBias: null,
+      smartMoneyScore: cockpitData?.smScore ?? null,
+      fundFlowBias:
+        technicalBreakdown?.quantumRefinement?.accumulationDistribution?.status === 'ACCUMULATION'
+          ? 'inflow'
+          : technicalBreakdown?.quantumRefinement?.accumulationDistribution?.status === 'DISTRIBUTION'
+            ? 'outflow'
+            : 'neutral',
+      sectorBias:
+        technicalBreakdown?.quantumRefinement?.sectorRotation?.status === 'LEADER'
+          ? 'leader'
+          : technicalBreakdown?.quantumRefinement?.sectorRotation?.status === 'LAGGARD'
+            ? 'laggard'
+            : 'neutral',
     });
   }, [
     analysisHorizon,
@@ -7025,6 +6949,118 @@ export default function App() {
     whaleAccumulation,
     activeLevels,
   ]);
+
+  /**
+   * Consistency layer: strip conflicting chart markers and stamp ONLY the Master Recommendation
+   * on the latest bar for the selected Investment Horizon.
+   */
+  const displayChartData = React.useMemo(() => {
+    if (!decoratedChartData?.length) return decoratedChartData;
+    const stance = horizonView.chartStance;
+    const rec = horizonView.ratingLabel;
+    const conf = horizonView.confidence;
+
+    let lastHistIdx = -1;
+    for (let i = decoratedChartData.length - 1; i >= 0; i--) {
+      if (!decoratedChartData[i]?.isProjectionPoint) {
+        lastHistIdx = i;
+        break;
+      }
+    }
+
+    return decoratedChartData.map((item: any, idx: number) => {
+      const next = { ...item };
+      // Clear all conflicting action markers — Master Engine is the only allowed stance
+      delete next.buySignalPrice;
+      delete next.sellSignalPrice;
+      delete next.holdSignalPrice;
+      delete next.aiSellSignalPrice;
+      delete next.entrySignalPrice;
+      delete next.exitSignalPrice;
+      delete next.buyConfidence;
+      delete next.sellConfidence;
+      delete next.holdConfidence;
+      delete next.buyFactors;
+      delete next.sellFactors;
+      delete next.holdFactors;
+      delete next.buyAiConfirmed;
+      delete next.sellAiConfirmed;
+
+      if (idx === lastHistIdx) {
+        if (stance === 'bull') {
+          next.buySignalPrice = next.close;
+          next.buyConfidence = conf;
+          next.buyFactors = 'MASTER_ENGINE';
+          next.buyAiConfirmed = true;
+          next.masterRecommendation = rec;
+        } else if (stance === 'bear') {
+          next.sellSignalPrice = next.close;
+          next.sellConfidence = conf;
+          next.sellFactors = 'MASTER_ENGINE';
+          next.sellAiConfirmed = true;
+          next.masterRecommendation = rec;
+        } else {
+          next.holdSignalPrice = next.close;
+          next.holdConfidence = conf;
+          next.holdFactors = 'MASTER_ENGINE';
+          next.masterRecommendation = rec;
+        }
+      }
+      return next;
+    });
+  }, [decoratedChartData, horizonView]);
+
+  const displayZoomedChartData = React.useMemo(() => {
+    if (!displayChartData || displayChartData.length === 0) return [];
+    if (!zoomRange) return displayChartData;
+    const start = Math.max(0, Math.min(zoomRange.start, displayChartData.length - 1));
+    const end = Math.max(start, Math.min(zoomRange.end, displayChartData.length - 1));
+    if (end - start < 3) return displayChartData;
+    return displayChartData.slice(start, end + 1);
+  }, [displayChartData, zoomRange]);
+
+  /** Chart headline signal — inherited from Master Engine only */
+  const chartSignals = React.useMemo(() => {
+    const chartHistory = visibleBaseHistory;
+    if (!chartHistory || chartHistory.length === 0) return null;
+
+    let minIdx = 0;
+    let maxIdx = 0;
+    let minPrice = Infinity;
+    let maxPrice = -Infinity;
+    chartHistory.forEach((h, idx) => {
+      if (h.close < minPrice) {
+        minPrice = h.close;
+        minIdx = idx;
+      }
+      if (h.close > maxPrice) {
+        maxPrice = h.close;
+        maxIdx = idx;
+      }
+    });
+
+    const stance = horizonView.chartStance;
+    const isBullish = stance === 'bull';
+    const isBearish = stance === 'bear';
+    const signal =
+      stance === 'bull' ? horizonView.ratingLabel : stance === 'bear' ? horizonView.ratingLabel : 'HOLD';
+    const color = isBullish ? '#10b981' : isBearish ? '#f43f5e' : '#fbbf24';
+
+    return {
+      buyPoint: chartHistory[minIdx],
+      sellPoint: chartHistory[maxIdx],
+      latestPoint: chartHistory[chartHistory.length - 1],
+      isBullish,
+      confidence: horizonView.confidence,
+      accuracy: horizonView.confidence,
+      signal,
+      color,
+      masterRecommendation: horizonView.ratingLabel,
+      finalVerdict: horizonView.finalVerdict,
+      expectedReturn: horizonView.expectedReturn,
+      horizonLabel: horizonView.horizonLabel,
+    };
+  }, [visibleBaseHistory, horizonView]);
 
   const getIndexPrediction = (symbol: string, currentPrice: number, changePercent: number) => {
     return globalGetIndexPrediction(symbol, currentPrice, changePercent);
@@ -8437,8 +8473,6 @@ export default function App() {
                     isLoading={predicting || (loading && !aiStockScore && !prediction)}
                   />
                   <AiInsightsStrip
-                    bullishFactors={bullishFactors}
-                    bearishFactors={bearishFactors}
                     keyRisks={keyRisks}
                     technical={{
                       rsi: technicalBreakdown?.indicators?.rsi ?? null,
@@ -8469,14 +8503,17 @@ export default function App() {
                     horizonLabel={horizonView.horizonLabel}
                     horizonKey={analysisHorizon}
                     keyReasons={horizonView.keyReasons}
+                    bullishFactors={horizonView.bullishFactors.map((f) => f.label)}
+                    bearishFactors={horizonView.bearishFactors.map((f) => f.label)}
                     recommendationTone={
-                      horizonView.expectedReturn >= 3
+                      horizonView.chartStance === 'bull'
                         ? 'bull'
-                        : horizonView.expectedReturn <= -3
+                        : horizonView.chartStance === 'bear'
                           ? 'bear'
                           : 'neutral'
                     }
                   />
+                  <DecisionBriefPanel decision={horizonView} />
                   <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                     <TradeZonesPanel
                       lastClose={
@@ -9440,7 +9477,7 @@ export default function App() {
                           )}
 
                           <ResponsiveContainer width="100%" height="100%">
-                            <AreaChart data={zoomedChartData} syncId="stockChart">
+                            <AreaChart data={displayZoomedChartData} syncId="stockChart">
                               <defs>
                                 <linearGradient id="colorPriceComparison" x1="0" y1="0" x2="0" y2="1">
                                   <stop offset="5%" stopColor="#10b981" stopOpacity={0.15}/>
@@ -9825,7 +9862,7 @@ export default function App() {
                         
                         <ResponsiveContainer width="100%" height="100%">
                           <ComposedChart 
-                            data={zoomedChartData}
+                            data={displayZoomedChartData}
                             syncId="stockChart"
                             onMouseDown={handleChartMouseDown}
                             onMouseMove={handleChartMouseMove}
@@ -9882,7 +9919,7 @@ export default function App() {
                                 radius={[1, 1, 0, 0]}
                                 animationDuration={800}
                               >
-                                {zoomedChartData.map((entry: any, index: number) => {
+                                {displayZoomedChartData.map((entry: any, index: number) => {
                                   const isUp = (entry.close || 0) >= (entry.open || entry.close || 0);
                                   const isSmart = showSmartMoney && entry.isInstitutionalVolume;
                                   return (
@@ -10177,26 +10214,25 @@ export default function App() {
                               </React.Fragment>
                             ))}
 
-                            {/* AI Generated Buy / Sell Markers with Confidence Percentages */}
+                            {/* Master Engine chart stance markers — one recommendation only */}
                             {showSignals && chartSignals && chartSignals.buyPoint && chartSignals.sellPoint && (
                               <>
                                 {chartSignals.buyPoint.date !== chartSignals.sellPoint.date && (
                                   <>
-                                    {/* Buy Signal Marker at lowest historic close shown ONLY during Bullish Momentum */}
-                                    {chartSignals.isBullish && (
+                                    {horizonView.chartStance === 'bull' && (
                                       <ReferenceDot 
                                         yAxisId="price"
                                         x={chartSignals.buyPoint.date} 
                                         y={chartSignals.buyPoint.close} 
                                         r={6} 
-                                        fill={getRecommendationTheme(aiStockScore?.totalScore || (chartSignals.confidence >= 95 ? 'EXCEPTIONAL BUY' : chartSignals.confidence >= 80 ? 'STRONG BUY' : 'BUY')).accentColor} 
+                                        fill="#34d399" 
                                         stroke="#111113" 
                                         strokeWidth={2}
                                       >
                                         <Label 
-                                          value={`BUY ENTRY (${chartSignals.confidence.toFixed(1)}%)`} 
+                                          value={`${horizonView.ratingLabel} (${horizonView.confidence}%)`} 
                                           position="top" 
-                                          fill={getRecommendationTheme(aiStockScore?.totalScore || (chartSignals.confidence >= 95 ? 'EXCEPTIONAL BUY' : chartSignals.confidence >= 80 ? 'STRONG BUY' : 'BUY')).accentColor} 
+                                          fill="#34d399" 
                                           fontSize={10} 
                                           fontWeight="bold"
                                           fontFamily="monospace"
@@ -10205,21 +10241,20 @@ export default function App() {
                                       </ReferenceDot>
                                     )}
 
-                                    {/* Sell Signal Marker at highest historic close shown ONLY during Bearish Pressure */}
-                                    {!chartSignals.isBullish && (
+                                    {horizonView.chartStance === 'bear' && (
                                       <ReferenceDot 
                                         yAxisId="price"
                                         x={chartSignals.sellPoint.date} 
                                         y={chartSignals.sellPoint.close} 
                                         r={6} 
-                                        fill={getRecommendationTheme((aiStockScore?.totalScore ?? chartSignals.confidence) < 50 ? 'AVOID' : 'SELL').accentColor} 
+                                        fill="#f43f5e" 
                                         stroke="#111113" 
                                         strokeWidth={2}
                                       >
                                         <Label 
-                                          value={`SELL EXIT (${(chartSignals.confidence * 0.95).toFixed(1)}%)`} 
+                                          value={`${horizonView.ratingLabel} (${horizonView.confidence}%)`} 
                                           position="bottom" 
-                                          fill={getRecommendationTheme((aiStockScore?.totalScore ?? chartSignals.confidence) < 50 ? 'AVOID' : 'SELL').accentColor} 
+                                          fill="#f43f5e" 
                                           fontSize={10} 
                                           fontWeight="bold"
                                           fontFamily="monospace"
@@ -10377,7 +10412,7 @@ export default function App() {
                             })()}
 
                             {/* Visual correlation sentiment indicators on the timeline */}
-                            {showNewsSentiment && zoomedChartData.map((item: any, idx: number) => {
+                            {showNewsSentiment && displayZoomedChartData.map((item: any, idx: number) => {
                               if (item.mappedNews && item.mappedNews.length > 0) {
                                 const hasGood = item.mappedNews.some((n: any) => n.sentiment === 'GOOD');
                                 const hasBad = item.mappedNews.some((n: any) => n.sentiment === 'BAD');
@@ -10714,7 +10749,7 @@ export default function App() {
                       <div className="h-16 w-full relative">
                         <ResponsiveContainer width="100%" height="100%">
                           <AreaChart 
-                            data={zoomedChartData}
+                            data={displayZoomedChartData}
                             syncId="stockChart"
                           >
                             <defs>
@@ -11634,6 +11669,9 @@ export default function App() {
                       }
                       currency={data.quote?.currency || 'USD'}
                       eps={getStockPE(data.ticker, data.quote).eps}
+                      masterRecommendation={horizonView.ratingLabel}
+                      masterExpectedReturn={horizonView.expectedReturn}
+                      masterHorizonLabel={horizonView.horizonLabel}
                     />
                   </div>
                 )}
@@ -11648,7 +11686,21 @@ export default function App() {
                 className="col-span-12 lg:col-span-5 space-y-6"
               >
                 <AiStockScoreCard
-                  scoreData={aiStockScore}
+                  scoreData={
+                    aiStockScore
+                      ? {
+                          ...aiStockScore,
+                          totalScore: horizonView.score,
+                          rating: horizonView.ratingLabel,
+                          overallExplanation: horizonView.summaryLead,
+                        }
+                      : {
+                          totalScore: horizonView.score,
+                          rating: horizonView.ratingLabel,
+                          components: {},
+                          overallExplanation: horizonView.summaryLead,
+                        }
+                  }
                   ticker={data.ticker}
                   stockName={data.quote?.shortName || data.quote?.longName || ''}
                   currentPrice={
@@ -11662,10 +11714,18 @@ export default function App() {
                   }
                   currency={data.quote?.currency}
                   isLoading={predicting || (loading && !aiStockScore)}
-                  projectionTrend={projectionMeta.trend}
-                  projectionHorizonDays={Math.min(10, Math.max(3, projectionHorizon))}
-                  shortTermConfidence={showProjection ? projectionMeta.shortConf : null}
-                  mediumTermConfidence={confidence}
+                  projectionTrend={
+                    horizonView.chartStance === 'bull'
+                      ? 'up'
+                      : horizonView.chartStance === 'bear'
+                        ? 'down'
+                        : 'flat'
+                  }
+                  projectionHorizonDays={
+                    analysisHorizon === '1W' ? 5 : analysisHorizon === '1M' ? 21 : analysisHorizon === '3M' ? 63 : 252
+                  }
+                  shortTermConfidence={horizonView.confidence}
+                  mediumTermConfidence={horizonView.confidence}
                   variant="compact"
                 />
 
@@ -12255,87 +12315,95 @@ export default function App() {
                     </button>
                   </div>
 
-                  {/* Recent Signal Feed Widget */}
+                  {/* Master Decision Feed — single recommendation + conflict brief */}
                   <div className="bg-[#0A0A0C] border border-white/5 p-4 rounded-xl space-y-3">
                     <div className="text-[9.5px] font-mono font-bold uppercase tracking-widest text-gray-500 border-b border-white/5 pb-1.5 flex justify-between items-center">
-                      <span>Quantitative Strategy Feed</span>
-                      <span className="text-[8px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded text-right tracking-tight uppercase">
-                        {recentSignalsList.length} Active Triggers
+                      <span>Master Decision Engine</span>
+                      <span className="text-[8px] bg-violet-500/10 text-violet-300 border border-violet-500/20 px-1.5 py-0.5 rounded text-right tracking-tight uppercase">
+                        {horizonView.horizonLabel}
                       </span>
                     </div>
-
-                    {recentSignalsList.length > 0 ? (
-                      <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
-                        {recentSignalsList.map((sig, idx) => {
-                          const isBuy = sig.type === 'BUY';
-                          const sigColor = isBuy ? "text-[#10b981]" : "text-[#ef4444]";
-                          const sigBg = isBuy ? "bg-[#10b981]/5 border-[#10b981]/15" : "bg-[#ef4444]/5 border-[#ef4444]/15";
-                          const formattedDate = (() => {
-                            try {
-                              const d = new Date(sig.date);
-                              return format(d, 'MMM d, yyyy');
-                            } catch {
-                              return sig.date;
-                            }
-                          })();
-
-                          return (
-                            <div 
-                              key={`sig-feed-${idx}`} 
-                              className={cn(
-                                "border rounded-lg p-2 flex flex-col gap-1.5 transition-all hover:bg-white/[0.02]", 
-                                sig.aiConfirmed ? "border-amber-500/35 bg-amber-500/[0.02]" : sigBg
-                              )}
-                            >
-                              <div className="flex justify-between items-center">
-                                <div className="flex items-center gap-2">
-                                  <span className={cn(
-                                    "text-[9px] px-1.5 py-0.5 rounded font-black tracking-wider uppercase",
-                                    isBuy ? "bg-[#10b981]/20 text-[#10b981]" : "bg-[#ef4444]/20 text-[#ef4444]"
-                                  )}>
-                                    {sig.type}
-                                  </span>
-                                  {sig.aiConfirmed && (
-                                    <span className="text-[8px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/25 font-bold uppercase tracking-wider flex items-center gap-0.5 animate-pulse">
-                                      ✨ AI CONFIRMED
-                                    </span>
-                                  )}
-                                </div>
-                                <span className="text-[8.5px] font-mono text-gray-500">{formattedDate}</span>
-                              </div>
-
-                              <div className="grid grid-cols-3 gap-2 text-[10.5px] font-mono items-center">
-                                <div>
-                                  <span className="text-gray-500 block text-[7px] uppercase">Price</span>
-                                  <span className="font-bold text-gray-200">${sig.price.toFixed(2)}</span>
-                                </div>
-                                <div>
-                                  <span className="text-gray-500 block text-[7px] uppercase">Confidence</span>
-                                  <span className="font-bold text-gray-200">{sig.confidence}%</span>
-                                </div>
-                                <div className="text-right">
-                                  <span className="text-gray-500 block text-[7px] uppercase">Confluences</span>
-                                  <span className={cn(
-                                    "font-mono font-semibold text-[9.5px]",
-                                    isBuy ? "text-emerald-400" : "text-rose-400"
-                                  )}>
-                                    {sig.factors}
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
+                    <div
+                      className={cn(
+                        'border rounded-lg p-3 space-y-2',
+                        horizonView.chartStance === 'bull'
+                          ? 'border-emerald-500/25 bg-emerald-500/5'
+                          : horizonView.chartStance === 'bear'
+                            ? 'border-rose-500/25 bg-rose-500/5'
+                            : 'border-amber-500/25 bg-amber-500/5'
+                      )}
+                    >
+                      <div className="flex justify-between items-center gap-2">
+                        <span
+                          className={cn(
+                            'text-[11px] px-2 py-1 rounded font-black tracking-wider uppercase',
+                            horizonView.chartStance === 'bull'
+                              ? 'bg-emerald-500/20 text-emerald-300'
+                              : horizonView.chartStance === 'bear'
+                                ? 'bg-rose-500/20 text-rose-300'
+                                : 'bg-amber-500/20 text-amber-300'
+                          )}
+                        >
+                          {horizonView.finalVerdict}
+                        </span>
+                        <span className="text-[10px] font-mono text-gray-400">
+                          {horizonView.confidence}% conf
+                        </span>
                       </div>
-                    ) : (
-                      <p className="text-[9.5px] font-mono text-gray-500 italic text-center py-4">
-                        Awaiting new model-driven trading triggers...
+                      <div className="grid grid-cols-2 gap-2 text-[10px] font-mono">
+                        <div>
+                          <span className="text-gray-500 block text-[7px] uppercase">Expected Return</span>
+                          <span
+                            className={cn(
+                              'font-bold',
+                              horizonView.expectedReturn >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                            )}
+                          >
+                            {horizonView.expectedReturn >= 0 ? '+' : ''}
+                            {horizonView.expectedReturn.toFixed(1)}%
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500 block text-[7px] uppercase">Suggested Action</span>
+                          <span className="font-bold text-gray-200 leading-tight">
+                            {horizonView.suggestedAction}
+                          </span>
+                        </div>
+                      </div>
+                      <p className="text-[10px] text-gray-300 leading-relaxed">{horizonView.whyWins}</p>
+                      {(horizonView.bullishFactors.length > 0 || horizonView.bearishFactors.length > 0) && (
+                        <div className="grid grid-cols-1 gap-1.5 pt-1 border-t border-white/5">
+                          {horizonView.bullishFactors.slice(0, 3).map((f) => (
+                            <p key={`md-b-${f.label}`} className="text-[9px] text-emerald-300/90">
+                              ✔ {f.label}
+                            </p>
+                          ))}
+                          {horizonView.bearishFactors.slice(0, 3).map((f) => (
+                            <p key={`md-e-${f.label}`} className="text-[9px] text-rose-300/90">
+                              ✖ {f.label}
+                            </p>
+                          ))}
+                        </div>
+                      )}
+                      <div className="grid grid-cols-3 gap-1 pt-1 border-t border-white/5 text-[8px] font-mono text-gray-500">
+                        {horizonView.committee.slice(0, 6).map((m) => (
+                          <p key={m.seat} className="truncate">
+                            {m.seat.slice(0, 4)} {m.score}
+                          </p>
+                        ))}
+                      </div>
+                      <p className="text-[9px] text-amber-200/80 leading-relaxed">
+                        Invalidation: {horizonView.invalidationLevel}
                       </p>
-                    )}
+                      <p className="text-[9px] text-sky-200/80 leading-relaxed">
+                        Next review: {horizonView.nextReviewTrigger}
+                      </p>
+                      <p className="text-[8px] font-mono text-violet-300/80">{horizonView.validationStatus}</p>
+                    </div>
                   </div>
 
                   <div className="text-[9px] text-gray-600 font-mono tracking-normal leading-relaxed text-center">
-                    The AI Advisory System combines high-resolution technical overlays with model-derived consensus rules. Always cross-verify critical entries.
+                    One final recommendation only — every module inherits the same Investment Horizon call. Conflicting signals are shown, then weighed.
                   </div>
                 </div>
 

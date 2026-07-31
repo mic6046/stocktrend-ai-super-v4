@@ -548,12 +548,6 @@ export const AiStockScoreCard: React.FC<AiStockScoreCardProps> = ({
           </h4>
         </div>
         <p className="text-[12px] text-gray-300 leading-relaxed font-sans break-words">{explanation}</p>
-        {shortBias !== mediumBias && (
-          <p className="mt-2 text-[10px] text-amber-200/80 leading-relaxed border border-amber-500/20 bg-amber-500/5 rounded-lg px-2.5 py-2 break-words">
-            These signals use different horizons. Short-term forecasts may differ from the medium-term rating — that is
-            normal and does not mean conflicting analysis.
-          </p>
-        )}
         <div className="mt-3 flex flex-wrap gap-1.5 min-w-0">
           <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-0.5 text-[9px] font-mono font-bold text-amber-300">
             Risk: {risks.risk}
@@ -566,7 +560,7 @@ export const AiStockScoreCard: React.FC<AiStockScoreCardProps> = ({
           </span>
         </div>
         <p className="mt-2 text-[9px] text-gray-600 font-mono">
-          Short-term projection confidence {shortConf}% (separate horizon)
+          Stance inherits Master Decision Engine for the selected Investment Horizon only.
         </p>
       </div>
     </div>

@@ -6,4 +6,5 @@ export { TradeZonesPanel } from './TradeZonesPanel';
 export { RiskMeterPanel } from './RiskMeterPanel';
 export { MetricRadialRow } from './MetricRadialRow';
 export { AnimatedNumber } from './AnimatedNumber';
+export { DecisionBriefPanel } from './DecisionBriefPanel';
 export * from './analysisTheme';

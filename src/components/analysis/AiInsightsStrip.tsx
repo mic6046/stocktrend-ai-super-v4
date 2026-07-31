@@ -65,13 +65,32 @@ export function AiInsightsStrip({
       });
     }
 
-    // Prefer master-engine reasons — they are guaranteed to match the recommendation
-    if (keyReasons && keyReasons.length > 0) {
+    // Show both sides — do not force indicators to agree with the final call
+    for (const f of bullishFactors.slice(0, 3)) {
+      const text = cleanFactor(f);
+      if (text && !items.some((i) => i.text === text)) {
+        items.push({ id: `b-${items.length}`, text: text.slice(0, 72), tone: 'bull' });
+      }
+    }
+    for (const f of bearishFactors.slice(0, 3)) {
+      const text = cleanFactor(f);
+      if (text && !items.some((i) => i.text === text)) {
+        items.push({ id: `be-${items.length}`, text: text.slice(0, 72), tone: 'risk' });
+      }
+    }
+
+    if (keyReasons && keyReasons.length > 0 && items.length < 6) {
       const tone: Insight['tone'] =
         recommendationTone === 'bull' ? 'bull' : recommendationTone === 'bear' ? 'risk' : 'neutral';
-      for (let i = 0; i < Math.min(6, keyReasons.length); i++) {
-        items.push({ id: `kr-${i}`, text: keyReasons[i], tone });
+      for (let i = 0; i < keyReasons.length && items.length < 7; i++) {
+        const text = cleanFactor(keyReasons[i]);
+        if (text && !items.some((x) => x.text === text)) {
+          items.push({ id: `kr-${i}`, text: text.slice(0, 72), tone });
+        }
       }
+    }
+
+    if (items.length >= 5) {
       return items.slice(0, 7);
     }
 
@@ -141,7 +160,7 @@ export function AiInsightsStrip({
     recommendationTone,
   ]);
 
-  const narrative = [horizonLead, whyBuyNow, whySellNow, fullAnalysis].filter(Boolean).join('\n\n');
+  const narrative = [horizonLead, fullAnalysis].filter(Boolean).join('\n\n');
 
   return (
     <GlassCard>

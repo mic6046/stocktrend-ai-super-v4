@@ -329,6 +329,10 @@ interface HistoricalValuationDashboardProps {
   currentPrice: number;
   currency?: string;
   eps?: number;
+  /** Master Engine recommendation — only allowed trading stance on this page */
+  masterRecommendation?: string;
+  masterExpectedReturn?: number | null;
+  masterHorizonLabel?: string;
 }
 
 export function HistoricalValuationDashboard({
@@ -339,6 +343,9 @@ export function HistoricalValuationDashboard({
   currentPrice,
   currency = 'USD',
   eps = 0,
+  masterRecommendation,
+  masterExpectedReturn,
+  masterHorizonLabel,
 }: HistoricalValuationDashboardProps) {
   const [range, setRange] = useState<RangeKey>('5Y');
   const displayName = stockName?.trim() || '';
@@ -757,10 +764,10 @@ export function HistoricalValuationDashboard({
                 />
                 <PanelRow label="Intrinsic Value" value={`${sym}${analytics.intrinsic.toFixed(2)}`} />
                 <PanelRow
-                  label="Expected Return"
-                  value={`${analytics.rec.expectedReturnPct >= 0 ? '+' : ''}${analytics.rec.expectedReturnPct.toFixed(1)}%`}
+                  label="Margin of Safety"
+                  value={`${analytics.marginOfSafety >= 0 ? '+' : ''}${analytics.marginOfSafety.toFixed(1)}%`}
                   valueClass={
-                    analytics.rec.expectedReturnPct >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                    analytics.marginOfSafety >= 0 ? 'text-emerald-400' : 'text-rose-400'
                   }
                 />
               </div>
@@ -774,18 +781,18 @@ export function HistoricalValuationDashboard({
 
             <div className="rounded-2xl border border-white/10 bg-[#121214] p-4 min-w-0 overflow-visible">
               <p className="text-[10px] font-mono uppercase tracking-wider text-gray-400 mb-3">
-                Recommendation
+                Master Recommendation
               </p>
               <div className="w-full overflow-visible">
                 <HeroStatusBlock
-                  label={analytics.rec.action}
-                  confidence={analytics.rec.confidence}
+                  label={masterRecommendation || 'HOLD'}
+                  confidence={undefined}
                   textClassName={
-                    analytics.rec.action === 'Strong Buy' || analytics.rec.action === 'Buy'
+                    String(masterRecommendation || '').includes('BUY')
                       ? 'text-emerald-400'
-                      : analytics.rec.action === 'Hold'
+                      : String(masterRecommendation || '').includes('HOLD')
                         ? 'text-amber-400'
-                        : analytics.rec.action === 'Reduce'
+                        : String(masterRecommendation || '').includes('REDUCE')
                           ? 'text-orange-400'
                           : 'text-rose-400'
                   }
@@ -796,12 +803,22 @@ export function HistoricalValuationDashboard({
                 />
               </div>
               <p className="mt-3 text-[10px] font-mono font-bold text-violet-300 tracking-wide break-words">
-                {analytics.rec.signal}
+                {masterHorizonLabel
+                  ? `${masterHorizonLabel} · inherited from Master Decision Engine`
+                  : 'Inherited from Master Decision Engine'}
+              </p>
+              <p className="mt-2 text-[10px] text-gray-500 leading-relaxed">
+                Valuation context only — PE status does not override the trading recommendation.
+                Current valuation: {tone.label}.
               </p>
               <div className="mt-3 grid grid-cols-2 gap-2 text-[10px] font-mono">
                 <Stat
                   label="Expected Return"
-                  value={`${analytics.rec.expectedReturnPct >= 0 ? '+' : ''}${analytics.rec.expectedReturnPct.toFixed(1)}%`}
+                  value={
+                    masterExpectedReturn != null
+                      ? `${masterExpectedReturn >= 0 ? '+' : ''}${masterExpectedReturn.toFixed(1)}%`
+                      : '—'
+                  }
                 />
                 <Stat label="Intrinsic Value" value={`${sym}${analytics.intrinsic.toFixed(2)}`} />
                 <Stat
@@ -857,11 +874,17 @@ export function HistoricalValuationDashboard({
               {explanationForStatus(analytics.status)}
             </p>
             <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-violet-500/30 bg-violet-500/10 px-2.5 py-1.5 min-w-0 max-w-full overflow-hidden">
-              <span className="text-[9px] font-mono uppercase tracking-wider text-violet-300 shrink-0">Valuation Signal</span>
+              <span className="text-[9px] font-mono uppercase tracking-wider text-violet-300 shrink-0">Valuation Status</span>
               <FitText maxPx={12} minPx={9} maxLines={2} className="font-black text-white flex-1">
-                {analytics.rec.signal}
+                {analytics.status.toUpperCase()}
               </FitText>
             </div>
+            {masterRecommendation && (
+              <p className="mt-2 text-[10px] text-gray-500 font-mono">
+                Trading stance: <span className="text-violet-300 font-bold">{masterRecommendation}</span>
+                {masterHorizonLabel ? ` · ${masterHorizonLabel}` : ''} (Master Engine)
+              </p>
+            )}
           </div>
 
           <div className="rounded-2xl border border-white/10 bg-black/30 p-4 min-w-0 overflow-hidden">
