@@ -25,6 +25,14 @@ type TradeZonesPanelProps = {
   zoneScale?: number;
   horizon?: HorizonKey;
   horizonLabel?: string;
+  /** Master engine zones — when provided, become the sole zone source */
+  engineZones?: {
+    buyZone: ZoneBand;
+    addZone: ZoneBand;
+    holdZone: ZoneBand;
+    takeProfitZone: ZoneBand;
+    stopLoss: number;
+  } | null;
 };
 
 function scaleFromSpot(px: number, level: number, scale: number) {
@@ -69,40 +77,56 @@ export function TradeZonesPanel({
   zoneScale = 1,
   horizon = '1M',
   horizonLabel = '1 Month',
+  engineZones = null,
 }: TradeZonesPanelProps) {
   const model = useMemo(() => {
-    // Zone geometry follows Investment Horizon via zoneScale + horizon-adjusted cases.
     const px = lastClose > 0 ? lastClose : 100;
-    const z = Number.isFinite(zoneScale) && zoneScale > 0 ? zoneScale : 1;
-    const rawS2 = levels?.s2 && Number.isFinite(levels.s2) ? levels.s2 : px * 0.92;
-    const rawS1 = levels?.s1 && Number.isFinite(levels.s1) ? levels.s1 : px * 0.96;
-    const rawR1 = levels?.r1 && Number.isFinite(levels.r1) ? levels.r1 : px * 1.04;
-    const rawR2 = levels?.r2 && Number.isFinite(levels.r2) ? levels.r2 : px * 1.1;
-    const s2 = scaleFromSpot(px, rawS2, z);
-    const s1 = scaleFromSpot(px, rawS1, z);
-    const r1 = scaleFromSpot(px, rawR1, z);
-    const r2 = scaleFromSpot(px, rawR2, z);
-    const tpHi = bullCase && Number.isFinite(bullCase) ? bullCase : r2 * 1.02;
-    const sl =
-      stopLoss && Number.isFinite(stopLoss)
-        ? stopLoss
-        : bearCase && Number.isFinite(bearCase)
-          ? bearCase
-          : s2 * 0.98;
 
-    const buy: ZoneBand = { lo: Math.min(s2, s1), hi: Math.max(s2, s1) };
-    const add: ZoneBand = {
-      lo: Math.min(s1, (s1 + px) / 2),
-      hi: Math.max(s1, (s1 + px) / 2),
-    };
-    const hold: ZoneBand = {
-      lo: Math.min(px * 0.99, r1),
-      hi: Math.max(px * 0.99, r1),
-    };
-    const takeProfit: ZoneBand = {
-      lo: Math.min(r1, tpHi),
-      hi: Math.max(r1, tpHi),
-    };
+    let buy: ZoneBand;
+    let add: ZoneBand;
+    let hold: ZoneBand;
+    let takeProfit: ZoneBand;
+    let sl: number;
+
+    if (engineZones) {
+      buy = engineZones.buyZone;
+      add = engineZones.addZone;
+      hold = engineZones.holdZone;
+      takeProfit = engineZones.takeProfitZone;
+      sl = engineZones.stopLoss;
+    } else {
+      // Fallback geometry if engine zones are unavailable
+      const z = Number.isFinite(zoneScale) && zoneScale > 0 ? zoneScale : 1;
+      const rawS2 = levels?.s2 && Number.isFinite(levels.s2) ? levels.s2 : px * 0.92;
+      const rawS1 = levels?.s1 && Number.isFinite(levels.s1) ? levels.s1 : px * 0.96;
+      const rawR1 = levels?.r1 && Number.isFinite(levels.r1) ? levels.r1 : px * 1.04;
+      const rawR2 = levels?.r2 && Number.isFinite(levels.r2) ? levels.r2 : px * 1.1;
+      const s2 = scaleFromSpot(px, rawS2, z);
+      const s1 = scaleFromSpot(px, rawS1, z);
+      const r1 = scaleFromSpot(px, rawR1, z);
+      const r2 = scaleFromSpot(px, rawR2, z);
+      const tpHi = bullCase && Number.isFinite(bullCase) ? bullCase : r2 * 1.02;
+      sl =
+        stopLoss && Number.isFinite(stopLoss)
+          ? stopLoss
+          : bearCase && Number.isFinite(bearCase)
+            ? bearCase
+            : s2 * 0.98;
+
+      buy = { lo: Math.min(s2, s1), hi: Math.max(s2, s1) };
+      add = {
+        lo: Math.min(s1, (s1 + px) / 2),
+        hi: Math.max(s1, (s1 + px) / 2),
+      };
+      hold = {
+        lo: Math.min(px * 0.99, r1),
+        hi: Math.max(px * 0.99, r1),
+      };
+      takeProfit = {
+        lo: Math.min(r1, tpHi),
+        hi: Math.max(r1, tpHi),
+      };
+    }
 
     const warnings: string[] = [];
     const ordered = [
@@ -190,7 +214,7 @@ export function TradeZonesPanel({
       },
       warnings: [...new Set(warnings)],
     };
-  }, [lastClose, levels, bullCase, bearCase, stopLoss, currency, zoneScale]);
+  }, [lastClose, levels, bullCase, bearCase, stopLoss, currency, zoneScale, engineZones]);
 
   return (
     <GlassCard className="h-full">

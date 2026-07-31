@@ -26,6 +26,9 @@ type AiInsightsStripProps = {
   horizonLead?: string;
   horizonLabel?: string;
   horizonKey?: string;
+  /** Master engine key reasons (must agree with recommendation) */
+  keyReasons?: string[];
+  recommendationTone?: 'bull' | 'bear' | 'neutral';
 };
 
 function cleanFactor(s: string): string {
@@ -46,6 +49,8 @@ export function AiInsightsStrip({
   horizonLead,
   horizonLabel,
   horizonKey = '1M',
+  keyReasons,
+  recommendationTone = 'neutral',
 }: AiInsightsStripProps) {
   const [expanded, setExpanded] = useState(false);
 
@@ -58,6 +63,16 @@ export function AiInsightsStrip({
         text: `${horizonLabel} Investment Horizon active`,
         tone: 'neutral',
       });
+    }
+
+    // Prefer master-engine reasons — they are guaranteed to match the recommendation
+    if (keyReasons && keyReasons.length > 0) {
+      const tone: Insight['tone'] =
+        recommendationTone === 'bull' ? 'bull' : recommendationTone === 'bear' ? 'risk' : 'neutral';
+      for (let i = 0; i < Math.min(6, keyReasons.length); i++) {
+        items.push({ id: `kr-${i}`, text: keyReasons[i], tone });
+      }
+      return items.slice(0, 7);
     }
 
     if (technical?.rsi != null) {
@@ -100,7 +115,7 @@ export function AiInsightsStrip({
       items.push({
         id: 'risk',
         text: `${riskLabel} Risk · ${horizonLabel || 'selected horizon'}`,
-        tone: riskLabel.toLowerCase() === 'high' ? 'risk' : 'neutral',
+        tone: riskLabel.toLowerCase().includes('high') ? 'risk' : 'neutral',
       });
     } else if (keyRisks[0]) {
       items.push({ id: 'risk0', text: cleanFactor(keyRisks[0]).slice(0, 64), tone: 'risk' });
@@ -122,6 +137,8 @@ export function AiInsightsStrip({
     institutionalScore,
     riskLabel,
     horizonLabel,
+    keyReasons,
+    recommendationTone,
   ]);
 
   const narrative = [horizonLead, whyBuyNow, whySellNow, fullAnalysis].filter(Boolean).join('\n\n');

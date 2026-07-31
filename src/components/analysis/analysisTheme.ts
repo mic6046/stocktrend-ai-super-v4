@@ -3,6 +3,7 @@
 export type ActionTone =
   | 'strong-buy'
   | 'buy'
+  | 'moderate-buy'
   | 'hold'
   | 'reduce'
   | 'sell'
@@ -26,6 +27,15 @@ export const ACTION_COLORS = {
     hex: '#38bdf8',
     label: 'Buy',
     emoji: '🔵',
+  },
+  'moderate-buy': {
+    text: 'text-cyan-300',
+    bg: 'bg-cyan-500/10',
+    border: 'border-cyan-400/35',
+    glow: 'shadow-[0_0_24px_rgba(34,211,238,0.14)]',
+    hex: '#22d3ee',
+    label: 'Moderate Buy',
+    emoji: '🩵',
   },
   hold: {
     text: 'text-amber-400',
@@ -69,6 +79,7 @@ export function actionToneFromLabel(label: string): ActionTone {
   const s = label.trim().toLowerCase();
   if (s.includes('exceptional') || s.includes('very strong buy') || s.includes('strong buy')) return 'strong-buy';
   if (s.includes('strong sell') || s.includes('avoid')) return 'strong-sell';
+  if (s.includes('moderate buy')) return 'moderate-buy';
   if (s.includes('reduce')) return 'reduce';
   if (s.includes('sell')) return 'sell';
   if (s.includes('hold') || s.includes('neutral')) return 'hold';

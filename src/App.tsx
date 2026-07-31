@@ -5164,44 +5164,6 @@ export default function App() {
     };
   }, [prediction, technicalBreakdown, recommendation, confidence, aiStockScore, ensembleForecast, patternSuccessSummary, financials, data, whyBuyStrength, whySellStrength, adaptiveLearning]);
 
-  /** Investment Horizon is the single source of truth for the analysis dashboard. */
-  const horizonView = React.useMemo(() => {
-    const lastClose =
-      Number(data?.quote?.regularMarketPrice) ||
-      projectionMeta.lastClose ||
-      Number(cockpitData?.entryPrice) ||
-      0;
-    return buildHorizonView({
-      horizon: analysisHorizon,
-      lastClose,
-      baseScore: aiStockScore?.totalScore ?? (confidence ?? 65),
-      baseConfidence: confidence ?? cockpitData?.confidence ?? null,
-      baseTarget: projectionMeta.baseCase ?? cockpitData?.baseCase?.targetPrice ?? null,
-      bullTarget: projectionMeta.bullCase ?? cockpitData?.bullCase?.targetPrice ?? null,
-      bearTarget: projectionMeta.bearCase ?? cockpitData?.bearCase?.targetPrice ?? null,
-      baseReturn: cockpitData?.baseCase?.expectedReturn ?? null,
-      bullReturn: cockpitData?.bullCase?.expectedReturn ?? null,
-      baseDrawdown: cockpitData?.baseCase?.expectedDrawdown ?? null,
-      baseVolatility: technicalBreakdown?.indicators?.volatility ?? null,
-      baseRiskScore: cockpitData?.riskScore ?? Math.max(0, 100 - (aiStockScore?.totalScore ?? 60)),
-      baseSharpe:
-        cockpitData?.rrRatio != null ? Number((cockpitData.rrRatio * 0.85).toFixed(2)) : null,
-      stopLoss: cockpitData?.stopLoss ?? null,
-      forecastHorizons,
-      ticker: data?.ticker,
-    });
-  }, [
-    analysisHorizon,
-    data?.quote?.regularMarketPrice,
-    data?.ticker,
-    projectionMeta,
-    cockpitData,
-    aiStockScore,
-    confidence,
-    technicalBreakdown?.indicators?.volatility,
-    forecastHorizons,
-  ]);
-
   const radarData = React.useMemo(() => {
     if (!news || news.length === 0) return [];
     
@@ -6999,6 +6961,71 @@ export default function App() {
   const technicalLevels = computeTechnicalLevels(visibleBaseHistory);
   const activeLevels: any = (srSource === 'AI' && levels) ? levels : technicalLevels;
 
+  /** Investment Horizon is the single source of truth — QuantumNode Master Engine. */
+  const horizonView = React.useMemo(() => {
+    const lastClose =
+      Number(data?.quote?.regularMarketPrice) ||
+      projectionMeta.lastClose ||
+      Number(cockpitData?.entryPrice) ||
+      0;
+    const whaleScore =
+      whaleAccumulation?.metrics?.whaleAccumulationIndex ??
+      (aiStockScore?.components?.whaleAccumulation
+        ? Math.round(
+            (aiStockScore.components.whaleAccumulation.score /
+              Math.max(1, aiStockScore.components.whaleAccumulation.maxWeight)) *
+              100
+          )
+        : null);
+    return buildHorizonView({
+      horizon: analysisHorizon,
+      lastClose,
+      baseScore: aiStockScore?.totalScore ?? (confidence ?? 65),
+      baseConfidence: confidence ?? cockpitData?.confidence ?? null,
+      baseTarget: projectionMeta.baseCase ?? cockpitData?.baseCase?.targetPrice ?? null,
+      bullTarget: projectionMeta.bullCase ?? cockpitData?.bullCase?.targetPrice ?? null,
+      bearTarget: projectionMeta.bearCase ?? cockpitData?.bearCase?.targetPrice ?? null,
+      baseReturn: cockpitData?.baseCase?.expectedReturn ?? null,
+      bullReturn: cockpitData?.bullCase?.expectedReturn ?? null,
+      baseDrawdown: cockpitData?.baseCase?.expectedDrawdown ?? null,
+      baseVolatility: technicalBreakdown?.indicators?.volatility ?? null,
+      baseRiskScore: cockpitData?.riskScore ?? Math.max(0, 100 - (aiStockScore?.totalScore ?? 60)),
+      baseSharpe:
+        cockpitData?.rrRatio != null ? Number((cockpitData.rrRatio * 0.85).toFixed(2)) : null,
+      stopLoss: cockpitData?.stopLoss ?? null,
+      forecastHorizons,
+      ticker: data?.ticker,
+      technical: {
+        rsi: technicalBreakdown?.indicators?.rsi ?? null,
+        macdBullish:
+          technicalBreakdown?.indicators?.macd != null
+            ? technicalBreakdown.indicators.macd.macdLine >
+              technicalBreakdown.indicators.macd.signalLine
+            : null,
+        trend: technicalBreakdown?.quantumRefinement?.trendStrength?.status ?? null,
+        volatility: technicalBreakdown?.indicators?.volatility ?? null,
+      },
+      levels: activeLevels,
+      whaleScore,
+      institutionalScore: cockpitData?.instAccumScore ?? null,
+      sentimentScore: cockpitData?.sentimentScore ?? null,
+      momentumScore: cockpitData?.momentumScore ?? null,
+      newsBias: null,
+    });
+  }, [
+    analysisHorizon,
+    data?.quote?.regularMarketPrice,
+    data?.ticker,
+    projectionMeta,
+    cockpitData,
+    aiStockScore,
+    confidence,
+    technicalBreakdown,
+    forecastHorizons,
+    whaleAccumulation,
+    activeLevels,
+  ]);
+
   const getIndexPrediction = (symbol: string, currentPrice: number, changePercent: number) => {
     return globalGetIndexPrediction(symbol, currentPrice, changePercent);
   };
@@ -8406,7 +8433,7 @@ export default function App() {
                     expectedReturn={horizonView.expectedReturn}
                     horizon={analysisHorizon}
                     onHorizonChange={setAnalysisHorizon}
-                    horizonExplanation={horizonView.explanation}
+                    horizonExplanation={`${horizonView.explanation} ${horizonView.validationStatus}`}
                     isLoading={predicting || (loading && !aiStockScore && !prediction)}
                   />
                   <AiInsightsStrip
@@ -8441,6 +8468,14 @@ export default function App() {
                     horizonLead={horizonView.summaryLead}
                     horizonLabel={horizonView.horizonLabel}
                     horizonKey={analysisHorizon}
+                    keyReasons={horizonView.keyReasons}
+                    recommendationTone={
+                      horizonView.expectedReturn >= 3
+                        ? 'bull'
+                        : horizonView.expectedReturn <= -3
+                          ? 'bear'
+                          : 'neutral'
+                    }
                   />
                   <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                     <TradeZonesPanel
@@ -8458,6 +8493,13 @@ export default function App() {
                       zoneScale={horizonView.zoneScale}
                       horizon={analysisHorizon}
                       horizonLabel={horizonView.horizonLabel}
+                      engineZones={{
+                        buyZone: horizonView.buyZone,
+                        addZone: horizonView.addZone,
+                        holdZone: horizonView.holdZone,
+                        takeProfitZone: horizonView.takeProfitZone,
+                        stopLoss: horizonView.stopLoss,
+                      }}
                     />
                     <RiskMeterPanel
                       riskScore={horizonView.riskScore}
