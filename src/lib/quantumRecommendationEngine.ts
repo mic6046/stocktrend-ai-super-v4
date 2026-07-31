@@ -64,8 +64,28 @@ export type CommitteeMember = {
   seat: CommitteeSeat;
   score: number;
   recommendation: RecommendationLabel;
+  confidence: number;
   reason: string;
   weight: number;
+};
+
+/** Live price maps to exactly one of these actions */
+export type ZoneAction =
+  | 'BUY'
+  | 'ADD POSITION'
+  | 'HOLD'
+  | 'WAIT'
+  | 'TAKE PROFIT'
+  | 'REDUCE'
+  | 'EXIT'
+  | 'AVOID NEW POSITION'
+  | 'STOP LOSS';
+
+export type LiveActionBrief = {
+  action: ZoneAction;
+  reason: string;
+  confidence: number;
+  zoneKey: string;
 };
 
 export type ComponentScores = {
@@ -129,6 +149,8 @@ export type QuantumEngineInput = {
   sectorBias?: 'leader' | 'laggard' | 'neutral' | null;
   stopLossHint?: number | null;
   ticker?: string;
+  /** Whether the user already owns the name — changes displayed actions */
+  userHasPosition?: boolean;
 };
 
 export type QuantumEngineOutput = {
@@ -151,11 +173,18 @@ export type QuantumEngineOutput = {
   addZone: EngineZoneBand;
   holdZone: EngineZoneBand;
   takeProfitZone: EngineZoneBand;
+  reduceZone: EngineZoneBand;
+  exitZone: EngineZoneBand;
   stopLoss: number;
   takeProfit: number;
   bullCase: number;
   bearCase: number;
   zoneScale: number;
+  userHasPosition: boolean;
+  currentAction: LiveActionBrief;
+  /** Zones shown for this position state (no contradictory actions) */
+  visibleZoneKeys: Array<'buy' | 'add' | 'hold' | 'takeProfit' | 'reduce' | 'exit' | 'stop'>;
+  zonesConsistent: boolean;
   keyReasons: string[];
   summaryLead: string;
   explanation: string;
@@ -709,6 +738,7 @@ function collectEvidence(input: QuantumEngineInput): EvidenceBag {
       seat: 'Technical',
       score: Math.round(technical),
       recommendation: recFromScore(technical),
+      confidence: Math.round(clamp(55 + Math.abs(technical - 50) * 0.7, 45, 92)),
       reason: techReason,
       weight: COMMITTEE_WEIGHTS.Technical,
     },
@@ -716,6 +746,7 @@ function collectEvidence(input: QuantumEngineInput): EvidenceBag {
       seat: 'Fundamental',
       score: Math.round(fundamental),
       recommendation: recFromScore(fundamental),
+      confidence: Math.round(clamp(55 + Math.abs(fundamental - 50) * 0.7, 45, 92)),
       reason: fundReason,
       weight: COMMITTEE_WEIGHTS.Fundamental,
     },
@@ -723,6 +754,7 @@ function collectEvidence(input: QuantumEngineInput): EvidenceBag {
       seat: 'Whale',
       score: Math.round(whale),
       recommendation: recFromScore(whale),
+      confidence: Math.round(clamp(55 + Math.abs(whale - 50) * 0.7, 45, 92)),
       reason: whaleReason,
       weight: COMMITTEE_WEIGHTS.Whale,
     },
@@ -730,6 +762,7 @@ function collectEvidence(input: QuantumEngineInput): EvidenceBag {
       seat: 'Risk',
       score: Math.round(risk),
       recommendation: recFromRiskScore(risk),
+      confidence: Math.round(clamp(58 + Math.abs(risk - 50) * 0.65, 45, 92)),
       reason:
         risk >= 68
           ? 'Elevated risk warrants defensive sizing'
@@ -742,6 +775,7 @@ function collectEvidence(input: QuantumEngineInput): EvidenceBag {
       seat: 'Momentum',
       score: Math.round(momentum),
       recommendation: recFromScore(momentum),
+      confidence: Math.round(clamp(55 + Math.abs(momentum - 50) * 0.7, 45, 92)),
       reason: momReason,
       weight: COMMITTEE_WEIGHTS.Momentum,
     },
@@ -749,6 +783,7 @@ function collectEvidence(input: QuantumEngineInput): EvidenceBag {
       seat: 'Sentiment',
       score: Math.round(news),
       recommendation: recFromScore(news),
+      confidence: Math.round(clamp(52 + Math.abs(news - 50) * 0.7, 45, 90)),
       reason: sentReason,
       weight: COMMITTEE_WEIGHTS.Sentiment,
     },
@@ -880,66 +915,308 @@ function buildZones(
   stopHint: number | null | undefined,
   vol: number | null
 ) {
-  const atrPct = (vol ?? 22) / 100 / Math.sqrt(252);
-  const band = Math.max(px * 0.008, px * atrPct * 3);
+  /**
+   * Strict non-overlapping ascending ladder (Step 8):
+   * STOP < BUY.max < ADD.min < ADD.max < HOLD.min < HOLD.max < TP.min < TP.max < REDUCE.min < REDUCE.max < EXIT.min
+   */
+  const eps = Math.max(round2(px * 0.0008), 0.01);
+  const band = Math.max(px * 0.006, ((vol ?? 22) / 100 / Math.sqrt(252)) * px * 2.5);
   const s2 = levels?.s2 && Number.isFinite(levels.s2) ? levels.s2 : px * 0.94;
   const s1 = levels?.s1 && Number.isFinite(levels.s1) ? levels.s1 : px * 0.97;
   const r1 = levels?.r1 && Number.isFinite(levels.r1) ? levels.r1 : px * 1.03;
+  const r2 = levels?.r2 && Number.isFinite(levels.r2) ? levels.r2 : px * 1.07;
   const bullish = rec === 'STRONG BUY' || rec === 'BUY';
+  const bearish = rec === 'SELL' || rec === 'AVOID NEW POSITION' || rec === 'REDUCE';
 
-  let buyLo: number;
-  let buyHi: number;
-  let addLo: number;
-  let addHi: number;
-  let holdLo: number;
-  let holdHi: number;
-  let tpLo: number;
-  let tpHi: number;
-  let stop: number;
-  let takeProfit: number;
+  // Primary target for take-profit midpoint
+  let tpAnchor = bullish ? Math.max(target, r1, px * 1.02) : bearish ? Math.min(Math.max(target, px * 0.99), r1) : Math.max(target, px * 1.015);
+  if (!(tpAnchor > px)) tpAnchor = px * (bullish ? 1.04 : 1.02);
 
-  if (bullish || rec === 'HOLD') {
-    buyHi = Math.min(px, s1);
-    buyLo = Math.min(s2, buyHi - band);
-    if (buyLo >= buyHi) buyLo = buyHi * 0.985;
-    addHi = Math.min(px, (buyHi + px) / 2);
-    addLo = Math.min(buyHi, addHi - band * 0.6);
-    if (addLo >= addHi) addLo = addHi * 0.99;
-    holdLo = Math.min(px * 0.995, r1);
-    holdHi = Math.max(px * 1.005, Math.min(r1, target * 0.98));
-    if (holdLo > holdHi) [holdLo, holdHi] = [holdHi * 0.99, holdHi];
-    takeProfit = Math.max(target, px * 1.01);
-    tpLo = Math.min(Math.max(r1, px * 1.01), takeProfit);
-    tpHi = Math.max(takeProfit * 1.02, tpLo + band * 0.5);
-    const hint = stopHint != null && Number.isFinite(stopHint) ? stopHint : buyLo * 0.97;
-    stop = Math.min(hint, buyLo * 0.995);
-    if (!(stop < buyLo)) stop = buyLo * 0.97;
-    if (bullish && buyHi >= target) {
-      buyHi = target * 0.97;
-      buyLo = Math.min(buyLo, buyHi * 0.985);
+  let stop =
+    stopHint != null && Number.isFinite(stopHint) ? Math.min(stopHint, Math.min(s2, px) * 0.995) : Math.min(s2, px * 0.94) * 0.99;
+  if (!(stop < px * 0.999)) stop = px * 0.94;
+
+  // Build contiguous non-overlapping steps from stop upward
+  let buyLo = round2(stop + eps);
+  let buyHi = round2(Math.min(Math.max(s1, buyLo + band), px * 0.995));
+  if (buyHi <= buyLo) buyHi = round2(buyLo + band);
+
+  let addLo = round2(buyHi + eps);
+  let addHi = round2(Math.max(addLo + band * 0.7, Math.min(px * 0.998, (addLo + px) / 2)));
+  if (addHi <= addLo) addHi = round2(addLo + band * 0.7);
+
+  let holdLo = round2(addHi + eps);
+  let holdHi = round2(Math.max(holdLo + band, Math.min(Math.max(r1, px * 1.005), tpAnchor * 0.97)));
+  if (holdHi <= holdLo) holdHi = round2(holdLo + band);
+
+  let tpLo = round2(holdHi + eps);
+  let tpHi = round2(Math.max(tpLo + band, tpAnchor));
+  if (tpHi <= tpLo) tpHi = round2(tpLo + band);
+
+  let reduceLo = round2(tpHi + eps);
+  let reduceHi = round2(Math.max(reduceLo + band * 0.6, Math.max(r2, tpHi * 1.015)));
+  if (reduceHi <= reduceLo) reduceHi = round2(reduceLo + band * 0.6);
+
+  let exitLo = round2(reduceHi + eps);
+  let exitHi = round2(exitLo + band);
+
+  // Ensure stop strictly below buy
+  stop = round2(Math.min(stop, buyLo - eps));
+  if (!(stop < buyLo)) stop = round2(buyLo - eps);
+
+  // Soft repair pass if any inversion slipped through
+  const steps = [
+    { lo: buyLo, hi: buyHi },
+    { lo: addLo, hi: addHi },
+    { lo: holdLo, hi: holdHi },
+    { lo: tpLo, hi: tpHi },
+    { lo: reduceLo, hi: reduceHi },
+    { lo: exitLo, hi: exitHi },
+  ];
+  for (let i = 0; i < steps.length; i++) {
+    if (steps[i].hi <= steps[i].lo) steps[i].hi = round2(steps[i].lo + band * 0.5);
+    if (i > 0 && !(steps[i - 1].hi + eps <= steps[i].lo + 1e-9)) {
+      steps[i].lo = round2(steps[i - 1].hi + eps);
+      if (steps[i].hi <= steps[i].lo) steps[i].hi = round2(steps[i].lo + band * 0.5);
     }
-  } else {
-    buyHi = Math.min(s1, px * 0.96);
-    buyLo = Math.min(s2, buyHi - band);
-    addHi = buyHi;
-    addLo = Math.min(buyLo, buyHi - band * 0.5);
-    holdLo = Math.min(px * 0.99, target);
-    holdHi = Math.max(px * 0.995, Math.min(px, r1));
-    takeProfit = Math.min(target, px * 0.99);
-    tpLo = Math.min(takeProfit, px * 0.98);
-    tpHi = Math.max(tpLo, Math.min(px * 0.995, takeProfit * 1.01));
-    stop = Math.min(buyLo * 0.97, px * 0.92);
-    if (!(stop < buyLo)) stop = buyLo * 0.96;
   }
+  [buyLo, buyHi] = [steps[0].lo, steps[0].hi];
+  [addLo, addHi] = [steps[1].lo, steps[1].hi];
+  [holdLo, holdHi] = [steps[2].lo, steps[2].hi];
+  [tpLo, tpHi] = [steps[3].lo, steps[3].hi];
+  [reduceLo, reduceHi] = [steps[4].lo, steps[4].hi];
+  [exitLo, exitHi] = [steps[5].lo, steps[5].hi];
+  stop = round2(Math.min(stop, buyLo - eps));
 
   return {
-    buyZone: { lo: round2(Math.min(buyLo, buyHi)), hi: round2(Math.max(buyLo, buyHi)) },
-    addZone: { lo: round2(Math.min(addLo, addHi)), hi: round2(Math.max(addLo, addHi)) },
-    holdZone: { lo: round2(Math.min(holdLo, holdHi)), hi: round2(Math.max(holdLo, holdHi)) },
-    takeProfitZone: { lo: round2(Math.min(tpLo, tpHi)), hi: round2(Math.max(tpLo, tpHi)) },
+    buyZone: { lo: round2(buyLo), hi: round2(buyHi) },
+    addZone: { lo: round2(addLo), hi: round2(addHi) },
+    holdZone: { lo: round2(holdLo), hi: round2(holdHi) },
+    takeProfitZone: { lo: round2(tpLo), hi: round2(tpHi) },
+    reduceZone: { lo: round2(reduceLo), hi: round2(reduceHi) },
+    exitZone: { lo: round2(exitLo), hi: round2(exitHi) },
     stopLoss: round2(stop),
-    takeProfit: round2(takeProfit),
+    takeProfit: round2(tpHi),
   };
+}
+
+function zonesAreConsistent(z: ReturnType<typeof buildZones>): boolean {
+  const ordered = [z.buyZone, z.addZone, z.holdZone, z.takeProfitZone, z.reduceZone, z.exitZone];
+  for (const band of ordered) {
+    if (!(band.lo < band.hi)) return false;
+  }
+  for (let i = 1; i < ordered.length; i++) {
+    if (!(ordered[i - 1].hi < ordered[i].lo)) return false;
+  }
+  if (!(z.stopLoss < z.buyZone.lo)) return false;
+  return true;
+}
+
+function inBand(px: number, band: EngineZoneBand): boolean {
+  const lo = Math.min(band.lo, band.hi);
+  const hi = Math.max(band.lo, band.hi);
+  return px >= lo - 1e-9 && px <= hi + 1e-9;
+}
+
+/**
+ * STEP 9–10: Map live price to exactly ONE action, position-aware.
+ */
+function resolveLiveAction(
+  px: number,
+  zones: ReturnType<typeof buildZones>,
+  rec: RecommendationLabel,
+  userHasPosition: boolean,
+  confidence: number
+): LiveActionBrief {
+  const conf = Math.round(clamp(confidence, 40, 94));
+
+  if (px <= zones.stopLoss) {
+    if (userHasPosition) {
+      return {
+        action: 'STOP LOSS',
+        reason: `Live price is at/below stop ${zones.stopLoss.toFixed(2)} — capital protection exit.`,
+        confidence: conf,
+        zoneKey: 'stop',
+      };
+    }
+    return {
+      action: 'AVOID NEW POSITION',
+      reason: `Live price is below the entry structure/stop — do not open a new long here.`,
+      confidence: conf,
+      zoneKey: 'stop',
+    };
+  }
+
+  if (inBand(px, zones.exitZone) || px > zones.exitZone.hi) {
+    if (userHasPosition) {
+      return {
+        action: 'EXIT',
+        reason: 'Price is in/above the EXIT zone — close remaining exposure.',
+        confidence: conf,
+        zoneKey: 'exit',
+      };
+    }
+    return {
+      action: 'AVOID NEW POSITION',
+      reason: 'Price is extended into EXIT territory — not a fresh entry.',
+      confidence: conf,
+      zoneKey: 'exit',
+    };
+  }
+
+  if (inBand(px, zones.reduceZone)) {
+    if (userHasPosition) {
+      return {
+        action: 'REDUCE',
+        reason: 'Price is in the REDUCE zone — trim exposure after take-profit stretch.',
+        confidence: conf,
+        zoneKey: 'reduce',
+      };
+    }
+    return {
+      action: 'AVOID NEW POSITION',
+      reason: 'Price is above take-profit into REDUCE — wait for a pullback to BUY zone.',
+      confidence: conf,
+      zoneKey: 'reduce',
+    };
+  }
+
+  if (inBand(px, zones.takeProfitZone)) {
+    if (userHasPosition) {
+      return {
+        action: 'TAKE PROFIT',
+        reason: 'Price is in TAKE PROFIT — consider partial profits; keep core if thesis intact.',
+        confidence: conf,
+        zoneKey: 'takeProfit',
+      };
+    }
+    return {
+      action: 'WAIT',
+      reason: 'Price is already in TAKE PROFIT territory — wait for a better entry rather than chase.',
+      confidence: conf,
+      zoneKey: 'takeProfit',
+    };
+  }
+
+  if (inBand(px, zones.holdZone)) {
+    if (userHasPosition) {
+      return {
+        action: 'HOLD',
+        reason: 'Price is above Buy/Add and below Take Profit — risk/reward balanced; no action required.',
+        confidence: conf,
+        zoneKey: 'hold',
+      };
+    }
+    return {
+      action: 'WAIT',
+      reason: 'Price is above the BUY zone and below Take Profit — wait for a dip into entry rather than chase.',
+      confidence: conf,
+      zoneKey: 'hold',
+    };
+  }
+
+  if (inBand(px, zones.addZone)) {
+    if (userHasPosition) {
+      return {
+        action: 'ADD POSITION',
+        reason: 'Price is in ADD POSITION zone — scale in if thesis and support hold.',
+        confidence: conf,
+        zoneKey: 'add',
+      };
+    }
+    // No position: ADD band is still a constructive entry area → BUY
+    if (rec === 'AVOID NEW POSITION' || rec === 'SELL') {
+      return {
+        action: 'AVOID NEW POSITION',
+        reason: 'Committee stance is defensive — do not open a new position in this band.',
+        confidence: conf,
+        zoneKey: 'add',
+      };
+    }
+    return {
+      action: 'BUY',
+      reason: 'Price is in a constructive entry band (ADD maps to BUY when you do not own the stock).',
+      confidence: conf,
+      zoneKey: 'add',
+    };
+  }
+
+  if (inBand(px, zones.buyZone) || (px > zones.stopLoss && px < zones.buyZone.lo)) {
+    // Between stop and buy lo → still treat as buy opportunity if above stop
+    if (userHasPosition) {
+      return {
+        action: 'ADD POSITION',
+        reason: 'Price is in/near BUY zone — BUY becomes ADD POSITION because you already own the stock.',
+        confidence: conf,
+        zoneKey: 'buy',
+      };
+    }
+    if (rec === 'AVOID NEW POSITION' || rec === 'SELL') {
+      return {
+        action: 'AVOID NEW POSITION',
+        reason: 'Even near support, committee validation rejected a new long.',
+        confidence: conf,
+        zoneKey: 'buy',
+      };
+    }
+    return {
+      action: 'BUY',
+      reason: 'Price is in the BUY zone — best entry area for a new position on this horizon.',
+      confidence: conf,
+      zoneKey: 'buy',
+    };
+  }
+
+  // Gap between buy and add or other gaps — snap to nearest logical action
+  if (userHasPosition) {
+    return {
+      action: 'HOLD',
+      reason: 'Price sits between defined management bands — maintain position until a zone is reached.',
+      confidence: Math.max(40, conf - 6),
+      zoneKey: 'hold',
+    };
+  }
+  return {
+    action: 'WAIT',
+    reason: 'Price is outside the preferred BUY zone — wait for a cleaner entry.',
+    confidence: Math.max(40, conf - 6),
+    zoneKey: 'hold',
+  };
+}
+
+function visibleZonesFor(userHasPosition: boolean): QuantumEngineOutput['visibleZoneKeys'] {
+  if (userHasPosition) {
+    return ['add', 'hold', 'takeProfit', 'reduce', 'exit', 'stop'];
+  }
+  return ['buy', 'hold', 'stop'];
+}
+
+function positionAwareSuggestedAction(
+  rec: RecommendationLabel,
+  live: LiveActionBrief,
+  userHasPosition: boolean,
+  evidence: EvidenceBag
+): SuggestedAction {
+  // Prefer live price action when it is specific
+  if (live.action === 'BUY') return 'Buy';
+  if (live.action === 'ADD POSITION') return 'Accumulate';
+  if (live.action === 'HOLD' || live.action === 'WAIT') return 'Hold';
+  if (live.action === 'TAKE PROFIT') return 'Take Partial Profit';
+  if (live.action === 'REDUCE' || live.action === 'STOP LOSS') return 'Reduce';
+  if (live.action === 'EXIT' || live.action === 'AVOID NEW POSITION') return 'Exit';
+
+  if (!userHasPosition) {
+    if (rec === 'STRONG BUY' || rec === 'BUY') return 'Buy';
+    if (rec === 'AVOID NEW POSITION' || rec === 'SELL') return 'Exit';
+    return 'Hold';
+  }
+  if (rec === 'STRONG BUY' || rec === 'BUY') {
+    return evidence.bearish.some((b) => /overbought|resistance/i.test(b.label)) ? 'Accumulate' : 'Accumulate';
+  }
+  if (rec === 'HOLD') return 'Hold';
+  if (rec === 'REDUCE') return 'Take Partial Profit';
+  if (rec === 'SELL') return 'Reduce';
+  return 'Exit';
 }
 
 function buildTargets(px: number, primary: number, rec: RecommendationLabel, levels: QuantumEngineInput['levels']) {
@@ -965,16 +1242,6 @@ function buildTargets(px: number, primary: number, rec: RecommendationLabel, lev
     target2: round2(Math.max(r1, px * 1.03)),
     target3: round2(Math.max(r2, px * 1.05)),
   };
-}
-
-function suggestedActionFor(rec: RecommendationLabel, evidence: EvidenceBag): SuggestedAction {
-  if (rec === 'STRONG BUY' || rec === 'BUY') {
-    return evidence.bearish.some((b) => /overbought|resistance/i.test(b.label)) ? 'Accumulate' : 'Buy';
-  }
-  if (rec === 'HOLD') return 'Hold';
-  if (rec === 'REDUCE') return 'Take Partial Profit';
-  if (rec === 'SELL') return 'Reduce';
-  return 'Exit';
 }
 
 function buildWhyWins(rec: RecommendationLabel, evidence: EvidenceBag): string {
@@ -1059,6 +1326,28 @@ function validate(out: QuantumEngineOutput): boolean {
   if (out.target1 <= 0 || out.entryZone.hi <= 0) return false;
   if (Math.abs(out.supportHoldProbability + out.supportFailureProbability - 100) > 1) return false;
   if (Math.abs(out.resistanceBreakProbability + out.resistanceRejectionProbability - 100) > 1) return false;
+  if (!out.zonesConsistent) return false;
+  if (!out.currentAction?.action) return false;
+  if (!zonesAreConsistent({
+    buyZone: out.buyZone,
+    addZone: out.addZone,
+    holdZone: out.holdZone,
+    takeProfitZone: out.takeProfitZone,
+    reduceZone: out.reduceZone,
+    exitZone: out.exitZone,
+    stopLoss: out.stopLoss,
+    takeProfit: out.takeProfit,
+  })) {
+    return false;
+  }
+  // Position-aware: no contradictory action labels for non-owners
+  if (!out.userHasPosition) {
+    if (['ADD POSITION', 'TAKE PROFIT', 'REDUCE', 'EXIT', 'STOP LOSS'].includes(out.currentAction.action)) {
+      return false;
+    }
+  } else if (out.currentAction.action === 'BUY' || out.currentAction.action === 'WAIT') {
+    return false;
+  }
   return true;
 }
 
@@ -1119,9 +1408,11 @@ function emptyOutput(horizon: HorizonKey, horizonLabel: string, input: QuantumEn
     seat,
     score: 50,
     recommendation: 'HOLD',
+    confidence: 40,
     reason: 'Awaiting price data',
     weight: COMMITTEE_WEIGHTS[seat],
   }));
+  const hasPos = !!input.userHasPosition;
   return {
     horizon,
     horizonLabel,
@@ -1142,11 +1433,22 @@ function emptyOutput(horizon: HorizonKey, horizonLabel: string, input: QuantumEn
     addZone: { lo: 0, hi: 0 },
     holdZone: { lo: 0, hi: 0 },
     takeProfitZone: { lo: 0, hi: 0 },
+    reduceZone: { lo: 0, hi: 0 },
+    exitZone: { lo: 0, hi: 0 },
     stopLoss: 0,
     takeProfit: 0,
     bullCase: 0,
     bearCase: 0,
     zoneScale: 1,
+    userHasPosition: hasPos,
+    currentAction: {
+      action: hasPos ? 'HOLD' : 'WAIT',
+      reason: 'Awaiting price data',
+      confidence: 40,
+      zoneKey: 'hold',
+    },
+    visibleZoneKeys: visibleZonesFor(hasPos),
+    zonesConsistent: false,
     keyReasons: ['Awaiting price data'],
     summaryLead: 'Awaiting price data to generate a QuantumNode Consensus recommendation.',
     explanation: `All metrics are locked to the ${horizonLabel} Investment Horizon.`,
@@ -1268,8 +1570,17 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
       api.vol ??
       (input.horizon === '1W' ? 26 : input.horizon === '1Y' ? 17 : 21);
     const risk = riskFromVolatility(vol, input.horizon);
-    const zones = buildZones(px, target, rec, input.levels, input.stopLossHint, vol);
+    let zones = buildZones(px, target, rec, input.levels, input.stopLossHint, vol);
+    // Auto-repair overlapping zones up to 3 times
+    for (let zAttempt = 0; zAttempt < 3 && !zonesAreConsistent(zones); zAttempt++) {
+      const widen = 1 + zAttempt * 0.015;
+      zones = buildZones(px, target * widen, rec, input.levels, zones.stopLoss * (1 - zAttempt * 0.002), (vol ?? 22) * widen);
+    }
+    const zonesConsistent = zonesAreConsistent(zones);
     const targets = buildTargets(px, target, rec, input.levels);
+    const userHasPosition = !!input.userHasPosition;
+    const currentAction = resolveLiveAction(px, zones, rec, userHasPosition, confidence);
+    const visibleZoneKeys = visibleZonesFor(userHasPosition);
 
     const topFactors =
       rec === 'STRONG BUY' || rec === 'BUY'
@@ -1286,9 +1597,9 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
 
     const whyWins = buildWhyWins(rec, evidence);
     const rejectedOpposite = buildRejectedOpposite(rec, evidence);
-    const suggestedAction = suggestedActionFor(rec, evidence);
+    const suggestedAction = positionAwareSuggestedAction(rec, currentAction, userHasPosition, evidence);
     const note = consensusNote(evidence.committee, rec);
-    const summaryLead = `Consensus AI · ${horizonLabel}: ${rec} (${confidence}% confidence). Expected return ${expectedReturn >= 0 ? '+' : ''}${expectedReturn.toFixed(1)}%. ${whyWins}`;
+    const summaryLead = `Consensus AI · ${horizonLabel}: ${rec} (${confidence}% confidence). Current action: ${currentAction.action}. Expected return ${expectedReturn >= 0 ? '+' : ''}${expectedReturn.toFixed(1)}%. ${whyWins}`;
 
     const drawdown = round2(-Math.max(2, Math.abs(expectedReturn) * 0.55 + (vol ?? 20) * 0.12));
     const sharpe =
@@ -1325,14 +1636,20 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
       addZone: zones.addZone,
       holdZone: zones.holdZone,
       takeProfitZone: zones.takeProfitZone,
+      reduceZone: zones.reduceZone,
+      exitZone: zones.exitZone,
       stopLoss: zones.stopLoss,
       takeProfit: zones.takeProfit,
       bullCase: zones.takeProfit,
       bearCase: zones.stopLoss,
       zoneScale,
+      userHasPosition,
+      currentAction,
+      visibleZoneKeys,
+      zonesConsistent,
       keyReasons,
       summaryLead,
-      explanation: `Consensus process for ${horizonLabel}: committee votes weighed, conflicts shown, gates enforced. ${note}`,
+      explanation: `Consensus process for ${horizonLabel}: committee votes weighed, conflicts shown, gates enforced, zones non-overlapping. Live action = ${currentAction.action}. ${note}`,
       chartStance: chartStanceFromRecommendation(rec),
       finalVerdict: rec,
       validationStatus: '✗ Recalculate',

@@ -40,8 +40,19 @@ export function DecisionBriefPanel({ decision }: DecisionBriefPanelProps) {
           tone={decision.expectedReturn >= 0 ? 'bull' : 'bear'}
         />
         <Metric label="Risk Level" value={decision.riskLevel} />
-        <Metric label="AI Score" value={`${decision.score}`} />
+        <Metric label="Current Action" value={decision.currentAction.action} tone={decision.chartStance} />
         <Metric label="Suggested Action" value={decision.suggestedAction} tone={decision.chartStance} />
+      </div>
+
+      <div className="rounded-xl border border-cyan-500/25 bg-cyan-500/5 px-3 py-2.5">
+        <p className="text-[8px] uppercase tracking-wider text-cyan-300/80">
+          Live Price Engine · {decision.userHasPosition ? 'Position held' : 'No position'}
+        </p>
+        <p className="mt-1 text-[13px] font-bold text-white">{decision.currentAction.action}</p>
+        <p className="mt-1 text-[11px] text-gray-300 leading-relaxed">{decision.currentAction.reason}</p>
+        <p className="mt-1 text-[10px] font-mono text-gray-500">
+          Confidence {decision.currentAction.confidence}% · answers: what now / why / when it changes
+        </p>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -71,7 +82,9 @@ export function DecisionBriefPanel({ decision }: DecisionBriefPanelProps) {
                 </div>
                 <div className="text-right shrink-0">
                   <p className="text-[15px] font-bold font-mono text-violet-200 tabular-nums">{m.score}</p>
-                  <p className="text-[8px] font-mono text-gray-500">{Math.round(m.weight * 100)}% wt</p>
+                  <p className="text-[8px] font-mono text-gray-500">
+                    {m.confidence}% conf · {Math.round(m.weight * 100)}% wt
+                  </p>
                 </div>
               </div>
               <p className="mt-1.5 text-[10px] text-gray-400 leading-snug">{m.reason}</p>

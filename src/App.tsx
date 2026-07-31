@@ -1200,6 +1200,32 @@ export default function App() {
   const [showFibonacci, setShowFibonacci] = useState(false);
   const [showProjection, setShowProjection] = useState(true);
   const [analysisHorizon, setAnalysisHorizon] = useState<HorizonKey>('1M');
+  const [userHasPosition, setUserHasPosition] = useState(false);
+
+  React.useEffect(() => {
+    const ticker = data?.ticker;
+    if (!ticker) return;
+    try {
+      const raw = localStorage.getItem(`qn-owns-${ticker}`);
+      setUserHasPosition(raw === '1');
+    } catch {
+      setUserHasPosition(false);
+    }
+  }, [data?.ticker]);
+
+  const handleUserHasPositionChange = React.useCallback(
+    (owns: boolean) => {
+      setUserHasPosition(owns);
+      const ticker = data?.ticker;
+      if (!ticker) return;
+      try {
+        localStorage.setItem(`qn-owns-${ticker}`, owns ? '1' : '0');
+      } catch {
+        /* ignore */
+      }
+    },
+    [data?.ticker]
+  );
   const [expandProjectionTuner, setExpandProjectionTuner] = useState(false);
   const [expandSrTuner, setExpandSrTuner] = useState(false);
   const [showVWAP, setShowVWAP] = useState(false);
@@ -6935,6 +6961,7 @@ export default function App() {
           : technicalBreakdown?.quantumRefinement?.sectorRotation?.status === 'LAGGARD'
             ? 'laggard'
             : 'neutral',
+      userHasPosition,
     });
   }, [
     analysisHorizon,
@@ -6948,6 +6975,7 @@ export default function App() {
     forecastHorizons,
     whaleAccumulation,
     activeLevels,
+    userHasPosition,
   ]);
 
   /**
@@ -8530,11 +8558,17 @@ export default function App() {
                       zoneScale={horizonView.zoneScale}
                       horizon={analysisHorizon}
                       horizonLabel={horizonView.horizonLabel}
+                      userHasPosition={userHasPosition}
+                      onUserHasPositionChange={handleUserHasPositionChange}
+                      currentAction={horizonView.currentAction}
+                      visibleZoneKeys={horizonView.visibleZoneKeys}
                       engineZones={{
                         buyZone: horizonView.buyZone,
                         addZone: horizonView.addZone,
                         holdZone: horizonView.holdZone,
                         takeProfitZone: horizonView.takeProfitZone,
+                        reduceZone: horizonView.reduceZone,
+                        exitZone: horizonView.exitZone,
                         stopLoss: horizonView.stopLoss,
                       }}
                     />

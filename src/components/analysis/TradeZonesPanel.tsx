@@ -1,9 +1,10 @@
 import React, { useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { AlertTriangle, Crosshair, ShieldAlert } from 'lucide-react';
+import { AlertTriangle, Crosshair, ShieldAlert, Activity } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { GlassCard, SectionLabel } from './GlassCard';
 import { formatMoney, type HorizonKey } from './analysisTheme';
+import type { LiveActionBrief, QuantumEngineOutput } from '../../lib/quantumRecommendationEngine';
 
 type Levels = {
   s1?: number;
@@ -12,6 +13,8 @@ type Levels = {
   r2?: number;
 } | null;
 
+type ZoneBand = { lo: number; hi: number };
+
 type TradeZonesPanelProps = {
   lastClose: number;
   levels?: Levels;
@@ -19,18 +22,21 @@ type TradeZonesPanelProps = {
   bearCase?: number | null;
   stopLoss?: number | null;
   currency?: string;
-  /** Epoch ms of last live quote refresh (optional) */
   quoteAsOf?: number | null;
-  /** Scales support/resistance distance from spot for the active Investment Horizon */
   zoneScale?: number;
   horizon?: HorizonKey;
   horizonLabel?: string;
-  /** Master engine zones — when provided, become the sole zone source */
+  userHasPosition?: boolean;
+  onUserHasPositionChange?: (owns: boolean) => void;
+  currentAction?: LiveActionBrief | null;
+  visibleZoneKeys?: QuantumEngineOutput['visibleZoneKeys'];
   engineZones?: {
     buyZone: ZoneBand;
     addZone: ZoneBand;
     holdZone: ZoneBand;
     takeProfitZone: ZoneBand;
+    reduceZone?: ZoneBand;
+    exitZone?: ZoneBand;
     stopLoss: number;
   } | null;
 };
@@ -38,8 +44,6 @@ type TradeZonesPanelProps = {
 function scaleFromSpot(px: number, level: number, scale: number) {
   return px + (level - px) * scale;
 }
-
-type ZoneBand = { lo: number; hi: number };
 
 function formatRange(lo: number, hi: number, currency?: string) {
   return `${formatMoney(Math.min(lo, hi), currency)} – ${formatMoney(Math.max(lo, hi), currency)}`;
@@ -54,7 +58,6 @@ function overlaps(a: ZoneBand, b: ZoneBand) {
   const aHi = Math.max(a.lo, a.hi);
   const bLo = Math.min(b.lo, b.hi);
   const bHi = Math.max(b.lo, b.hi);
-  // Shared boundary is allowed; interior overlap is not
   return aLo < bHi - 1e-9 && bLo < aHi - 1e-9 && !(nearlyEqual(aHi, bLo) || nearlyEqual(bHi, aLo));
 }
 
@@ -78,6 +81,10 @@ export function TradeZonesPanel({
   horizon = '1M',
   horizonLabel = '1 Month',
   engineZones = null,
+  userHasPosition = false,
+  onUserHasPositionChange,
+  currentAction = null,
+  visibleZoneKeys,
 }: TradeZonesPanelProps) {
   const model = useMemo(() => {
     const px = lastClose > 0 ? lastClose : 100;
@@ -86,6 +93,8 @@ export function TradeZonesPanel({
     let add: ZoneBand;
     let hold: ZoneBand;
     let takeProfit: ZoneBand;
+    let reduce: ZoneBand;
+    let exit: ZoneBand;
     let sl: number;
 
     if (engineZones) {
@@ -93,9 +102,16 @@ export function TradeZonesPanel({
       add = engineZones.addZone;
       hold = engineZones.holdZone;
       takeProfit = engineZones.takeProfitZone;
+      reduce = engineZones.reduceZone ?? {
+        lo: takeProfit.hi * 1.002,
+        hi: takeProfit.hi * 1.02,
+      };
+      exit = engineZones.exitZone ?? {
+        lo: reduce.hi * 1.002,
+        hi: reduce.hi * 1.02,
+      };
       sl = engineZones.stopLoss;
     } else {
-      // Fallback geometry if engine zones are unavailable
       const z = Number.isFinite(zoneScale) && zoneScale > 0 ? zoneScale : 1;
       const rawS2 = levels?.s2 && Number.isFinite(levels.s2) ? levels.s2 : px * 0.92;
       const rawS1 = levels?.s1 && Number.isFinite(levels.s1) ? levels.s1 : px * 0.96;
@@ -113,19 +129,13 @@ export function TradeZonesPanel({
             ? bearCase
             : s2 * 0.98;
 
+      const eps = Math.max(px * 0.0008, 0.01);
       buy = { lo: Math.min(s2, s1), hi: Math.max(s2, s1) };
-      add = {
-        lo: Math.min(s1, (s1 + px) / 2),
-        hi: Math.max(s1, (s1 + px) / 2),
-      };
-      hold = {
-        lo: Math.min(px * 0.99, r1),
-        hi: Math.max(px * 0.99, r1),
-      };
-      takeProfit = {
-        lo: Math.min(r1, tpHi),
-        hi: Math.max(r1, tpHi),
-      };
+      add = { lo: buy.hi + eps, hi: buy.hi + eps + Math.max(px * 0.01, (px - buy.hi) * 0.4) };
+      hold = { lo: add.hi + eps, hi: Math.max(add.hi + eps + px * 0.01, Math.min(r1, px * 1.02)) };
+      takeProfit = { lo: hold.hi + eps, hi: Math.max(hold.hi + eps + px * 0.01, tpHi) };
+      reduce = { lo: takeProfit.hi + eps, hi: takeProfit.hi + eps + px * 0.012 };
+      exit = { lo: reduce.hi + eps, hi: reduce.hi + eps + px * 0.012 };
     }
 
     const warnings: string[] = [];
@@ -134,68 +144,58 @@ export function TradeZonesPanel({
       { key: 'ADD', band: add },
       { key: 'HOLD', band: hold },
       { key: 'TAKE PROFIT', band: takeProfit },
+      { key: 'REDUCE', band: reduce },
+      { key: 'EXIT', band: exit },
     ] as const;
 
     for (const z of ordered) {
-      if (!(z.band.lo < z.band.hi) && !nearlyEqual(z.band.lo, z.band.hi)) {
-        warnings.push(`${z.key} zone has an inverted price range.`);
-      }
+      if (!(z.band.lo < z.band.hi)) warnings.push(`${z.key} zone has an inverted price range.`);
     }
-
     for (let i = 0; i < ordered.length; i++) {
       for (let j = i + 1; j < ordered.length; j++) {
         if (overlaps(ordered[i].band, ordered[j].band)) {
           warnings.push(`${ordered[i].key} and ${ordered[j].key} ranges overlap.`);
         }
       }
-    }
-
-    // Expect ascending structure: BUY < ADD < HOLD < TAKE PROFIT (by zone lows / midpoints)
-    const mids = ordered.map((z) => (z.band.lo + z.band.hi) / 2);
-    for (let i = 1; i < mids.length; i++) {
-      if (mids[i] + 1e-9 < mids[i - 1]) {
-        warnings.push(`Zone order inconsistent: expected BUY < ADD < HOLD < TAKE PROFIT.`);
-        break;
+      if (i > 0 && !(ordered[i - 1].band.hi < ordered[i].band.lo)) {
+        warnings.push(`Zone order broken: ${ordered[i - 1].key}.max must be < ${ordered[i].key}.min`);
       }
     }
+    if (!(sl < buy.lo)) warnings.push('Stop Loss must sit strictly under the BUY zone.');
 
-    if (!(sl < buy.lo - 1e-9) && !nearlyEqual(sl, buy.lo)) {
-      warnings.push('Stop Loss Below should sit under the BUY zone for long trades.');
-    }
-
-    const journey = [
+    const allCards = [
       {
-        key: 'buy',
+        key: 'buy' as const,
         emoji: '🟢',
         title: 'BUY ZONE',
-        subtitle: 'Best entry price',
+        subtitle: 'Best entry for a new position',
         detail: null as string | null,
         price: formatRange(buy.lo, buy.hi, currency),
         className: 'border-emerald-500/35 bg-emerald-500/10',
         titleClass: 'text-emerald-300',
       },
       {
-        key: 'add',
+        key: 'add' as const,
         emoji: '🔵',
         title: 'ADD POSITION',
-        subtitle: 'If already holding and the trend remains bullish',
+        subtitle: 'Scale in if already holding and thesis intact',
         detail: null,
         price: formatRange(add.lo, add.hi, currency),
         className: 'border-sky-500/35 bg-sky-500/10',
         titleClass: 'text-sky-300',
       },
       {
-        key: 'hold',
+        key: 'hold' as const,
         emoji: '🟡',
-        title: 'HOLD',
-        subtitle: 'No action required.',
-        detail: 'Continue holding existing position.',
+        title: userHasPosition ? 'HOLD' : 'WAIT',
+        subtitle: userHasPosition ? 'No action required.' : 'Wait for a better entry — do not chase.',
+        detail: userHasPosition ? 'Continue holding existing position.' : 'Prefer BUY zone before opening.',
         price: formatRange(hold.lo, hold.hi, currency),
         className: 'border-amber-500/35 bg-amber-500/10',
         titleClass: 'text-amber-300',
       },
       {
-        key: 'tp',
+        key: 'takeProfit' as const,
         emoji: '🟣',
         title: 'TAKE PROFIT',
         subtitle: 'Consider taking partial profits.',
@@ -204,17 +204,54 @@ export function TradeZonesPanel({
         className: 'border-violet-500/35 bg-violet-500/10',
         titleClass: 'text-violet-300',
       },
+      {
+        key: 'reduce' as const,
+        emoji: '🟠',
+        title: 'REDUCE',
+        subtitle: 'Trim remaining exposure after extension.',
+        detail: null,
+        price: formatRange(reduce.lo, reduce.hi, currency),
+        className: 'border-orange-500/35 bg-orange-500/10',
+        titleClass: 'text-orange-300',
+      },
+      {
+        key: 'exit' as const,
+        emoji: '🔴',
+        title: 'EXIT',
+        subtitle: 'Close remaining position.',
+        detail: null,
+        price: formatRange(exit.lo, exit.hi, currency),
+        className: 'border-rose-500/35 bg-rose-500/10',
+        titleClass: 'text-rose-300',
+      },
     ];
+
+    const keys =
+      visibleZoneKeys ??
+      (userHasPosition
+        ? (['add', 'hold', 'takeProfit', 'reduce', 'exit', 'stop'] as const)
+        : (['buy', 'hold', 'stop'] as const));
+
+    const journey = allCards.filter((c) => keys.includes(c.key));
 
     return {
       journey,
-      stop: {
-        price: formatMoney(sl, currency),
-        raw: sl,
-      },
+      stop: { price: formatMoney(sl, currency), raw: sl },
+      showStop: keys.includes('stop'),
       warnings: [...new Set(warnings)],
     };
-  }, [lastClose, levels, bullCase, bearCase, stopLoss, currency, zoneScale, engineZones]);
+  }, [
+    lastClose,
+    levels,
+    bullCase,
+    bearCase,
+    stopLoss,
+    currency,
+    zoneScale,
+    engineZones,
+    userHasPosition,
+    visibleZoneKeys,
+  ]);
 
   return (
     <GlassCard className="h-full">
@@ -224,27 +261,62 @@ export function TradeZonesPanel({
 
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <p className="text-[10px] text-gray-500 leading-relaxed font-mono uppercase tracking-wider">
-          {horizonLabel} · long trade journey
+          {horizonLabel} · non-overlapping zones
         </p>
-        {lastClose > 0 && (
-          <p className="text-[10px] font-mono text-emerald-400/90 tabular-nums flex items-center gap-1.5">
-            <span className="relative flex h-1.5 w-1.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60" />
-              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-400" />
-            </span>
-            Live {formatMoney(lastClose, currency)}
-            {quoteAsOf != null && Number.isFinite(quoteAsOf) && (
-              <span className="text-gray-600 normal-case tracking-normal">
-                · {new Date(quoteAsOf).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+        <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+          <span className="text-[10px] font-mono text-gray-400 uppercase tracking-wider">I own this stock</span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={userHasPosition}
+            onClick={() => onUserHasPositionChange?.(!userHasPosition)}
+            className={cn(
+              'relative h-5 w-9 rounded-full border transition-colors',
+              userHasPosition ? 'bg-emerald-500/40 border-emerald-400/50' : 'bg-white/10 border-white/15'
+            )}
+          >
+            <span
+              className={cn(
+                'absolute top-0.5 left-0.5 h-3.5 w-3.5 rounded-full bg-white transition-transform',
+                userHasPosition && 'translate-x-4'
+              )}
+            />
+          </button>
+        </label>
+      </div>
+
+      {lastClose > 0 && (
+        <div className="mb-3 rounded-xl border border-cyan-500/25 bg-cyan-500/5 px-3 py-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-[10px] font-mono uppercase tracking-wider text-cyan-300/90 flex items-center gap-1.5">
+              <Activity className="w-3.5 h-3.5" />
+              Live {formatMoney(lastClose, currency)}
+              {quoteAsOf != null && Number.isFinite(quoteAsOf) && (
+                <span className="text-gray-600 normal-case tracking-normal">
+                  · {new Date(quoteAsOf).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                </span>
+              )}
+            </p>
+            {currentAction && (
+              <span className="text-[11px] font-black tracking-wider uppercase text-white bg-white/10 border border-white/15 px-2 py-0.5 rounded">
+                {currentAction.action}
               </span>
             )}
-          </p>
-        )}
-      </div>
+          </div>
+          {currentAction && (
+            <>
+              <p className="mt-1.5 text-[11px] text-gray-300 leading-relaxed">{currentAction.reason}</p>
+              <p className="mt-1 text-[10px] font-mono text-gray-500">
+                Confidence {currentAction.confidence}% · exactly one live action
+              </p>
+            </>
+          )}
+        </div>
+      )}
 
       <AnimatePresence mode="wait">
         <motion.div
-          key={horizon}
+          key={`${horizon}-${userHasPosition ? 'owned' : 'flat'}`}
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -6 }}
@@ -259,7 +331,8 @@ export function TradeZonesPanel({
                 transition={{ duration: 0.28, delay: idx * 0.04 }}
                 className={cn(
                   'rounded-xl border px-3 py-2.5 min-w-0 transition-transform duration-200 hover:scale-[1.01]',
-                  z.className
+                  z.className,
+                  currentAction?.zoneKey === z.key && 'ring-1 ring-cyan-400/40'
                 )}
               >
                 <div className="flex items-start justify-between gap-3 min-w-0">
@@ -286,74 +359,60 @@ export function TradeZonesPanel({
         </motion.div>
       </AnimatePresence>
 
-      {/* Contingency path — visually separated so it is not read as conflicting advice */}
-      <div className="mt-3 pt-3 border-t border-dashed border-white/10">
-        <div className="flex items-center gap-2 mb-2">
-          <ShieldAlert className="w-3.5 h-3.5 text-rose-400/80 shrink-0" />
-          <p className="text-[9px] font-mono uppercase tracking-[0.14em] text-rose-300/80">
-            If the trade fails at any stage
-          </p>
-        </div>
-        <div className="flex justify-center pb-1.5" aria-hidden>
-          <span className="text-[11px] leading-none text-rose-400/40 font-mono">⬇</span>
-        </div>
-        <motion.div
-          initial={{ opacity: 0, y: 6 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.28, delay: 0.22 }}
-          className="rounded-xl border border-rose-500/35 bg-rose-500/10 px-3 py-2.5 min-w-0"
-        >
-          <div className="flex items-start justify-between gap-3 min-w-0">
-            <div className="min-w-0 flex-1">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-rose-300">
-                <span className="mr-1.5" aria-hidden>
-                  🔴
-                </span>
-                Stop Loss Below
-              </p>
-              <p className="mt-1 text-[11px] text-gray-300 leading-snug">
-                Exit only if price closes below this level.
-              </p>
-              <p className="mt-0.5 text-[10px] text-gray-500 leading-snug">
-                This protects capital if the trade fails.
-              </p>
-              <div className="mt-2 rounded-lg border border-rose-500/25 bg-rose-500/10 px-2.5 py-2">
-                <p className="text-[10px] text-rose-200/90 leading-snug">
-                  For investors who have already opened a position. This is a risk-exit level —{' '}
-                  <span className="font-semibold text-rose-100">not an entry signal</span>.
+      {model.showStop && (
+        <div className="mt-3 pt-3 border-t border-dashed border-white/10">
+          <div className="flex items-center gap-2 mb-2">
+            <ShieldAlert className="w-3.5 h-3.5 text-rose-400/80 shrink-0" />
+            <p className="text-[9px] font-mono uppercase tracking-[0.14em] text-rose-300/80">
+              If the trade fails at any stage
+            </p>
+          </div>
+          <div className="flex justify-center pb-1.5" aria-hidden>
+            <span className="text-[11px] leading-none text-rose-400/40 font-mono">⬇</span>
+          </div>
+          <motion.div
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.28, delay: 0.22 }}
+            className={cn(
+              'rounded-xl border border-rose-500/35 bg-rose-500/10 px-3 py-2.5 min-w-0',
+              currentAction?.zoneKey === 'stop' && 'ring-1 ring-cyan-400/40'
+            )}
+          >
+            <div className="flex items-start justify-between gap-3 min-w-0">
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-rose-300">
+                  <span className="mr-1.5" aria-hidden>
+                    🔴
+                  </span>
+                  Stop Loss Below
+                </p>
+                <p className="mt-1 text-[11px] text-gray-300 leading-snug">
+                  {userHasPosition
+                    ? 'Exit only if price closes below this level.'
+                    : 'Invalidation for new entries — do not buy below this level.'}
                 </p>
               </div>
-            </div>
-            <div className="text-right shrink-0 pt-0.5">
-              <p className="font-mono text-[12px] sm:text-[13px] font-bold text-white tabular-nums">
+              <p className="font-mono text-[12px] sm:text-[13px] font-bold text-rose-200 tabular-nums shrink-0">
                 {model.stop.price}
               </p>
             </div>
-          </div>
-        </motion.div>
-      </div>
+          </motion.div>
+        </div>
+      )}
 
       {model.warnings.length > 0 && (
-        <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 flex gap-2.5">
+        <div className="mt-3 rounded-xl border border-amber-500/25 bg-amber-500/5 px-3 py-2 flex gap-2">
           <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
-          <div className="min-w-0 space-y-1">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-amber-300">
-              Zone consistency warning
-            </p>
+          <div className="space-y-1">
             {model.warnings.map((w) => (
-              <p key={w} className="text-[10px] text-amber-100/80 leading-snug">
+              <p key={w} className="text-[10px] text-amber-200/90 leading-snug">
                 {w}
               </p>
             ))}
           </div>
         </div>
       )}
-
-      <p className="mt-3 text-[10px] text-gray-500 leading-relaxed border-t border-white/5 pt-3">
-        Zones and stop are calibrated to the <span className="text-gray-400">{horizonLabel}</span> Investment
-        Horizon only. Stop Loss Below applies to investors who already hold a position — protective exit,
-        not an entry signal.
-      </p>
     </GlassCard>
   );
 }

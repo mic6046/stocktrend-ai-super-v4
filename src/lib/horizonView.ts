@@ -46,6 +46,7 @@ export type HorizonViewInput = {
   smartMoneyScore?: number | null;
   fundFlowBias?: QuantumEngineInput['fundFlowBias'];
   sectorBias?: QuantumEngineInput['sectorBias'];
+  userHasPosition?: boolean;
 };
 
 export type HorizonView = QuantumEngineOutput;
@@ -76,5 +77,6 @@ export function buildHorizonView(input: HorizonViewInput): HorizonView {
     sectorBias: input.sectorBias,
     stopLossHint: input.stopLoss,
     ticker: input.ticker,
+    userHasPosition: input.userHasPosition,
   });
 }
