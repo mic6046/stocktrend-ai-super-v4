@@ -12834,24 +12834,46 @@ export default function App() {
                 <Search className="w-10 h-10 text-emerald-500/50 mb-4 mx-auto" />
                 <h2 className="text-xl font-sans font-bold text-white mb-2">Search a ticker to begin</h2>
                 <p className="text-sm text-gray-500 max-w-md mx-auto">
-                  Press <span className="text-emerald-400 font-mono">Enter</span> in the search bar, or paste a list and run{' '}
-                  <span className="text-emerald-400 font-semibold">Find a Trade</span>.
+                  Press <span className="text-emerald-400 font-mono">Enter</span> in the search bar, or open{' '}
+                  <span className="text-emerald-400 font-semibold">Find a Trade</span> /{' '}
+                  <span className="text-sky-400 font-semibold">Suggest a Trade</span>.
                 </p>
               </div>
-              <div className="w-full max-w-xl text-left">
+              <div className="w-full max-w-xl space-y-3">
                 {!showFindATrade && (
                   <button
                     type="button"
-                    onClick={() => setShowFindATrade(true)}
-                    className="w-full mb-3 inline-flex items-center justify-center gap-2 rounded-full bg-emerald-500 text-black py-2.5 text-[12px] font-bold uppercase tracking-wider hover:bg-emerald-400 transition-colors cursor-pointer"
+                    onClick={() => {
+                      setShowFindATrade(true);
+                      setShowSuggestATrade(false);
+                    }}
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-emerald-500 text-black py-2.5 text-[12px] font-bold uppercase tracking-wider hover:bg-emerald-400 transition-colors cursor-pointer"
                   >
                     <Rocket className="w-4 h-4" />
                     Open Find a Trade
                   </button>
                 )}
                 {showFindATrade && (
-                  <p className="text-[11px] text-emerald-300/80 font-mono text-center mb-2">
+                  <p className="text-[11px] text-emerald-300/80 font-mono text-center">
                     Find a Trade panel is open above — paste tickers and scan.
+                  </p>
+                )}
+                {!showSuggestATrade && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowSuggestATrade(true);
+                      setShowFindATrade(false);
+                    }}
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-sky-500 text-black py-2.5 text-[12px] font-bold uppercase tracking-wider hover:bg-sky-400 transition-colors cursor-pointer"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    Open Suggest a Trade
+                  </button>
+                )}
+                {showSuggestATrade && (
+                  <p className="text-[11px] text-sky-300/80 font-mono text-center">
+                    Suggest a Trade panel is open above — pick a market and scan.
                   </p>
                 )}
               </div>
