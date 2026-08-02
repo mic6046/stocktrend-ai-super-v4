@@ -1207,6 +1207,7 @@ export default function App() {
   const [showProjection, setShowProjection] = useState(true);
   const [analysisHorizon, setAnalysisHorizon] = useState<HorizonKey>('1M');
   const [userHasPosition, setUserHasPosition] = useState(false);
+  const [showFindATrade, setShowFindATrade] = useState(false);
 
   React.useEffect(() => {
     const ticker = data?.ticker;
@@ -7287,7 +7288,7 @@ export default function App() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 flex-1 min-w-[200px] max-w-md">
+        <div className="flex items-center gap-2 flex-1 min-w-[200px] max-w-xl">
           <form
             onSubmit={handleSubmit}
             className="flex-1 min-w-0 group"
@@ -7322,6 +7323,24 @@ export default function App() {
               {loading && <Loader2 className="absolute right-3.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-emerald-500" />}
             </div>
           </form>
+          <button
+            type="button"
+            onClick={() => {
+              setActivePage('DASHBOARD');
+              setShowFindATrade((v) => !v);
+            }}
+            className={cn(
+              'shrink-0 inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
+              showFindATrade
+                ? 'bg-emerald-500 text-black border-emerald-400 shadow-[0_0_16px_rgba(16,185,129,0.35)]'
+                : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/25'
+            )}
+            title="Paste a ticker list and let Consensus AI find a BUY"
+          >
+            <Rocket className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Find a Trade</span>
+            <span className="sm:hidden">Trade</span>
+          </button>
         </div>
 
         {user && (
@@ -7439,6 +7458,27 @@ export default function App() {
       <main className="relative z-10 max-w-[1400px] mx-auto p-6 md:p-10 pb-28 lg:pb-10">
         {/* Desktop-only spacer; mobile uses bottom nav */}
         <div className="hidden" />
+
+        <AnimatePresence>
+          {showFindATrade && (
+            <motion.div
+              key="find-a-trade-dock"
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              className="mb-6"
+            >
+              <FindATradePanel
+                horizon={analysisHorizon}
+                onOpenTicker={(sym) => {
+                  if (!assertAnalysisCredits()) return;
+                  setShowFindATrade(false);
+                  runTickerSearch(sym);
+                }}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <AnimatePresence mode="wait">
           {activePage === 'NEWS_CENTER' ? (
@@ -8484,14 +8524,6 @@ export default function App() {
               >
                 {/* Premium analysis hero stack — full width */}
                 <div className="col-span-12 space-y-4">
-                  <FindATradePanel
-                    compact
-                    horizon={analysisHorizon}
-                    onOpenTicker={(sym) => {
-                      if (!assertAnalysisCredits()) return;
-                      runTickerSearch(sym);
-                    }}
-                  />
                   <AnalysisHeroCard
                     ticker={data.ticker}
                     stockName={data.quote?.shortName || data.quote?.longName || ''}
@@ -12767,13 +12799,21 @@ export default function App() {
                 </p>
               </div>
               <div className="w-full max-w-xl text-left">
-                <FindATradePanel
-                  horizon={analysisHorizon}
-                  onOpenTicker={(sym) => {
-                    if (!assertAnalysisCredits()) return;
-                    runTickerSearch(sym);
-                  }}
-                />
+                {!showFindATrade && (
+                  <button
+                    type="button"
+                    onClick={() => setShowFindATrade(true)}
+                    className="w-full mb-3 inline-flex items-center justify-center gap-2 rounded-full bg-emerald-500 text-black py-2.5 text-[12px] font-bold uppercase tracking-wider hover:bg-emerald-400 transition-colors cursor-pointer"
+                  >
+                    <Rocket className="w-4 h-4" />
+                    Open Find a Trade
+                  </button>
+                )}
+                {showFindATrade && (
+                  <p className="text-[11px] text-emerald-300/80 font-mono text-center mb-2">
+                    Find a Trade panel is open above — paste tickers and scan.
+                  </p>
+                )}
               </div>
             </div>
           )}

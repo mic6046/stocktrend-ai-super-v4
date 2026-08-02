@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Crosshair, Loader2, Rocket, Search } from 'lucide-react';
 import { cn } from '../../lib/utils';
@@ -13,6 +13,19 @@ import {
   type FindATradeResult,
 } from '../../lib/findATrade';
 
+const LIST_STORAGE_KEY = 'qn-find-a-trade-list';
+const DEFAULT_LIST = 'AAPL, NVDA, MSFT, TSLA, 0700.HK';
+
+function loadSavedList(): string {
+  try {
+    const raw = localStorage.getItem(LIST_STORAGE_KEY);
+    if (raw != null && raw.trim()) return raw;
+  } catch {
+    /* ignore */
+  }
+  return DEFAULT_LIST;
+}
+
 type FindATradePanelProps = {
   horizon?: HorizonKey;
   onOpenTicker: (ticker: string) => void;
@@ -26,11 +39,19 @@ export function FindATradePanel({
   className,
   compact = false,
 }: FindATradePanelProps) {
-  const [listText, setListText] = useState('AAPL, NVDA, MSFT, TSLA, 0700.HK');
+  const [listText, setListText] = useState(loadSavedList);
   const [scanning, setScanning] = useState(false);
   const [progress, setProgress] = useState<FindATradeProgress | null>(null);
   const [result, setResult] = useState<FindATradeResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LIST_STORAGE_KEY, listText);
+    } catch {
+      /* ignore */
+    }
+  }, [listText]);
 
   const parsed = useMemo(() => parseTickerList(listText), [listText]);
   const horizonLabel = HORIZON_OPTIONS.find((o) => o.key === horizon)?.label ?? horizon;
@@ -67,7 +88,8 @@ export function FindATradePanel({
       </SectionLabel>
 
       <p className="text-[11px] text-gray-400 leading-relaxed">
-        Paste up to {FIND_A_TRADE_MAX} tickers. Consensus AI scouts for names that clear{' '}
+        Paste up to {FIND_A_TRADE_MAX} tickers — your list is saved automatically in this browser.
+        Consensus AI scouts for names that clear{' '}
         <span className="text-emerald-300 font-semibold">BUY / STRONG BUY</span> gates — it will not
         force a pick if none qualify.
       </p>
@@ -82,7 +104,7 @@ export function FindATradePanel({
 
       <div className="flex flex-wrap items-center gap-2 justify-between">
         <p className="text-[10px] font-mono text-gray-500">
-          {parsed.length} ticker{parsed.length === 1 ? '' : 's'} ready
+          {parsed.length}/{FIND_A_TRADE_MAX} ticker{parsed.length === 1 ? '' : 's'} ready · list memorized
           {scanning && progress
             ? ` · scanning ${progress.done}/${progress.total}${progress.current ? ` (${progress.current})` : ''}`
             : ''}
