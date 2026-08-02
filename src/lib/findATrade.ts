@@ -43,7 +43,7 @@ export function parseTickerList(input: string, max = FIND_A_TRADE_MAX): string[]
   const parts = input
     .split(/[\s,;|]+/)
     .map(normalizeTicker)
-    .filter((t) => /^[A-Z0-9.]{1,12}$/.test(t));
+    .filter((t) => /^[A-Z0-9.-]{1,16}$/.test(t));
   const seen = new Set<string>();
   const out: string[] = [];
   for (const t of parts) {

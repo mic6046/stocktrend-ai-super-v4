@@ -16,6 +16,7 @@ import {
   DecisionBriefPanel,
   RecommendationChangeLogPanel,
   FindATradePanel,
+  SuggestATradePanel,
   type HorizonKey,
 } from './components/analysis';
 import {
@@ -1208,6 +1209,7 @@ export default function App() {
   const [analysisHorizon, setAnalysisHorizon] = useState<HorizonKey>('1M');
   const [userHasPosition, setUserHasPosition] = useState(false);
   const [showFindATrade, setShowFindATrade] = useState(false);
+  const [showSuggestATrade, setShowSuggestATrade] = useState(false);
 
   React.useEffect(() => {
     const ticker = data?.ticker;
@@ -7328,6 +7330,7 @@ export default function App() {
             onClick={() => {
               setActivePage('DASHBOARD');
               setShowFindATrade((v) => !v);
+              if (!showFindATrade) setShowSuggestATrade(false);
             }}
             className={cn(
               'shrink-0 inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
@@ -7339,7 +7342,26 @@ export default function App() {
           >
             <Rocket className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Find a Trade</span>
-            <span className="sm:hidden">Trade</span>
+            <span className="sm:hidden">Find</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActivePage('DASHBOARD');
+              setShowSuggestATrade((v) => !v);
+              if (!showSuggestATrade) setShowFindATrade(false);
+            }}
+            className={cn(
+              'shrink-0 inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
+              showSuggestATrade
+                ? 'bg-sky-500 text-black border-sky-400 shadow-[0_0_16px_rgba(56,189,248,0.35)]'
+                : 'bg-sky-500/15 text-sky-300 border-sky-500/40 hover:bg-sky-500/25'
+            )}
+            title="Suggest a BUY from popular US / HK / Japan / Europe markets"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Suggest a Trade</span>
+            <span className="sm:hidden">Suggest</span>
           </button>
         </div>
 
@@ -7473,6 +7495,24 @@ export default function App() {
                 onOpenTicker={(sym) => {
                   if (!assertAnalysisCredits()) return;
                   setShowFindATrade(false);
+                  runTickerSearch(sym);
+                }}
+              />
+            </motion.div>
+          )}
+          {showSuggestATrade && (
+            <motion.div
+              key="suggest-a-trade-dock"
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              className="mb-6"
+            >
+              <SuggestATradePanel
+                horizon={analysisHorizon}
+                onOpenTicker={(sym) => {
+                  if (!assertAnalysisCredits()) return;
+                  setShowSuggestATrade(false);
                   runTickerSearch(sym);
                 }}
               />

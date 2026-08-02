@@ -9,4 +9,5 @@ export { AnimatedNumber } from './AnimatedNumber';
 export { DecisionBriefPanel } from './DecisionBriefPanel';
 export { RecommendationChangeLogPanel } from './RecommendationChangeLogPanel';
 export { FindATradePanel } from './FindATradePanel';
+export { SuggestATradePanel } from './SuggestATradePanel';
 export * from './analysisTheme';
