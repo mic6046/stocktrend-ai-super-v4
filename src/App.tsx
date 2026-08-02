@@ -14,8 +14,14 @@ import {
   RiskMeterPanel,
   MetricRadialRow,
   DecisionBriefPanel,
+  RecommendationChangeLogPanel,
+  FindATradePanel,
   type HorizonKey,
 } from './components/analysis';
+import {
+  ingestRecommendationSnapshot,
+  type ChangeLogState,
+} from './lib/recommendationChangeLog';
 import { buildHorizonView } from './lib/horizonView';
 import { TruncatedText } from './components/TruncatedText';
 import { AuthModal } from './components/AuthModal';
@@ -8478,6 +8484,14 @@ export default function App() {
               >
                 {/* Premium analysis hero stack — full width */}
                 <div className="col-span-12 space-y-4">
+                  <FindATradePanel
+                    compact
+                    horizon={analysisHorizon}
+                    onOpenTicker={(sym) => {
+                      if (!assertAnalysisCredits()) return;
+                      runTickerSearch(sym);
+                    }}
+                  />
                   <AnalysisHeroCard
                     ticker={data.ticker}
                     stockName={data.quote?.shortName || data.quote?.longName || ''}
@@ -8499,6 +8513,9 @@ export default function App() {
                     onHorizonChange={setAnalysisHorizon}
                     horizonExplanation={`${horizonView.explanation} ${horizonView.validationStatus}`}
                     isLoading={predicting || (loading && !aiStockScore && !prediction)}
+                    currentAction={horizonView.currentAction.action}
+                    currentActionReason={horizonView.currentAction.reason}
+                    userHasPosition={userHasPosition}
                   />
                   <AiInsightsStrip
                     keyRisks={keyRisks}
@@ -12740,15 +12757,24 @@ export default function App() {
               </div>
             </div>
           ) : (
-            <div className="col-span-12 py-16 sm:py-24 flex flex-col items-center justify-center text-center px-6">
-              <Search className="w-10 h-10 text-emerald-500/50 mb-4" />
-              <h2 className="text-xl font-sans font-bold text-white mb-2">Search a ticker to begin</h2>
-              <p className="text-sm text-gray-500 max-w-md">
-                No API calls until you press <span className="text-emerald-400 font-mono">Enter</span> in the search bar.
-              </p>
-              <p className="mt-3 text-[11px] text-gray-600 font-mono uppercase tracking-wider">
-                Timeframe changes apply on next search
-              </p>
+            <div className="col-span-12 py-10 sm:py-16 flex flex-col items-center justify-center text-center px-6 gap-6">
+              <div>
+                <Search className="w-10 h-10 text-emerald-500/50 mb-4 mx-auto" />
+                <h2 className="text-xl font-sans font-bold text-white mb-2">Search a ticker to begin</h2>
+                <p className="text-sm text-gray-500 max-w-md mx-auto">
+                  Press <span className="text-emerald-400 font-mono">Enter</span> in the search bar, or paste a list and run{' '}
+                  <span className="text-emerald-400 font-semibold">Find a Trade</span>.
+                </p>
+              </div>
+              <div className="w-full max-w-xl text-left">
+                <FindATradePanel
+                  horizon={analysisHorizon}
+                  onOpenTicker={(sym) => {
+                    if (!assertAnalysisCredits()) return;
+                    runTickerSearch(sym);
+                  }}
+                />
+              </div>
             </div>
           )}
         </AnimatePresence>

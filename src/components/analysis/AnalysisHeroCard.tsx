@@ -46,6 +46,10 @@ type AnalysisHeroCardProps = {
   onHorizonChange: (h: HorizonKey) => void;
   horizonExplanation?: string;
   isLoading?: boolean;
+  /** Live do-now action (position + price) — distinct from horizon recommendation */
+  currentAction?: string | null;
+  currentActionReason?: string | null;
+  userHasPosition?: boolean;
   /** @deprecated kept for compatibility — unused when target/return passed */
   projection?: HeroProjection;
   cockpit?: HeroCockpit;
@@ -130,6 +134,9 @@ export function AnalysisHeroCard({
   onHorizonChange,
   horizonExplanation,
   isLoading,
+  currentAction,
+  currentActionReason,
+  userHasPosition = false,
 }: AnalysisHeroCardProps) {
   const theme = useMemo(() => getRecommendationTheme(score), [score]);
   const label = ratingLabel || theme.label;
@@ -234,6 +241,18 @@ export function AnalysisHeroCard({
                 {tone.emoji} {label}
               </motion.p>
             </AnimatePresence>
+
+            {currentAction && (
+              <div className="mt-3 rounded-xl border border-cyan-500/25 bg-cyan-500/5 px-3 py-2">
+                <p className="text-[9px] uppercase tracking-wider text-cyan-300/80">
+                  Do now · Current Action · {userHasPosition ? 'Position held' : 'No position'}
+                </p>
+                <p className="mt-0.5 text-[15px] font-bold text-white tracking-wide">{currentAction}</p>
+                {currentActionReason && (
+                  <p className="mt-1 text-[10px] text-gray-400 leading-snug">{currentActionReason}</p>
+                )}
+              </div>
+            )}
 
             <div className="mt-5 grid grid-cols-2 gap-3">
               <div className="rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 min-w-0">

@@ -261,7 +261,7 @@ export function TradeZonesPanel({
 
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <p className="text-[10px] text-gray-500 leading-relaxed font-mono uppercase tracking-wider">
-          {horizonLabel} · non-overlapping zones
+          {horizonLabel} · {userHasPosition ? 'owned: ADD only' : 'flat: BUY only'} · never both
         </p>
         <label className="inline-flex items-center gap-2 cursor-pointer select-none">
           <span className="text-[10px] font-mono text-gray-400 uppercase tracking-wider">I own this stock</span>

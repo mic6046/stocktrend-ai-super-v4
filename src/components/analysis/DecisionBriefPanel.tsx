@@ -32,7 +32,7 @@ export function DecisionBriefPanel({ decision }: DecisionBriefPanelProps) {
 
       {/* STEP 11 — Final output header */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-        <Metric label="Overall Recommendation" value={decision.finalVerdict} tone={decision.chartStance} />
+        <Metric label="Horizon Recommendation" value={decision.finalVerdict} tone={decision.chartStance} />
         <Metric label="Confidence" value={`${decision.confidence}%`} />
         <Metric
           label="Expected Return"
@@ -40,9 +40,15 @@ export function DecisionBriefPanel({ decision }: DecisionBriefPanelProps) {
           tone={decision.expectedReturn >= 0 ? 'bull' : 'bear'}
         />
         <Metric label="Risk Level" value={decision.riskLevel} />
-        <Metric label="Current Action" value={decision.currentAction.action} tone={decision.chartStance} />
+        <Metric label="Do Now (Current Action)" value={decision.currentAction.action} tone={decision.chartStance} />
         <Metric label="Suggested Action" value={decision.suggestedAction} tone={decision.chartStance} />
       </div>
+
+      <p className="text-[10px] text-gray-500 font-mono leading-relaxed">
+        Recommendation = horizon thesis · Current Action = what to do at this live price given{' '}
+        {decision.userHasPosition ? 'you own the stock' : 'you do not own the stock'}. BUY ZONE and ADD
+        POSITION never appear together.
+      </p>
 
       <div className="rounded-xl border border-cyan-500/25 bg-cyan-500/5 px-3 py-2.5">
         <p className="text-[8px] uppercase tracking-wider text-cyan-300/80">

@@ -1020,6 +1020,7 @@ function inBand(px: number, band: EngineZoneBand): boolean {
 
 /**
  * STEP 9–10: Map live price to exactly ONE action, position-aware.
+ * BUY and ADD POSITION are mutually exclusive by ownership — never both active.
  */
 function resolveLiveAction(
   px: number,
@@ -1094,7 +1095,7 @@ function resolveLiveAction(
       action: 'WAIT',
       reason: 'Price is already in TAKE PROFIT territory — wait for a better entry rather than chase.',
       confidence: conf,
-      zoneKey: 'takeProfit',
+      zoneKey: 'hold',
     };
   }
 
@@ -1102,7 +1103,7 @@ function resolveLiveAction(
     if (userHasPosition) {
       return {
         action: 'HOLD',
-        reason: 'Price is above Buy/Add and below Take Profit — risk/reward balanced; no action required.',
+        reason: 'Price is above Add zone and below Take Profit — risk/reward balanced; no action required.',
         confidence: conf,
         zoneKey: 'hold',
       };
@@ -1115,40 +1116,19 @@ function resolveLiveAction(
     };
   }
 
-  if (inBand(px, zones.addZone)) {
-    if (userHasPosition) {
-      return {
-        action: 'ADD POSITION',
-        reason: 'Price is in ADD POSITION zone — scale in if thesis and support hold.',
-        confidence: conf,
-        zoneKey: 'add',
-      };
-    }
-    // No position: ADD band is still a constructive entry area → BUY
-    if (rec === 'AVOID NEW POSITION' || rec === 'SELL') {
-      return {
-        action: 'AVOID NEW POSITION',
-        reason: 'Committee stance is defensive — do not open a new position in this band.',
-        confidence: conf,
-        zoneKey: 'add',
-      };
-    }
-    return {
-      action: 'BUY',
-      reason: 'Price is in a constructive entry band (ADD maps to BUY when you do not own the stock).',
-      confidence: conf,
-      zoneKey: 'add',
-    };
-  }
+  // Entry structure (buy + add ladder bands): ownership decides BUY vs ADD — never both
+  const inEntry =
+    inBand(px, zones.buyZone) ||
+    inBand(px, zones.addZone) ||
+    (px > zones.stopLoss && px < zones.addZone.hi);
 
-  if (inBand(px, zones.buyZone) || (px > zones.stopLoss && px < zones.buyZone.lo)) {
-    // Between stop and buy lo → still treat as buy opportunity if above stop
+  if (inEntry) {
     if (userHasPosition) {
       return {
         action: 'ADD POSITION',
-        reason: 'Price is in/near BUY zone — BUY becomes ADD POSITION because you already own the stock.',
+        reason: 'Price is in the entry/scale-in structure — BUY is replaced by ADD POSITION because you already own the stock.',
         confidence: conf,
-        zoneKey: 'buy',
+        zoneKey: 'add',
       };
     }
     if (rec === 'AVOID NEW POSITION' || rec === 'SELL') {
@@ -1161,13 +1141,12 @@ function resolveLiveAction(
     }
     return {
       action: 'BUY',
-      reason: 'Price is in the BUY zone — best entry area for a new position on this horizon.',
+      reason: 'Price is in the BUY zone — best entry for a new position. ADD POSITION is hidden because you do not own the stock.',
       confidence: conf,
       zoneKey: 'buy',
     };
   }
 
-  // Gap between buy and add or other gaps — snap to nearest logical action
   if (userHasPosition) {
     return {
       action: 'HOLD',
@@ -1185,10 +1164,61 @@ function resolveLiveAction(
 }
 
 function visibleZonesFor(userHasPosition: boolean): QuantumEngineOutput['visibleZoneKeys'] {
+  // Hard rule: BUY ZONE and ADD POSITION must never both be active/visible
   if (userHasPosition) {
     return ['add', 'hold', 'takeProfit', 'reduce', 'exit', 'stop'];
   }
   return ['buy', 'hold', 'stop'];
+}
+
+/** Rewrite signal labels so position state cannot contradict zone visibility */
+function positionAwareSignals(
+  signals: ExplainedSignal[],
+  userHasPosition: boolean
+): ExplainedSignal[] {
+  return signals
+    .map((sig) => {
+      if (!userHasPosition) {
+        if (sig.signalClass === 'ADD POSITION' || /ADD POSITION/i.test(sig.title)) {
+          return {
+            ...sig,
+            title: sig.title.replace(/ADD POSITION/gi, 'BUY SIGNAL'),
+            signalClass: 'BUY SIGNAL' as SignalClass,
+            suggestedAction: 'Buy / open new position if thesis holds',
+          };
+        }
+        if (
+          sig.signalClass === 'TAKE PARTIAL PROFIT' ||
+          sig.signalClass === 'REDUCE POSITION' ||
+          sig.signalClass === 'EXIT POSITION'
+        ) {
+          return {
+            ...sig,
+            title: `WAIT / AVOID · ${sig.title.replace(/^(TAKE PARTIAL PROFIT|REDUCE POSITION|EXIT POSITION)[·\s]*/i, '')}`,
+            signalClass: 'HOLD' as SignalClass,
+            suggestedAction: 'Do not open — wait or avoid new position',
+          };
+        }
+      } else {
+        if (sig.signalClass === 'BUY SIGNAL' || /^BUY SIGNAL/i.test(sig.title)) {
+          return {
+            ...sig,
+            title: sig.title.replace(/BUY SIGNAL/gi, 'ADD POSITION'),
+            signalClass: 'ADD POSITION' as SignalClass,
+            suggestedAction: 'Add to existing position gradually',
+          };
+        }
+      }
+      return sig;
+    })
+    .filter((sig) => {
+      if (!userHasPosition) {
+        return !['TAKE PARTIAL PROFIT', 'REDUCE POSITION', 'EXIT POSITION', 'ADD POSITION'].includes(
+          sig.signalClass
+        );
+      }
+      return sig.signalClass !== 'BUY SIGNAL';
+    });
 }
 
 function positionAwareSuggestedAction(
@@ -1345,9 +1375,15 @@ function validate(out: QuantumEngineOutput): boolean {
     if (['ADD POSITION', 'TAKE PROFIT', 'REDUCE', 'EXIT', 'STOP LOSS'].includes(out.currentAction.action)) {
       return false;
     }
+    if (out.visibleZoneKeys.includes('add') || out.visibleZoneKeys.includes('takeProfit')) return false;
+    if (out.visibleZoneKeys.includes('reduce') || out.visibleZoneKeys.includes('exit')) return false;
   } else if (out.currentAction.action === 'BUY' || out.currentAction.action === 'WAIT') {
     return false;
+  } else if (out.visibleZoneKeys.includes('buy')) {
+    return false;
   }
+  // Hard rule: BUY ZONE and ADD POSITION must never both be active
+  if (out.visibleZoneKeys.includes('buy') && out.visibleZoneKeys.includes('add')) return false;
   return true;
 }
 
@@ -1599,7 +1635,8 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
     const rejectedOpposite = buildRejectedOpposite(rec, evidence);
     const suggestedAction = positionAwareSuggestedAction(rec, currentAction, userHasPosition, evidence);
     const note = consensusNote(evidence.committee, rec);
-    const summaryLead = `Consensus AI · ${horizonLabel}: ${rec} (${confidence}% confidence). Current action: ${currentAction.action}. Expected return ${expectedReturn >= 0 ? '+' : ''}${expectedReturn.toFixed(1)}%. ${whyWins}`;
+    const explainedSignals = positionAwareSignals(evidence.explainedSignals, userHasPosition);
+    const summaryLead = `Horizon recommendation: ${rec} (${confidence}% confidence). Do now: ${currentAction.action}. Expected return ${expectedReturn >= 0 ? '+' : ''}${expectedReturn.toFixed(1)}%. ${whyWins}`;
 
     const drawdown = round2(-Math.max(2, Math.abs(expectedReturn) * 0.55 + (vol ?? 20) * 0.12));
     const sharpe =
@@ -1664,7 +1701,7 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
       nextReviewTrigger: nextReviewFor(horizonLabel, evidence),
       supportHoldProbability: evidence.supportHoldProbability,
       resistanceBreakProbability: evidence.resistanceBreakProbability,
-      explainedSignals: evidence.explainedSignals,
+      explainedSignals,
       decisionWeightNote: note,
       committee: evidence.committee,
       bullishScore: evidence.bullishScore,
