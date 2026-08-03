@@ -1,5 +1,5 @@
 /**
- * Curated popular-market universes for Suggest a Trade.
+ * Curated popular-market universes for Find a Trade +.
  * Kept modest (≤20 per scout) so Consensus scanning stays within API limits.
  */
 

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Crosshair, Loader2, Rocket, Search } from 'lucide-react';
+import { Crosshair, Loader2, Rocket, Search, ListPlus } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { GlassCard, SectionLabel } from './GlassCard';
 import { formatMoney, formatPct, type HorizonKey, HORIZON_OPTIONS } from './analysisTheme';
@@ -12,8 +12,19 @@ import {
   type FindATradeProgress,
   type FindATradeResult,
 } from '../../lib/findATrade';
+import {
+  SUGGEST_MARKETS,
+  SUGGEST_THEMES,
+  buildSuggestUniverse,
+  type SuggestMarket,
+  type SuggestTheme,
+} from '../../lib/suggestTradeUniverses';
 
 const LIST_STORAGE_KEY = 'qn-find-a-trade-list';
+const MARKET_KEY = 'qn-find-a-trade-market';
+const THEME_KEY = 'qn-find-a-trade-theme';
+const LEGACY_MARKET_KEY = 'qn-suggest-market';
+const LEGACY_THEME_KEY = 'qn-suggest-theme';
 const DEFAULT_LIST = 'AAPL, NVDA, MSFT, TSLA, 0700.HK';
 
 function loadSavedList(): string {
@@ -24,6 +35,28 @@ function loadSavedList(): string {
     /* ignore */
   }
   return DEFAULT_LIST;
+}
+
+function loadMarket(): SuggestMarket {
+  try {
+    const v = (localStorage.getItem(MARKET_KEY) ||
+      localStorage.getItem(LEGACY_MARKET_KEY)) as SuggestMarket | null;
+    if (v && SUGGEST_MARKETS.some((m) => m.key === v)) return v;
+  } catch {
+    /* ignore */
+  }
+  return 'US';
+}
+
+function loadTheme(): SuggestTheme {
+  try {
+    const v = (localStorage.getItem(THEME_KEY) ||
+      localStorage.getItem(LEGACY_THEME_KEY)) as SuggestTheme | null;
+    if (v && SUGGEST_THEMES.some((t) => t.key === v)) return v;
+  } catch {
+    /* ignore */
+  }
+  return 'ALL';
 }
 
 type FindATradePanelProps = {
@@ -40,6 +73,8 @@ export function FindATradePanel({
   compact = false,
 }: FindATradePanelProps) {
   const [listText, setListText] = useState(loadSavedList);
+  const [market, setMarket] = useState<SuggestMarket>(loadMarket);
+  const [theme, setTheme] = useState<SuggestTheme>(loadTheme);
   const [scanning, setScanning] = useState(false);
   const [progress, setProgress] = useState<FindATradeProgress | null>(null);
   const [result, setResult] = useState<FindATradeResult | null>(null);
@@ -53,16 +88,45 @@ export function FindATradePanel({
     }
   }, [listText]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(MARKET_KEY, market);
+      localStorage.setItem(THEME_KEY, theme);
+    } catch {
+      /* ignore */
+    }
+  }, [market, theme]);
+
   const parsed = useMemo(() => parseTickerList(listText), [listText]);
+  const universe = useMemo(
+    () => buildSuggestUniverse(market, theme, FIND_A_TRADE_MAX),
+    [market, theme]
+  );
   const horizonLabel = HORIZON_OPTIONS.find((o) => o.key === horizon)?.label ?? horizon;
+  const marketLabel = SUGGEST_MARKETS.find((m) => m.key === market)?.label ?? market;
+  const themeLabel = SUGGEST_THEMES.find((t) => t.key === theme)?.label ?? theme;
+
+  const fillFromMarketTheme = () => {
+    if (!universe.length) {
+      setError('No names in this market/theme combo. Try All themes.');
+      return;
+    }
+    setError(null);
+    setListText(universe.map((u) => u.ticker).join(', '));
+  };
 
   const runScout = async () => {
     if (scanning) return;
-    const tickers = parseTickerList(listText);
+
+    const pasted = parseTickerList(listText);
+    const tickers =
+      pasted.length > 0 ? pasted : universe.map((u) => u.ticker).slice(0, FIND_A_TRADE_MAX);
+
     if (!tickers.length) {
-      setError('Enter tickers separated by commas or spaces.');
+      setError('Paste tickers, or pick a market/theme and click Fill from market/theme.');
       return;
     }
+
     setError(null);
     setScanning(true);
     setProgress({ done: 0, total: tickers.length });
@@ -76,24 +140,77 @@ export function FindATradePanel({
       });
       setResult(out);
     } catch (e: any) {
-      setError(e?.message || 'Find a Trade failed');
+      setError(e?.message || 'Find a Trade + failed');
     } finally {
       setScanning(false);
     }
   };
 
+  const canScan = !scanning && (parsed.length > 0 || universe.length > 0);
+
   return (
     <GlassCard className={cn('space-y-3', className)}>
       <SectionLabel icon={<Rocket className="w-3.5 h-3.5 text-emerald-400" />}>
-        Find a Trade · {horizonLabel}
+        Find a Trade + · {horizonLabel}
       </SectionLabel>
 
       <p className="text-[11px] text-gray-400 leading-relaxed">
-        Paste up to {FIND_A_TRADE_MAX} tickers — your list is saved automatically in this browser.
-        Consensus AI scouts for names that clear{' '}
-        <span className="text-emerald-300 font-semibold">BUY / STRONG BUY</span> gates — it will not
-        force a pick if none qualify.
+        Choose a market and theme, paste your own list (memorized in this browser), or fill from the
+        curated universe. Consensus AI scouts for{' '}
+        <span className="text-emerald-300 font-semibold">BUY / STRONG BUY</span> — never forced.
       </p>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <label className="block space-y-1.5">
+          <span className="text-[9px] font-mono uppercase tracking-wider text-gray-500">Market</span>
+          <select
+            value={market}
+            onChange={(e) => setMarket(e.target.value as SuggestMarket)}
+            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-[12px] text-gray-100 focus:outline-none focus:border-emerald-500/40"
+          >
+            {SUGGEST_MARKETS.map((m) => (
+              <option key={m.key} value={m.key}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block space-y-1.5">
+          <span className="text-[9px] font-mono uppercase tracking-wider text-gray-500">Theme</span>
+          <select
+            value={theme}
+            onChange={(e) => setTheme(e.target.value as SuggestTheme)}
+            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-[12px] text-gray-100 focus:outline-none focus:border-emerald-500/40"
+          >
+            {SUGGEST_THEMES.map((t) => (
+              <option key={t.key} value={t.key}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 justify-between rounded-xl border border-white/8 bg-black/25 px-3 py-2">
+        <p className="text-[10px] font-mono text-gray-500">
+          {marketLabel} · {themeLabel} · {universe.length} curated names
+        </p>
+        <button
+          type="button"
+          disabled={scanning || universe.length === 0}
+          onClick={fillFromMarketTheme}
+          className={cn(
+            'inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider border transition-colors cursor-pointer',
+            scanning || universe.length === 0
+              ? 'border-white/10 text-gray-600'
+              : 'border-emerald-500/35 text-emerald-300 hover:bg-emerald-500/10'
+          )}
+          title="Replace the paste box with curated tickers for this market/theme"
+        >
+          <ListPlus className="w-3 h-3" />
+          Fill from market/theme
+        </button>
+      </div>
 
       <textarea
         value={listText}
@@ -105,24 +222,26 @@ export function FindATradePanel({
 
       <div className="flex flex-wrap items-center gap-2 justify-between">
         <p className="text-[10px] font-mono text-gray-500">
-          {parsed.length}/{FIND_A_TRADE_MAX} ticker{parsed.length === 1 ? '' : 's'} ready · list memorized
+          {parsed.length > 0
+            ? `${parsed.length}/${FIND_A_TRADE_MAX} pasted · list memorized`
+            : `Paste empty → will scout ${Math.min(universe.length, FIND_A_TRADE_MAX)} curated`}
           {scanning && progress
             ? ` · scanning ${progress.done}/${progress.total}${progress.current ? ` (${progress.current})` : ''}`
             : ''}
         </p>
         <button
           type="button"
-          disabled={scanning || parsed.length === 0}
+          disabled={!canScan}
           onClick={() => void runScout()}
           className={cn(
             'inline-flex items-center gap-2 rounded-full px-4 py-2 text-[11px] font-bold uppercase tracking-wider transition-all cursor-pointer',
-            scanning || parsed.length === 0
+            !canScan
               ? 'bg-white/5 text-gray-500 border border-white/10'
               : 'bg-emerald-500 text-black border border-emerald-400 shadow-[0_0_18px_rgba(16,185,129,0.35)] hover:bg-emerald-400'
           )}
         >
           {scanning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Crosshair className="w-3.5 h-3.5" />}
-          Find a Trade
+          Find a Trade +
         </button>
       </div>
 
