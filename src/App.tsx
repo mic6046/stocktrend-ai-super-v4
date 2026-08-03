@@ -5908,15 +5908,20 @@ export default function App() {
         },
       } as any;
 
-      // Kick off news + optional 1y history in parallel with the chart fetch (predict path)
+      // Always load 1y daily for Quantum SSOT (matches Find a Trade lookback),
+      // even when the chart itself is a shorter timeframe.
       const needsParallel1y =
-        runPredict &&
         !(String(range) === '1y' && String(interval) === '1d') &&
         String(range) !== '5y' &&
         String(range) !== 'max';
       const newsPromise = runPredict ? fetchNews(symbol) : Promise.resolve([] as any[]);
       const longHistPromise = needsParallel1y
-        ? fetchWithRetry(`/api/stock?ticker=${tickerEnc}&range=1y&interval=1d${cacheQs}`, stockMeta)
+        ? fetchWithRetry(`/api/stock?ticker=${tickerEnc}&range=1y&interval=1d${cacheQs}`, {
+            __qnMeta: {
+              reason: 'quantum-1y-history',
+              userAction: runPredict ? 'Search stock' : 'Click Refresh',
+            },
+          } as any)
             .then((r) => r.json())
             .catch((err) => {
               console.warn('Parallel 1y stock fetch failed:', err);
@@ -5932,9 +5937,7 @@ export default function App() {
       const sanitizedHistory = (stockData.history || []).filter((h: any) => h.close !== null && h.close !== undefined);
       stockData.history = sanitizedHistory;
 
-      const [newsItems, longData] = runPredict
-        ? await Promise.all([newsPromise, longHistPromise])
-        : [[], null];
+      const [newsItems, longData] = await Promise.all([newsPromise, longHistPromise]);
 
       let predictHistoryOverride: any[] | undefined;
       if (longData?.history) {
@@ -5944,6 +5947,10 @@ export default function App() {
         if (predictHistoryOverride.length) {
           setIndicatorHistory(predictHistoryOverride);
         }
+      } else if (String(range) === '1y' && String(interval) === '1d' && sanitizedHistory.length) {
+        // Chart fetch already is 1y — use it for Quantum.
+        setIndicatorHistory(sanitizedHistory);
+        predictHistoryOverride = sanitizedHistory;
       }
 
       if (isInitial) {
@@ -6974,44 +6981,25 @@ export default function App() {
   const technicalLevels = computeTechnicalLevels(visibleBaseHistory);
   const activeLevels: any = (srSource === 'AI' && levels) ? levels : technicalLevels;
 
-  /** Investment Horizon SSOT — shared Quantum input builder (+ optional predict enrich). */
+  /**
+   * Investment Horizon SSOT — same chart-only Quantum path as Find a Trade.
+   * Prefer 1y indicatorHistory (never timeframe-sliced visibleBaseHistory).
+   * Do NOT feed /api/predict totalScore or cockpit overlays into baseScore —
+   * that was why NVDA could be BUY here and missing from Find a Trade buys.
+   */
   const horizonView = React.useMemo(() => {
+    // Match Find a Trade: full 1y daily series when available (not 1mo chart slice).
     const hist =
       (indicatorHistory && indicatorHistory.length >= 30 ? indicatorHistory : null) ||
       (chartHistory && chartHistory.length ? chartHistory : null) ||
-      visibleBaseHistory ||
       [];
-    const whaleScore =
-      whaleAccumulation?.metrics?.whaleAccumulationIndex ??
-      (aiStockScore?.components?.whaleAccumulation
-        ? Math.round(
-            (aiStockScore.components.whaleAccumulation.score /
-              Math.max(1, aiStockScore.components.whaleAccumulation.maxWeight)) *
-              100
-          )
-        : null);
     const input = buildQuantumInputFromMarketData({
       horizon: analysisHorizon,
       ticker: String(data?.ticker || ''),
       quote: data?.quote,
       history: hist,
+      // Affects live zone action labels only — not finalVerdict / overallScore.
       userHasPosition,
-      enrich: {
-        baseScore: aiStockScore?.totalScore ?? null,
-        baseConfidence: confidence ?? cockpitData?.confidence ?? null,
-        baseTarget: projectionMeta.baseCase ?? cockpitData?.baseCase?.targetPrice ?? null,
-        bullTarget: projectionMeta.bullCase ?? cockpitData?.bullCase?.targetPrice ?? null,
-        bearTarget: projectionMeta.bearCase ?? cockpitData?.bearCase?.targetPrice ?? null,
-        baseReturn: cockpitData?.baseCase?.expectedReturn ?? null,
-        forecastHorizons,
-        whaleScore,
-        institutionalScore: cockpitData?.instAccumScore ?? null,
-        sentimentScore: cockpitData?.sentimentScore ?? null,
-        momentumScore: cockpitData?.momentumScore ?? null,
-        smartMoneyScore: cockpitData?.smScore ?? null,
-        levels: activeLevels,
-        stopLossHint: cockpitData?.stopLoss ?? null,
-      },
     });
     if (!input.currentPrice) {
       const fallback =
@@ -7028,14 +7016,8 @@ export default function App() {
     data?.ticker,
     indicatorHistory,
     chartHistory,
-    visibleBaseHistory,
-    projectionMeta,
-    cockpitData,
-    aiStockScore,
-    confidence,
-    forecastHorizons,
-    whaleAccumulation,
-    activeLevels,
+    projectionMeta.lastClose,
+    cockpitData?.entryPrice,
     userHasPosition,
   ]);
 

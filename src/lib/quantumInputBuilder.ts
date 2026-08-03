@@ -1,7 +1,8 @@
 /**
  * Shared Quantum Score input builder.
- * Find a Trade and Individual Analysis must derive chart-side features the same way.
- * Optional `enrich` overlays (server AI score, forecasts) are applied only when available.
+ * Find a Trade and Individual Analysis MUST call this with the same history lookback
+ * (1y daily) and must NOT override baseScore/baseConfidence with /api/predict totals.
+ * Optional enrich is limited to non-score overlays; score SSOT is chart master score.
  */
 
 import type { HorizonKey } from '../components/analysis/analysisTheme';
@@ -9,7 +10,9 @@ import { computeTechnicalIndicators } from './technical';
 import type { QuantumEngineInput } from './quantumRecommendationEngine';
 
 export type QuantumInputEnrich = {
+  /** @deprecated Ignored — chart master score is SSOT; do not pass predict totalScore. */
   baseScore?: number | null;
+  /** @deprecated Ignored — chart confidence is SSOT. */
   baseConfidence?: number | null;
   baseTarget?: number | null;
   bullTarget?: number | null;
@@ -126,17 +129,11 @@ export function buildQuantumInputFromMarketData(opts: {
   return {
     horizon: opts.horizon,
     currentPrice: px,
-    // Prefer enrich (full analysis / predict); otherwise chart master score — never a hard-coded 60.
-    baseScore:
-      enrich.baseScore != null && Number.isFinite(Number(enrich.baseScore))
-        ? Number(enrich.baseScore)
-        : Number.isFinite(chartScore)
-          ? chartScore
-          : 65,
-    baseConfidence:
-      enrich.baseConfidence != null && Number.isFinite(Number(enrich.baseConfidence))
-        ? Number(enrich.baseConfidence)
-        : chartConfidence,
+    // Chart master score is SSOT for Find a Trade + Individual Analysis.
+    // enrich.baseScore/baseConfidence must NOT be used for predict totalScore —
+    // that broke ranking parity (analysis BUY vs scout HOLD).
+    baseScore: Number.isFinite(chartScore) ? chartScore : 65,
+    baseConfidence: chartConfidence,
     baseTarget: enrich.baseTarget ?? baseTarget,
     bullTarget: enrich.bullTarget ?? bullTarget,
     bearTarget: enrich.bearTarget ?? bearTarget,
