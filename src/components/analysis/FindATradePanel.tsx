@@ -57,6 +57,7 @@ export function FindATradePanel({
   const horizonLabel = HORIZON_OPTIONS.find((o) => o.key === horizon)?.label ?? horizon;
 
   const runScout = async () => {
+    if (scanning) return;
     const tickers = parseTickerList(listText);
     if (!tickers.length) {
       setError('Enter tickers separated by commas or spaces.');

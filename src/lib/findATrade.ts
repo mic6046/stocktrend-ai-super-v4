@@ -4,6 +4,7 @@
  */
 
 import { computeTechnicalIndicators } from './technical';
+import { apiUrl, loggedFetch } from './api';
 import {
   runQuantumRecommendationEngine,
   type RecommendationLabel,
@@ -258,7 +259,12 @@ export async function findATrade(opts: {
   const fetchJson =
     opts.fetchJson ??
     (async (url: string) => {
-      const res = await fetch(url);
+      const res = await loggedFetch(apiUrl(url), {
+        __qnMeta: {
+          reason: 'find-or-suggest-trade',
+          userAction: 'Click Find/Suggest Trade',
+        },
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     });

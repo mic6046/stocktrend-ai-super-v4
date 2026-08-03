@@ -1,4 +1,4 @@
-import { apiUrl } from './api';
+import { apiUrl, loggedFetch } from './api';
 
 export type UsageSnapshot = {
   email: string;
@@ -26,7 +26,9 @@ export type UsageSnapshot = {
 export type OverageProduct = 'analysis' | 'news' | 'analysis_pack';
 
 export async function fetchUsage(email: string): Promise<UsageSnapshot> {
-  const res = await fetch(apiUrl(`/api/usage?email=${encodeURIComponent(email)}`));
+  const res = await loggedFetch(apiUrl(`/api/usage?email=${encodeURIComponent(email)}`), {
+    __qnMeta: { reason: 'usage', userAction: 'Load usage quota' },
+  });
   const data = await res.json();
   if (!res.ok) throw new Error(data?.error || 'Failed to load usage');
   return data as UsageSnapshot;
@@ -36,10 +38,11 @@ export async function startOverageCheckout(
   product: OverageProduct,
   email: string
 ): Promise<{ url: string }> {
-  const res = await fetch(apiUrl('/api/stripe/create-overage-checkout'), {
+  const res = await loggedFetch(apiUrl('/api/stripe/create-overage-checkout'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ product, email }),
+    __qnMeta: { reason: 'stripe-overage', userAction: 'Start overage checkout' },
   });
   const data = await res.json();
   if (!res.ok || !data?.url) {

@@ -10,7 +10,7 @@ import {
   serverTimestamp,
   type Timestamp,
 } from 'firebase/firestore';
-import { apiUrl } from './api';
+import { apiUrl, loggedFetch } from './api';
 import { db } from './firebase';
 
 export type SubscriptionStatus = 'active' | 'inactive' | 'expired' | 'none';
@@ -174,10 +174,11 @@ export async function startStripeCheckout(
   plan: SubscriptionPlan,
   email: string
 ): Promise<{ url: string }> {
-  const res = await fetch(apiUrl('/api/stripe/create-checkout-session'), {
+  const res = await loggedFetch(apiUrl('/api/stripe/create-checkout-session'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ plan, email }),
+    __qnMeta: { reason: 'stripe-checkout', userAction: 'Start subscription checkout' },
   });
   const data = await res.json();
   if (!res.ok || !data?.url) {
@@ -188,10 +189,11 @@ export async function startStripeCheckout(
 
 /** Pull latest Stripe subscription state into Firestore for this email. */
 export async function syncStripeSubscription(email: string): Promise<boolean> {
-  const res = await fetch(apiUrl('/api/stripe/sync-subscription'), {
+  const res = await loggedFetch(apiUrl('/api/stripe/sync-subscription'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email }),
+    __qnMeta: { reason: 'stripe-sync', userAction: 'Sync subscription' },
   });
   if (!res.ok) return false;
   const data = await res.json().catch(() => null);

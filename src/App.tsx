@@ -17,6 +17,7 @@ import {
   RecommendationChangeLogPanel,
   FindATradePanel,
   SuggestATradePanel,
+  MarketDataRefreshBar,
   type HorizonKey,
 } from './components/analysis';
 import {
@@ -30,7 +31,16 @@ import { UsageQuotaBar, QuotaExhaustedBanner } from './components/UsageQuotaBar'
 import { LegalLinks } from './components/LegalDocs';
 import { useAuth } from './lib/auth';
 import { loadUserData, saveUserData } from './lib/userData';
-import { apiUrl, assertJsonResponse } from './lib/api';
+import { apiUrl, assertJsonResponse, loggedFetch, withMarketRefreshLock } from './lib/api';
+import {
+  loadRefreshMode,
+  saveRefreshMode,
+  loadAutoRefreshIntervalSec,
+  saveAutoRefreshIntervalSec,
+  type AutoRefreshIntervalSec,
+  type MarketDataStatus,
+  type RefreshMode,
+} from './lib/marketDataRefresh';
 import { fetchUsage, type UsageSnapshot } from './lib/usageApi';
 import { buildInstitutionalFlowNarrative, formatSignedMillions } from './lib/institutionalFlow';
 import { generateStockReportPDF } from './utils/pdfGenerator';
@@ -1210,6 +1220,14 @@ export default function App() {
   const [userHasPosition, setUserHasPosition] = useState(false);
   const [showFindATrade, setShowFindATrade] = useState(false);
   const [showSuggestATrade, setShowSuggestATrade] = useState(false);
+  const [refreshMode, setRefreshMode] = useState<RefreshMode>(() => loadRefreshMode());
+  const [autoRefreshIntervalSec, setAutoRefreshIntervalSec] = useState<AutoRefreshIntervalSec>(
+    () => loadAutoRefreshIntervalSec()
+  );
+  const [marketDataStatus, setMarketDataStatus] = useState<MarketDataStatus>('idle');
+  const [lastMarketUpdatedAt, setLastMarketUpdatedAt] = useState<number | null>(null);
+  const marketStatusResetRef = useRef<number | null>(null);
+  const autoRefresh = refreshMode === 'auto';
 
   React.useEffect(() => {
     const ticker = data?.ticker;
@@ -2383,7 +2401,9 @@ export default function App() {
     setTestingPing(true);
     const start = performance.now();
     try {
-      const res = await fetch(apiUrl('/api/health'));
+      const res = await loggedFetch(apiUrl('/api/health'), {
+        __qnMeta: { reason: 'health-ping', userAction: 'Click uplink test' },
+      });
       if (res.ok) {
         const end = performance.now();
         setPingLatency(Math.round(end - start));
@@ -2548,8 +2568,6 @@ export default function App() {
         setUsage(detail.usage);
       }
       void refreshUsage();
-      window.setTimeout(() => void refreshUsage(), 1500);
-      window.setTimeout(() => void refreshUsage(), 4000);
     };
     window.addEventListener('quantum:usage-refresh', onRefresh);
     return () => window.removeEventListener('quantum:usage-refresh', onRefresh);
@@ -5752,9 +5770,17 @@ export default function App() {
   const getActiveTimeframeParams = () =>
     TIMEFRAMES.find((t) => t.label === timeframe) || { label: '1M', range: '1mo', interval: '1d' };
 
-  const fetchWithRetry = async (url: string, options?: RequestInit, retries = 2, delay = 1200): Promise<Response> => {
+  const fetchWithRetry = async (url: string, options?: RequestInit, retries = 1, delay = 1200): Promise<Response> => {
     try {
-      const res = await assertJsonResponse(await fetch(apiUrl(url), options));
+      const res = await assertJsonResponse(
+        await loggedFetch(apiUrl(url), {
+          ...options,
+          __qnMeta: {
+            reason: (options as any)?.__qnMeta?.reason || (options as any)?.__qnTrigger || 'app-fetch',
+            userAction: (options as any)?.__qnMeta?.userAction || 'app',
+          },
+        } as any)
+      );
       if (!res.ok) {
         let msg = `HTTP error ${res.status}`;
         try {
@@ -5863,6 +5889,7 @@ export default function App() {
     const requestId = ++stockRequestSeq.current;
     if (isInitial) {
       setLoading(true);
+      setMarketDataStatus('loading');
       clearTickerSearchState();
     }
     
@@ -5870,6 +5897,12 @@ export default function App() {
       const tickerEnc = encodeURIComponent(cleanSymbol.toUpperCase());
       const cacheQs = bypassCache ? '&bypassCache=true' : '';
       const chartUrl = `/api/stock?ticker=${tickerEnc}&range=${range}&interval=${interval}${cacheQs}`;
+      const stockMeta = {
+        __qnMeta: {
+          reason: runPredict ? 'stock-search-with-analysis' : 'stock-chart-refresh',
+          userAction: runPredict ? 'Search stock' : 'Click Refresh',
+        },
+      } as any;
 
       // Kick off news + optional 1y history in parallel with the chart fetch (predict path)
       const needsParallel1y =
@@ -5879,7 +5912,7 @@ export default function App() {
         String(range) !== 'max';
       const newsPromise = runPredict ? fetchNews(symbol) : Promise.resolve([] as any[]);
       const longHistPromise = needsParallel1y
-        ? fetchWithRetry(`/api/stock?ticker=${tickerEnc}&range=1y&interval=1d${cacheQs}`)
+        ? fetchWithRetry(`/api/stock?ticker=${tickerEnc}&range=1y&interval=1d${cacheQs}`, stockMeta)
             .then((r) => r.json())
             .catch((err) => {
               console.warn('Parallel 1y stock fetch failed:', err);
@@ -5887,7 +5920,7 @@ export default function App() {
             })
         : Promise.resolve(null);
 
-      const res = await fetchWithRetry(chartUrl);
+      const res = await fetchWithRetry(chartUrl, stockMeta);
       if (requestId !== stockRequestSeq.current) return null;
       const stockData = await res.json();
       
@@ -5940,6 +5973,12 @@ export default function App() {
       if (stockData.quote?.regularMarketPrice) {
         checkAlertsForTicker(stockData.ticker, stockData.quote.regularMarketPrice);
       }
+      setLastMarketUpdatedAt(Date.now());
+      setMarketDataStatus('updated');
+      if (marketStatusResetRef.current) window.clearTimeout(marketStatusResetRef.current);
+      marketStatusResetRef.current = window.setTimeout(() => {
+        setMarketDataStatus((s) => (s === 'updated' ? 'idle' : s));
+      }, 2500);
       return stockData;
     } catch (err: any) {
       if (requestId !== stockRequestSeq.current) return null;
@@ -5948,7 +5987,9 @@ export default function App() {
         /failed to fetch|networkerror|load failed/i.test(raw)
           ? 'Cannot reach the API. Please retry in a moment.'
           : raw;
-      setError(msg);
+      // Keep previously loaded data visible on background/manual refresh failures
+      if (isInitial) setError(msg);
+      else console.warn('[fetchStock] refresh failed (keeping cached data):', msg);
       return null;
     } finally {
       if (requestId === stockRequestSeq.current) {
@@ -5990,7 +6031,7 @@ export default function App() {
     setShowNewsSummaryBox(true);
     try {
       const activeSym = data?.ticker || '';
-      const response = await fetch(apiUrl('/api/news-summary'), {
+      const response = await loggedFetch(apiUrl('/api/news-summary'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -6000,6 +6041,7 @@ export default function App() {
           ticker: activeSym,
           email: user?.email || undefined,
         }),
+        __qnMeta: { reason: 'news-summary', userAction: 'Generate AI news summary' },
       });
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
@@ -6032,7 +6074,10 @@ export default function App() {
     setLoadingFinnhub(true);
     setFinnhubError(null);
     try {
-      const response = await fetch(apiUrl(`/api/finnhub-news/${encodeURIComponent(sym.toUpperCase())}`));
+      const response = await loggedFetch(
+        apiUrl(`/api/finnhub-news/${encodeURIComponent(sym.toUpperCase())}`),
+        { __qnMeta: { reason: 'finnhub-news', userAction: 'Fetch Finnhub news' } }
+      );
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
         throw new Error(errData.error || `HTTP error ${response.status}`);
@@ -6067,7 +6112,9 @@ export default function App() {
         const endpoint = source === 'MARKETAUX'
           ? `/api/marketaux-news/${encodeURIComponent(symbol.toUpperCase())}`
           : `/api/finnhub-news/${encodeURIComponent(symbol.toUpperCase())}`;
-        const response = await fetch(apiUrl(endpoint));
+        const response = await loggedFetch(apiUrl(endpoint), {
+          __qnMeta: { reason: 'news-center', userAction: 'Click Execute (News Center)' },
+        });
         if (!response.ok) {
           const errData = await response.json().catch(() => ({}));
           throw new Error(errData.error || `HTTP request failed (${response.status})`);
@@ -6320,7 +6367,7 @@ export default function App() {
         title: art.headline,
         publisher: art.source
       }));
-      const response = await fetch(apiUrl('/api/news-summary'), {
+      const response = await loggedFetch(apiUrl('/api/news-summary'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -6330,6 +6377,7 @@ export default function App() {
           ticker: newsCenterSymbol.toUpperCase(),
           email: user?.email || undefined,
         }),
+        __qnMeta: { reason: 'news-center-summary', userAction: 'Generate News Center summary' },
       });
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
@@ -6490,8 +6538,12 @@ export default function App() {
           bypassCache: forceBypass,
           modelWeights: modelWeights,
           email: user?.email || undefined,
-        })
-      });
+        }),
+        __qnMeta: {
+          reason: 'ai-predict',
+          userAction: 'Search stock / Analyze',
+        },
+      } as any);
       const result = await res.json();
       if (!res.ok) {
         if (res.status === 402) {
@@ -6587,61 +6639,107 @@ export default function App() {
 
   // No auto API on mount — wait for Search
 
-  // Keep displayed current price near real-time (lightweight /api/quote poll; does not re-run AI)
+  const markMarketDataUpdated = (at = Date.now()) => {
+    setLastMarketUpdatedAt(at);
+    setMarketDataStatus('updated');
+    if (marketStatusResetRef.current) window.clearTimeout(marketStatusResetRef.current);
+    marketStatusResetRef.current = window.setTimeout(() => {
+      setMarketDataStatus((s) => (s === 'updated' ? 'idle' : s));
+    }, 2500);
+  };
+
+  const applyLiveQuote = (activeTicker: string, body: any) => {
+    const live = body?.quote;
+    const px = Number(live?.regularMarketPrice);
+    if (!live || !Number.isFinite(px) || px <= 0) return false;
+
+    setData((prev) => {
+      if (!prev || String(prev.ticker).toUpperCase() !== String(activeTicker).toUpperCase()) {
+        return prev;
+      }
+      const prevPx = Number(prev.quote?.regularMarketPrice);
+      const asOf = Number(body?.asOf) || Date.now();
+      if (Number.isFinite(prevPx) && Math.abs(prevPx - px) < 0.005) {
+        if ((prev as any).quoteAsOf === asOf) return prev;
+        return { ...prev, quoteAsOf: asOf };
+      }
+      return {
+        ...prev,
+        quote: { ...(prev.quote || {}), ...live },
+        quoteAsOf: asOf,
+      };
+    });
+    checkAlertsForTicker(activeTicker, px);
+    return true;
+  };
+
+  const refreshLiveQuoteOnce = async (activeTicker: string, reason: string, userAction: string) => {
+    const res = await loggedFetch(apiUrl(`/api/quote?ticker=${encodeURIComponent(activeTicker)}`), {
+      __qnMeta: { reason, userAction },
+    } as any);
+    if (!res.ok) throw new Error(`Quote HTTP ${res.status}`);
+    const body = await res.json();
+    applyLiveQuote(activeTicker, body);
+    return body;
+  };
+
+  const handleMarketDataRefresh = async () => {
+    await withMarketRefreshLock(async () => {
+      const activeTicker = data?.ticker;
+      setMarketDataStatus('loading');
+      try {
+        if (activeTicker) {
+          await refreshLiveQuoteOnce(
+            String(activeTicker),
+            'manual-refresh-quote',
+            'Click Refresh'
+          );
+          const tf = getActiveTimeframeParams();
+          // Chart/price only — do not re-run AI analysis
+          await fetchStock(String(activeTicker), tf.range, tf.interval, false, true, false);
+        } else {
+          await fetchMarkets(true);
+        }
+        markMarketDataUpdated();
+      } catch (err) {
+        console.warn('[market-data] Manual refresh failed:', err);
+        setMarketDataStatus('idle');
+      }
+    });
+  };
+
+  // Optional auto quote poll — only when Refresh Mode is Auto. No visibility/focus refetch.
   useEffect(() => {
     const activeTicker = data?.ticker;
-    if (!activeTicker) return;
+    if (!activeTicker || refreshMode !== 'auto') return;
 
     let cancelled = false;
 
-    const refreshLiveQuote = async () => {
+    const tick = async () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
-      try {
-        const res = await fetch(
-          apiUrl(`/api/quote?ticker=${encodeURIComponent(activeTicker)}`)
-        );
-        if (!res.ok || cancelled) return;
-        const body = await res.json();
-        const live = body?.quote;
-        const px = Number(live?.regularMarketPrice);
-        if (!live || !Number.isFinite(px) || px <= 0 || cancelled) return;
-
-        setData((prev) => {
-          if (!prev || String(prev.ticker).toUpperCase() !== String(activeTicker).toUpperCase()) {
-            return prev;
-          }
-          const prevPx = Number(prev.quote?.regularMarketPrice);
-          const asOf = Number(body?.asOf) || Date.now();
-          // Skip quote churn when unchanged within 1 cent, but keep asOf fresh
-          if (Number.isFinite(prevPx) && Math.abs(prevPx - px) < 0.005) {
-            if ((prev as any).quoteAsOf === asOf) return prev;
-            return { ...prev, quoteAsOf: asOf };
-          }
-          return {
-            ...prev,
-            quote: { ...(prev.quote || {}), ...live },
-            quoteAsOf: asOf,
-          };
-        });
-
-        checkAlertsForTicker(activeTicker, px);
-      } catch {
-        // Silent — chart/analysis remain usable on transient quote failures
-      }
+      await withMarketRefreshLock(async () => {
+        try {
+          setMarketDataStatus('loading');
+          await refreshLiveQuoteOnce(
+            String(activeTicker),
+            'auto-refresh-quote',
+            'Auto Refresh timer'
+          );
+          if (!cancelled) markMarketDataUpdated();
+        } catch {
+          if (!cancelled) setMarketDataStatus('idle');
+        }
+      });
     };
 
-    void refreshLiveQuote();
-    const id = window.setInterval(refreshLiveQuote, 12000);
-    const onVis = () => {
-      if (document.visibilityState === 'visible') void refreshLiveQuote();
-    };
-    document.addEventListener('visibilitychange', onVis);
+    // Wait for the first interval — do not fetch immediately on enable / mount
+    const id = window.setInterval(tick, autoRefreshIntervalSec * 1000);
     return () => {
       cancelled = true;
       window.clearInterval(id);
-      document.removeEventListener('visibilitychange', onVis);
     };
-  }, [data?.ticker]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- gate on ticker/settings only
+  }, [data?.ticker, refreshMode, autoRefreshIntervalSec]);
 
   // Real-time wall clock ticking so relative times update live (local browser clock only, no network calls)
   useEffect(() => {
@@ -7152,6 +7250,14 @@ export default function App() {
   const runTickerSearch = (rawInput: string) => {
     const raw = rawInput.trim();
     if (!raw) return;
+    if (loading || marketDataStatus === 'loading') {
+      console.log('API Request suppressed (search already running)', {
+        Timestamp: new Date().toISOString(),
+        Reason: 'duplicate-search-guard',
+        UserAction: 'ignored',
+      });
+      return;
+    }
     if (!assertAnalysisCredits()) return;
     let cleanTicker = raw.split(/[\s,·•\-]+/)[0].toUpperCase();
     cleanTicker = decomposeCompoundTicker(cleanTicker);
@@ -7372,9 +7478,12 @@ export default function App() {
         <div className="hidden xl:flex gap-3 items-center text-[11px] tracking-wide uppercase shrink-0 ml-auto">
           <div className="flex flex-col items-end font-sans opacity-80 leading-tight gap-0">
             <span className="text-[9px] text-gray-500 normal-case tracking-normal">Mode</span>
-            <span className="text-emerald-400 font-semibold flex items-center gap-1 font-mono text-[10px]">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-              MANUAL
+            <span className={cn(
+              "font-semibold flex items-center gap-1 font-mono text-[10px]",
+              autoRefresh ? "text-amber-400" : "text-emerald-400"
+            )}>
+              <span className={cn("w-1.5 h-1.5 rounded-full", autoRefresh ? "bg-amber-400" : "bg-emerald-400")} />
+              {autoRefresh ? `AUTO ${autoRefreshIntervalSec}s` : 'MANUAL'}
             </span>
           </div>
           <div className="w-[1px] h-6 bg-white/10" />
@@ -7444,6 +7553,25 @@ export default function App() {
           </div>
         )}
       </nav>
+
+      <div className="relative z-10 px-4 sm:px-6 py-2 border-b border-white/5 bg-[#08080A]/90">
+        <MarketDataRefreshBar
+          lastUpdatedAt={lastMarketUpdatedAt}
+          status={marketDataStatus}
+          mode={refreshMode}
+          intervalSec={autoRefreshIntervalSec}
+          onModeChange={(mode) => {
+            setRefreshMode(mode);
+            saveRefreshMode(mode);
+          }}
+          onIntervalChange={(sec) => {
+            setAutoRefreshIntervalSec(sec);
+            saveAutoRefreshIntervalSec(sec);
+          }}
+          onRefresh={() => void handleMarketDataRefresh()}
+          disabled={loading || marketDataStatus === 'loading'}
+        />
+      </div>
 
       {quotaBanner && (
         <div className="relative z-10 px-4 sm:px-6 pt-3">

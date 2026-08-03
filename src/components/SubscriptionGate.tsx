@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useAuth } from '../lib/auth';
-import { apiUrl } from '../lib/api';
+import { apiUrl, loggedFetch } from '../lib/api';
 import { syncStripeSubscription } from '../lib/subscription';
 import { LandingPage } from './LandingPage';
 import { PricingPage } from './PricingPage';
@@ -33,8 +33,9 @@ export function SubscriptionGate({ children, onActive, onOverageSuccess }: Subsc
     (async () => {
       try {
         if (sessionId) {
-          const res = await fetch(
-            apiUrl(`/api/stripe/confirm?session_id=${encodeURIComponent(sessionId)}`)
+          const res = await loggedFetch(
+            apiUrl(`/api/stripe/confirm?session_id=${encodeURIComponent(sessionId)}`),
+            { __qnMeta: { reason: 'stripe-confirm', userAction: 'Checkout return' } }
           );
           const data = await res.json().catch(() => null);
           if (overageOk && data?.usage) {

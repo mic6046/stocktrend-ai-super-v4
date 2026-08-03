@@ -78,6 +78,7 @@ export function SuggestATradePanel({
   const themeLabel = SUGGEST_THEMES.find((t) => t.key === theme)?.label ?? theme;
 
   const runSuggest = async () => {
+    if (scanning) return;
     if (!universe.length) {
       setError('No names in this market/theme combo. Try All themes.');
       return;
