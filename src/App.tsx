@@ -24,6 +24,11 @@ import {
   type ChangeLogState,
 } from './lib/recommendationChangeLog';
 import { buildHorizonView } from './lib/horizonView';
+import {
+  assertMatchesQuantumRecommendation,
+  formatRecommendationDisplay,
+  toStockRecommendation,
+} from './lib/recommendation';
 import { TruncatedText } from './components/TruncatedText';
 import { AuthModal } from './components/AuthModal';
 import { UsageQuotaBar, QuotaExhaustedBanner } from './components/UsageQuotaBar';
@@ -6968,7 +6973,7 @@ export default function App() {
   const technicalLevels = computeTechnicalLevels(visibleBaseHistory);
   const activeLevels: any = (srSource === 'AI' && levels) ? levels : technicalLevels;
 
-  /** Investment Horizon is the single source of truth — QuantumNode Master Engine. */
+  /** Investment Horizon is the single source of truth — AI Quantum Score Master Engine. */
   const horizonView = React.useMemo(() => {
     const lastClose =
       Number(data?.quote?.regularMarketPrice) ||
@@ -7002,6 +7007,7 @@ export default function App() {
       stopLoss: cockpitData?.stopLoss ?? null,
       forecastHorizons,
       ticker: data?.ticker,
+      companyName: data?.quote?.shortName || data?.quote?.longName || data?.ticker,
       technical: {
         rsi: technicalBreakdown?.indicators?.rsi ?? null,
         macdBullish:
@@ -7071,6 +7077,8 @@ export default function App() {
   }, [
     analysisHorizon,
     data?.quote?.regularMarketPrice,
+    data?.quote?.shortName,
+    data?.quote?.longName,
     data?.ticker,
     projectionMeta,
     cockpitData,
@@ -7082,6 +7090,31 @@ export default function App() {
     activeLevels,
     userHasPosition,
   ]);
+
+  /** Shared Recommendation object — every analysis surface must mirror this. */
+  const masterRecommendation = React.useMemo(() => {
+    if (!data?.ticker || !horizonView) return null;
+    return toStockRecommendation(horizonView, {
+      ticker: data.ticker,
+      companyName: data.quote?.shortName || data.quote?.longName || data.ticker,
+    });
+  }, [horizonView, data?.ticker, data?.quote?.shortName, data?.quote?.longName]);
+
+  React.useEffect(() => {
+    if (!masterRecommendation || !horizonView) return;
+    assertMatchesQuantumRecommendation(
+      masterRecommendation,
+      {
+        recommendation: formatRecommendationDisplay(masterRecommendation),
+        score: horizonView.score,
+        confidence: horizonView.confidence,
+        expectedReturn: horizonView.expectedReturn,
+        currentAction: horizonView.currentAction.action,
+        explanation: horizonView.whyWins || horizonView.explanation,
+      },
+      'App.IndividualAnalysis'
+    );
+  }, [masterRecommendation, horizonView]);
 
   /**
    * Consistency layer: strip conflicting chart markers and stamp ONLY the Master Recommendation
@@ -8663,18 +8696,30 @@ export default function App() {
                           0
                       ) || null
                     }
-                    score={horizonView.score}
-                    ratingLabel={horizonView.ratingLabel}
-                    confidence={horizonView.confidence}
+                    score={masterRecommendation?.overallScore ?? horizonView.score}
+                    ratingLabel={
+                      masterRecommendation
+                        ? formatRecommendationDisplay(masterRecommendation)
+                        : horizonView.ratingLabel
+                    }
+                    confidence={masterRecommendation?.confidence ?? horizonView.confidence}
                     currency={data.quote?.currency}
-                    targetPrice={horizonView.targetPrice}
-                    expectedReturn={horizonView.expectedReturn}
+                    targetPrice={masterRecommendation?.targetPrice ?? horizonView.targetPrice}
+                    expectedReturn={masterRecommendation?.expectedReturn ?? horizonView.expectedReturn}
                     horizon={analysisHorizon}
                     onHorizonChange={setAnalysisHorizon}
                     horizonExplanation={`${horizonView.explanation} ${horizonView.validationStatus}`}
                     isLoading={predicting || (loading && !aiStockScore && !prediction)}
-                    currentAction={horizonView.currentAction.action}
-                    currentActionReason={horizonView.currentAction.reason}
+                    currentAction={masterRecommendation?.currentAction ?? horizonView.currentAction.action}
+                    currentActionReason={
+                      masterRecommendation
+                        ? masterRecommendation.currentAction === 'WAIT' &&
+                          (masterRecommendation.recommendation === 'BUY' ||
+                            masterRecommendation.recommendation === 'STRONG BUY')
+                          ? 'BUY - WAIT for a better entry price.'
+                          : masterRecommendation.currentActionReason
+                        : horizonView.currentAction.reason
+                    }
                     userHasPosition={userHasPosition}
                   />
                   <AiInsightsStrip

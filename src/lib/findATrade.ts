@@ -1,33 +1,24 @@
 /**
- * Find a Trade — batch scout over user ticker lists using Consensus AI.
- * Only surfaces names that clear BUY / STRONG BUY with a constructive live action.
+ * Find a Trade — scouts tickers via AI Quantum Score (SSOT).
+ * No independent BUY/HOLD/SELL or ranking logic: rank = Quantum Overall Score.
  */
 
 import { computeTechnicalIndicators } from './technical';
 import { apiUrl, loggedFetch } from './api';
 import {
-  runQuantumRecommendationEngine,
-  type RecommendationLabel,
-  type ZoneAction,
-} from './quantumRecommendationEngine';
+  evaluateStockRecommendation,
+  formatActionNote,
+  formatRecommendationDisplay,
+  rankByQuantumScore,
+  selectBuyCandidates,
+  type StockRecommendation,
+} from './recommendation';
 import type { HorizonKey } from '../components/analysis/analysisTheme';
 
 export const FIND_A_TRADE_MAX = 30;
 
-export type FindATradeCandidate = {
-  ticker: string;
-  name: string;
-  price: number;
-  recommendation: RecommendationLabel;
-  currentAction: ZoneAction;
-  confidence: number;
-  score: number;
-  expectedReturn: number;
-  why: string;
-  tradeScore: number;
-  isBuyCandidate: boolean;
-  error?: string;
-};
+/** @deprecated Prefer StockRecommendation — kept as alias for UI compatibility. */
+export type FindATradeCandidate = StockRecommendation;
 
 export type FindATradeProgress = {
   done: number;
@@ -95,18 +86,45 @@ async function mapPool<T, R>(
   return results;
 }
 
-function rankScore(c: FindATradeCandidate): number {
-  if (!c.isBuyCandidate) return -1e9;
-  const actionBoost = c.currentAction === 'BUY' ? 18 : c.currentAction === 'WAIT' ? 4 : 0;
-  const recBoost = c.recommendation === 'STRONG BUY' ? 12 : c.recommendation === 'BUY' ? 8 : 0;
-  return c.score * 0.35 + c.confidence * 0.3 + Math.max(0, c.expectedReturn) * 2.2 + actionBoost + recBoost;
+function errorRecommendation(ticker: string, message: string): StockRecommendation {
+  const ts = Date.now();
+  return {
+    ticker,
+    companyName: ticker,
+    overallScore: 0,
+    confidence: 0,
+    recommendation: 'HOLD',
+    currentAction: 'WAIT',
+    currentActionReason: message,
+    entryZone: { lo: 0, hi: 0 },
+    targetPrice: 0,
+    stopLoss: 0,
+    expectedReturn: 0,
+    riskScore: 100,
+    riskLabel: 'High',
+    aiExplanation: message,
+    indicatorScores: {
+      technical: 0,
+      fundamental: 0,
+      whale: 0,
+      news: 0,
+      risk: 0,
+      momentum: 0,
+      overall: 0,
+    },
+    ranking: 0,
+    dataTimestamp: ts,
+    isBuyCandidate: false,
+    engine: null,
+    error: message,
+  };
 }
 
 async function scoutOne(
   ticker: string,
   horizon: HorizonKey,
   fetchJson: (url: string) => Promise<any>
-): Promise<FindATradeCandidate> {
+): Promise<StockRecommendation & { error?: string }> {
   try {
     const data = await fetchJson(
       `/api/stock?ticker=${encodeURIComponent(ticker)}&range=3mo&interval=1d`
@@ -115,20 +133,7 @@ async function scoutOne(
       (h: any) => h?.close != null && Number.isFinite(Number(h.close))
     );
     if (!history.length) {
-      return {
-        ticker,
-        name: ticker,
-        price: 0,
-        recommendation: 'HOLD',
-        currentAction: 'WAIT',
-        confidence: 0,
-        score: 0,
-        expectedReturn: 0,
-        why: 'No price history returned.',
-        tradeScore: -1e9,
-        isBuyCandidate: false,
-        error: 'No history',
-      };
+      return errorRecommendation(ticker, 'No price history returned.');
     }
 
     const px =
@@ -153,96 +158,73 @@ async function scoutOne(
           : 55;
     const smartMoneyScore = sm === 'BULLISH' ? 85 : sm === 'BEARISH' ? 35 : 50;
 
-    const engine = runQuantumRecommendationEngine({
-      horizon,
-      currentPrice: px,
-      baseScore: tech?.masterScores?.aiBuyScore ?? 60,
-      baseConfidence: 65,
-      baseTarget: px * 1.06,
-      bullTarget: px * 1.12,
-      bearTarget: px * 0.92,
-      technical: {
-        rsi: tech?.indicators?.rsi ?? null,
-        macdBullish:
-          tech?.indicators?.macd != null
-            ? tech.indicators.macd.macdLine > tech.indicators.macd.signalLine
-            : null,
-        trend: tech?.quantumRefinement?.trendStrength?.status ?? null,
-        volatility: tech?.indicators?.volatility ?? null,
-        emaBias:
-          tech?.indicators?.ema20 != null && px > tech.indicators.ema20 ? 'bull' : 'bear',
-        smaBias:
-          tech?.indicators?.sma50 != null && px > tech.indicators.sma50 ? 'bull' : 'bear',
-        bollingerBias:
-          tech?.indicators?.bollinger?.percent != null
-            ? tech.indicators.bollinger.percent <= 0.2
-              ? 'oversold'
-              : tech.indicators.bollinger.percent >= 0.8
-                ? 'overbought'
-                : 'mid'
-            : null,
-        obvBias: ad === 'ACCUMULATION' ? 'bull' : ad === 'DISTRIBUTION' ? 'bear' : 'neutral',
-        volumeBias:
-          (tech?.quantumRefinement?.rvol?.ratio ?? 1) >= 1.4
-            ? 'high'
-            : (tech?.quantumRefinement?.rvol?.ratio ?? 1) <= 0.7
-              ? 'low'
-              : 'normal',
+    const companyName =
+      data?.quote?.shortName || data?.quote?.longName || String(data?.ticker || ticker);
+
+    // ONE evaluation — AI Quantum Score is the only recommendation engine.
+    return evaluateStockRecommendation(
+      {
+        horizon,
+        currentPrice: px,
+        baseScore: tech?.masterScores?.aiBuyScore ?? 60,
+        baseConfidence: 65,
+        baseTarget: px * 1.06,
+        bullTarget: px * 1.12,
+        bearTarget: px * 0.92,
+        technical: {
+          rsi: tech?.indicators?.rsi ?? null,
+          macdBullish:
+            tech?.indicators?.macd != null
+              ? tech.indicators.macd.macdLine > tech.indicators.macd.signalLine
+              : null,
+          trend: tech?.quantumRefinement?.trendStrength?.status ?? null,
+          volatility: tech?.indicators?.volatility ?? null,
+          emaBias:
+            tech?.indicators?.ema20 != null && px > tech.indicators.ema20 ? 'bull' : 'bear',
+          smaBias:
+            tech?.indicators?.sma50 != null && px > tech.indicators.sma50 ? 'bull' : 'bear',
+          bollingerBias:
+            tech?.indicators?.bollinger?.percent != null
+              ? tech.indicators.bollinger.percent <= 0.2
+                ? 'oversold'
+                : tech.indicators.bollinger.percent >= 0.8
+                  ? 'overbought'
+                  : 'mid'
+              : null,
+          obvBias: ad === 'ACCUMULATION' ? 'bull' : ad === 'DISTRIBUTION' ? 'bear' : 'neutral',
+          volumeBias:
+            (tech?.quantumRefinement?.rvol?.ratio ?? 1) >= 1.4
+              ? 'high'
+              : (tech?.quantumRefinement?.rvol?.ratio ?? 1) <= 0.7
+                ? 'low'
+                : 'normal',
+        },
+        levels,
+        whaleScore,
+        institutionalScore,
+        sentimentScore: 58,
+        momentumScore: tech?.indicators?.rsi != null ? Math.round(tech.indicators.rsi) : 55,
+        smartMoneyScore,
+        fundFlowBias: ad === 'ACCUMULATION' ? 'inflow' : ad === 'DISTRIBUTION' ? 'outflow' : 'neutral',
+        sectorBias: sector === 'LEADER' ? 'leader' : sector === 'LAGGARD' ? 'laggard' : 'neutral',
+        userHasPosition: false,
+        ticker,
       },
-      levels,
-      whaleScore,
-      institutionalScore,
-      sentimentScore: 58,
-      momentumScore: tech?.indicators?.rsi != null ? Math.round(tech.indicators.rsi) : 55,
-      smartMoneyScore,
-      fundFlowBias: ad === 'ACCUMULATION' ? 'inflow' : ad === 'DISTRIBUTION' ? 'outflow' : 'neutral',
-      sectorBias: sector === 'LEADER' ? 'leader' : sector === 'LAGGARD' ? 'laggard' : 'neutral',
-      userHasPosition: false,
-      ticker,
-    });
-
-    const isBuyCandidate =
-      (engine.finalVerdict === 'BUY' || engine.finalVerdict === 'STRONG BUY') &&
-      (engine.currentAction.action === 'BUY' || engine.currentAction.action === 'WAIT') &&
-      engine.expectedReturn > 0;
-
-    const candidate: FindATradeCandidate = {
-      ticker: String(data?.ticker || ticker).toUpperCase(),
-      name: data?.quote?.shortName || data?.quote?.longName || ticker,
-      price: engine.currentPrice,
-      recommendation: engine.finalVerdict,
-      currentAction: engine.currentAction.action,
-      confidence: engine.confidence,
-      score: engine.score,
-      expectedReturn: engine.expectedReturn,
-      why: engine.whyWins,
-      tradeScore: 0,
-      isBuyCandidate,
-    };
-    candidate.tradeScore = rankScore(candidate);
-    return candidate;
+      {
+        ticker: String(data?.ticker || ticker).toUpperCase(),
+        companyName,
+        dataTimestamp: Date.now(),
+      }
+    );
   } catch (err: any) {
-    return {
-      ticker,
-      name: ticker,
-      price: 0,
-      recommendation: 'HOLD',
-      currentAction: 'WAIT',
-      confidence: 0,
-      score: 0,
-      expectedReturn: 0,
-      why: err?.message || 'Scout failed',
-      tradeScore: -1e9,
-      isBuyCandidate: false,
-      error: err?.message || 'Scout failed',
-    };
+    return errorRecommendation(ticker, err?.message || 'Scout failed');
   }
 }
 
 export type FindATradeResult = {
-  scanned: FindATradeCandidate[];
-  buyCandidates: FindATradeCandidate[];
-  topPick: FindATradeCandidate | null;
+  scanned: Array<StockRecommendation & { error?: string }>;
+  buyCandidates: StockRecommendation[];
+  topPick: StockRecommendation | null;
   message: string;
 };
 
@@ -262,7 +244,7 @@ export async function findATrade(opts: {
       const res = await loggedFetch(apiUrl(url), {
         __qnMeta: {
           reason: 'find-or-suggest-trade',
-          userAction: 'Click Find/Suggest Trade',
+          userAction: 'Click Find a Trade +',
         },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -280,27 +262,26 @@ export async function findATrade(opts: {
 
   opts.onProgress?.({ done: 0, total: tickers.length });
 
-  const scanned = await mapPool(
+  const raw = await mapPool(
     tickers,
     concurrency,
     (ticker) => scoutOne(ticker, horizon, fetchJson),
     (done, ticker) => opts.onProgress?.({ done, total: tickers.length, current: String(ticker) })
   );
 
-  const buyCandidates = scanned
-    .filter((c) => c.isBuyCandidate)
-    .sort((a, b) => b.tradeScore - a.tradeScore);
-
-  // Prefer live action BUY over WAIT when ranking top pick
-  const actionable = buyCandidates.filter((c) => c.currentAction === 'BUY');
-  const topPick = (actionable[0] || buyCandidates[0]) ?? null;
+  // Rank EVERY stock by Quantum Overall Score (SSOT) — no secondary tradeScore.
+  const scanned = rankByQuantumScore(raw) as Array<StockRecommendation & { error?: string }>;
+  const buyCandidates = selectBuyCandidates(scanned);
+  const topPick = buyCandidates[0] ?? null;
 
   return {
     scanned,
     buyCandidates,
     topPick,
     message: topPick
-      ? `Top trade: ${topPick.ticker} · ${topPick.recommendation} · Do now: ${topPick.currentAction}`
-      : 'No BUY trade cleared Consensus gates in this list. Wait or refresh the universe.',
+      ? `Top trade: ${topPick.ticker} · ${formatRecommendationDisplay(topPick)} · ${formatActionNote(topPick)}`
+      : 'No BUY / STRONG BUY cleared AI Quantum Score gates in this list. Wait or refresh the universe.',
   };
 }
+
+export { formatActionNote, formatRecommendationDisplay };

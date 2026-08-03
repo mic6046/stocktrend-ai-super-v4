@@ -1,5 +1,7 @@
 /**
- * Horizon view adapter — Investment Horizon remains SSOT; delegates to Master Engine.
+ * Horizon view adapter — Investment Horizon remains the analysis SSOT surface.
+ * Delegates ONLY to AI Quantum Score (runQuantumRecommendationEngine).
+ * Screens must read verdict/score/confidence/ER/action from this output — never recalculate.
  */
 import type { HorizonKey } from '../components/analysis/analysisTheme';
 import {
@@ -7,6 +9,7 @@ import {
   type QuantumEngineInput,
   type QuantumEngineOutput,
 } from './quantumRecommendationEngine';
+import { toStockRecommendation, type StockRecommendation } from './recommendation';
 
 export type ForecastHorizonRow = {
   label?: string;
@@ -36,6 +39,7 @@ export type HorizonViewInput = {
   stopLoss: number | null;
   forecastHorizons?: ForecastHorizonRow[];
   ticker?: string;
+  companyName?: string;
   technical?: QuantumEngineInput['technical'];
   levels?: QuantumEngineInput['levels'];
   whaleScore?: number | null;
@@ -78,5 +82,14 @@ export function buildHorizonView(input: HorizonViewInput): HorizonView {
     stopLossHint: input.stopLoss,
     ticker: input.ticker,
     userHasPosition: input.userHasPosition,
+  });
+}
+
+/** Shared Recommendation object for every screen — Quantum Score only. */
+export function buildStockRecommendation(input: HorizonViewInput): StockRecommendation {
+  const engine = buildHorizonView(input);
+  return toStockRecommendation(engine, {
+    ticker: input.ticker || '—',
+    companyName: input.companyName || input.ticker || '—',
   });
 }

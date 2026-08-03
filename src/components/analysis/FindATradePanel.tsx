@@ -7,11 +7,16 @@ import { formatMoney, formatPct, type HorizonKey, HORIZON_OPTIONS } from './anal
 import {
   FIND_A_TRADE_MAX,
   findATrade,
+  formatActionNote,
+  formatRecommendationDisplay,
   parseTickerList,
-  type FindATradeCandidate,
   type FindATradeProgress,
   type FindATradeResult,
 } from '../../lib/findATrade';
+import {
+  assertMatchesQuantumRecommendation,
+  type StockRecommendation,
+} from '../../lib/recommendation';
 import {
   SUGGEST_MARKETS,
   SUGGEST_THEMES,
@@ -155,9 +160,10 @@ export function FindATradePanel({
       </SectionLabel>
 
       <p className="text-[11px] text-gray-400 leading-relaxed">
-        Choose a market and theme, paste your own list (memorized in this browser), or fill from the
-        curated universe. Consensus AI scouts for{' '}
-        <span className="text-emerald-300 font-semibold">BUY / STRONG BUY</span> — never forced.
+        Choose a market and theme, paste your own list (memorized), or fill from the curated
+        universe. Every ticker is scored once by{' '}
+        <span className="text-emerald-300 font-semibold">AI Quantum Score</span> — Top Pick and
+        candidates are ranked by that score only.
       </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -275,27 +281,23 @@ export function FindATradePanel({
                   Other BUY candidates
                 </p>
                 <div className="space-y-1.5">
-                  {result.buyCandidates.slice(1, 5).map((c) => (
+                  {result.buyCandidates.slice(1, 6).map((c) => (
                     <CandidateRow key={c.ticker} c={c} onOpen={onOpenTicker} />
                   ))}
                 </div>
               </div>
             )}
 
-            {result.scanned.some((c) => !c.isBuyCandidate) && (
-              <details className="rounded-xl border border-white/8 bg-black/25 px-3 py-2">
-                <summary className="text-[10px] font-mono uppercase tracking-wider text-gray-500 cursor-pointer">
-                  Full scout log ({result.scanned.length})
-                </summary>
-                <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
-                  {result.scanned.map((c) => (
-                    <p key={`log-${c.ticker}`} className="text-[10px] font-mono text-gray-500">
-                      {c.ticker}: {c.error ? `ERR ${c.error}` : `${c.recommendation} · ${c.currentAction}`}
-                    </p>
-                  ))}
-                </div>
-              </details>
-            )}
+            <details className="rounded-xl border border-white/8 bg-black/25 px-3 py-2" open>
+              <summary className="text-[10px] font-mono uppercase tracking-wider text-gray-500 cursor-pointer">
+                Full scout log ({result.scanned.length}) · ranked by AI Quantum Score
+              </summary>
+              <div className="mt-2 space-y-1 max-h-48 overflow-y-auto">
+                {result.scanned.map((c) => (
+                  <ScoutLogRow key={`log-${c.ticker}`} c={c} />
+                ))}
+              </div>
+            </details>
           </motion.div>
         )}
       </AnimatePresence>
@@ -307,21 +309,41 @@ function TopPickCard({
   pick,
   onOpen,
 }: {
-  pick: FindATradeCandidate;
+  pick: StockRecommendation;
   onOpen: (t: string) => void;
 }) {
+  const displayRec = formatRecommendationDisplay(pick);
+  const actionNote = formatActionNote(pick);
+
+  useEffect(() => {
+    assertMatchesQuantumRecommendation(
+      pick,
+      {
+        recommendation: displayRec,
+        score: pick.overallScore,
+        confidence: pick.confidence,
+        expectedReturn: pick.expectedReturn,
+        currentAction: pick.currentAction,
+        explanation: pick.aiExplanation,
+      },
+      'FindATrade.TopPick'
+    );
+  }, [pick, displayRec]);
+
   return (
     <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-3 space-y-2">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-[9px] font-mono uppercase tracking-wider text-emerald-300/80">Top pick</p>
+          <p className="text-[9px] font-mono uppercase tracking-wider text-emerald-300/80">
+            Top pick · Quantum rank #{pick.ranking}
+          </p>
           <p className="text-lg font-black text-white tracking-wide">{pick.ticker}</p>
-          <p className="text-[11px] text-gray-400 truncate max-w-[220px]">{pick.name}</p>
+          <p className="text-[11px] text-gray-400 truncate max-w-[220px]">{pick.companyName}</p>
         </div>
         <div className="text-right shrink-0">
-          <p className="text-[12px] font-bold text-emerald-300">{pick.recommendation}</p>
-          <p className="text-[10px] font-mono text-cyan-200">Do now: {pick.currentAction}</p>
-          <p className="text-[11px] font-mono text-white mt-1">{formatMoney(pick.price)}</p>
+          <p className="text-[12px] font-bold text-emerald-300">{displayRec}</p>
+          <p className="text-[10px] font-mono text-cyan-200">{actionNote}</p>
+          <p className="text-[11px] font-mono text-white mt-1">{formatMoney(pick.engine?.currentPrice ?? 0)}</p>
         </div>
       </div>
       <div className="grid grid-cols-3 gap-2 text-[10px] font-mono">
@@ -330,8 +352,8 @@ function TopPickCard({
           <p className="text-white">{pick.confidence}%</p>
         </div>
         <div className="rounded-lg bg-black/30 border border-white/8 px-2 py-1.5">
-          <p className="text-gray-500 uppercase text-[8px]">Score</p>
-          <p className="text-white">{pick.score}</p>
+          <p className="text-gray-500 uppercase text-[8px]">AI Score</p>
+          <p className="text-white">{pick.overallScore}</p>
         </div>
         <div className="rounded-lg bg-black/30 border border-white/8 px-2 py-1.5">
           <p className="text-gray-500 uppercase text-[8px]">ER</p>
@@ -340,7 +362,7 @@ function TopPickCard({
           </p>
         </div>
       </div>
-      <p className="text-[11px] text-gray-300 leading-relaxed">{pick.why}</p>
+      <p className="text-[11px] text-gray-300 leading-relaxed">{pick.aiExplanation}</p>
       <button
         type="button"
         onClick={() => onOpen(pick.ticker)}
@@ -357,9 +379,10 @@ function CandidateRow({
   c,
   onOpen,
 }: {
-  c: FindATradeCandidate;
+  c: StockRecommendation;
   onOpen: (t: string) => void;
 }) {
+  const displayRec = formatRecommendationDisplay(c);
   return (
     <button
       type="button"
@@ -367,15 +390,35 @@ function CandidateRow({
       className="w-full flex items-center justify-between gap-2 rounded-xl border border-white/8 bg-black/30 px-3 py-2 text-left hover:border-emerald-500/30 transition-colors cursor-pointer"
     >
       <div className="min-w-0">
-        <p className="text-[12px] font-bold text-white">{c.ticker}</p>
-        <p className="text-[10px] text-gray-500 truncate">{c.recommendation} · {c.currentAction}</p>
+        <p className="text-[12px] font-bold text-white">
+          #{c.ranking} {c.ticker}
+        </p>
+        <p className="text-[10px] text-gray-500 truncate">
+          {displayRec} · {formatActionNote(c)}
+        </p>
       </div>
       <div className="text-right shrink-0 font-mono text-[10px]">
-        <p className="text-emerald-300">{c.confidence}%</p>
+        <p className="text-emerald-300">Score {c.overallScore}</p>
+        <p className="text-cyan-200">{c.confidence}%</p>
         <p className={c.expectedReturn >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
           {formatPct(c.expectedReturn)}
         </p>
       </div>
     </button>
+  );
+}
+
+function ScoutLogRow({ c }: { c: StockRecommendation & { error?: string } }) {
+  const displayRec = c.error ? 'ERR' : formatRecommendationDisplay(c);
+  return (
+    <p className="text-[10px] font-mono text-gray-500 flex flex-wrap gap-x-2">
+      <span className="text-gray-400">#{c.ranking || '—'}</span>
+      <span className="text-white">{c.ticker}</span>
+      <span>
+        {c.error
+          ? `ERR ${c.error}`
+          : `${displayRec} · score ${c.overallScore} · conf ${c.confidence}% · ${formatActionNote(c)}`}
+      </span>
+    </p>
   );
 }
