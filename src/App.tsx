@@ -23,7 +23,8 @@ import {
   ingestRecommendationSnapshot,
   type ChangeLogState,
 } from './lib/recommendationChangeLog';
-import { buildHorizonView } from './lib/horizonView';
+import { buildQuantumInputFromMarketData } from './lib/quantumInputBuilder';
+import { runQuantumRecommendationEngine } from './lib/quantumRecommendationEngine';
 import {
   assertMatchesQuantumRecommendation,
   formatRecommendationDisplay,
@@ -6973,13 +6974,13 @@ export default function App() {
   const technicalLevels = computeTechnicalLevels(visibleBaseHistory);
   const activeLevels: any = (srSource === 'AI' && levels) ? levels : technicalLevels;
 
-  /** Investment Horizon is the single source of truth — AI Quantum Score Master Engine. */
+  /** Investment Horizon SSOT — shared Quantum input builder (+ optional predict enrich). */
   const horizonView = React.useMemo(() => {
-    const lastClose =
-      Number(data?.quote?.regularMarketPrice) ||
-      projectionMeta.lastClose ||
-      Number(cockpitData?.entryPrice) ||
-      0;
+    const hist =
+      (indicatorHistory && indicatorHistory.length >= 30 ? indicatorHistory : null) ||
+      (chartHistory && chartHistory.length ? chartHistory : null) ||
+      visibleBaseHistory ||
+      [];
     const whaleScore =
       whaleAccumulation?.metrics?.whaleAccumulationIndex ??
       (aiStockScore?.components?.whaleAccumulation
@@ -6989,102 +6990,49 @@ export default function App() {
               100
           )
         : null);
-    return buildHorizonView({
+    const input = buildQuantumInputFromMarketData({
       horizon: analysisHorizon,
-      lastClose,
-      baseScore: aiStockScore?.totalScore ?? (confidence ?? 65),
-      baseConfidence: confidence ?? cockpitData?.confidence ?? null,
-      baseTarget: projectionMeta.baseCase ?? cockpitData?.baseCase?.targetPrice ?? null,
-      bullTarget: projectionMeta.bullCase ?? cockpitData?.bullCase?.targetPrice ?? null,
-      bearTarget: projectionMeta.bearCase ?? cockpitData?.bearCase?.targetPrice ?? null,
-      baseReturn: cockpitData?.baseCase?.expectedReturn ?? null,
-      bullReturn: cockpitData?.bullCase?.expectedReturn ?? null,
-      baseDrawdown: cockpitData?.baseCase?.expectedDrawdown ?? null,
-      baseVolatility: technicalBreakdown?.indicators?.volatility ?? null,
-      baseRiskScore: cockpitData?.riskScore ?? Math.max(0, 100 - (aiStockScore?.totalScore ?? 60)),
-      baseSharpe:
-        cockpitData?.rrRatio != null ? Number((cockpitData.rrRatio * 0.85).toFixed(2)) : null,
-      stopLoss: cockpitData?.stopLoss ?? null,
-      forecastHorizons,
-      ticker: data?.ticker,
-      companyName: data?.quote?.shortName || data?.quote?.longName || data?.ticker,
-      technical: {
-        rsi: technicalBreakdown?.indicators?.rsi ?? null,
-        macdBullish:
-          technicalBreakdown?.indicators?.macd != null
-            ? technicalBreakdown.indicators.macd.macdLine >
-              technicalBreakdown.indicators.macd.signalLine
-            : null,
-        trend: technicalBreakdown?.quantumRefinement?.trendStrength?.status ?? null,
-        volatility: technicalBreakdown?.indicators?.volatility ?? null,
-        emaBias:
-          technicalBreakdown?.indicators?.ema20 != null && lastClose > 0
-            ? lastClose > technicalBreakdown.indicators.ema20
-              ? 'bull'
-              : 'bear'
-            : null,
-        smaBias:
-          technicalBreakdown?.indicators?.sma50 != null && lastClose > 0
-            ? lastClose > technicalBreakdown.indicators.sma50
-              ? 'bull'
-              : 'bear'
-            : null,
-        bollingerBias:
-          technicalBreakdown?.indicators?.bollinger?.percent != null
-            ? technicalBreakdown.indicators.bollinger.percent <= 0.2
-              ? 'oversold'
-              : technicalBreakdown.indicators.bollinger.percent >= 0.8
-                ? 'overbought'
-                : 'mid'
-            : null,
-        atrPct: technicalBreakdown?.indicators?.atr != null && lastClose > 0
-          ? (technicalBreakdown.indicators.atr / lastClose) * 100
-          : null,
-        volumeBias:
-          (technicalBreakdown?.quantumRefinement?.rvol?.ratio ?? 1) >= 1.4
-            ? 'high'
-            : (technicalBreakdown?.quantumRefinement?.rvol?.ratio ?? 1) <= 0.7
-              ? 'low'
-              : 'normal',
-        obvBias:
-          technicalBreakdown?.quantumRefinement?.accumulationDistribution?.status === 'ACCUMULATION'
-            ? 'bull'
-            : technicalBreakdown?.quantumRefinement?.accumulationDistribution?.status === 'DISTRIBUTION'
-              ? 'bear'
-              : 'neutral',
-      },
-      levels: activeLevels,
-      whaleScore,
-      institutionalScore: cockpitData?.instAccumScore ?? null,
-      sentimentScore: cockpitData?.sentimentScore ?? null,
-      momentumScore: cockpitData?.momentumScore ?? null,
-      newsBias: null,
-      smartMoneyScore: cockpitData?.smScore ?? null,
-      fundFlowBias:
-        technicalBreakdown?.quantumRefinement?.accumulationDistribution?.status === 'ACCUMULATION'
-          ? 'inflow'
-          : technicalBreakdown?.quantumRefinement?.accumulationDistribution?.status === 'DISTRIBUTION'
-            ? 'outflow'
-            : 'neutral',
-      sectorBias:
-        technicalBreakdown?.quantumRefinement?.sectorRotation?.status === 'LEADER'
-          ? 'leader'
-          : technicalBreakdown?.quantumRefinement?.sectorRotation?.status === 'LAGGARD'
-            ? 'laggard'
-            : 'neutral',
+      ticker: String(data?.ticker || ''),
+      quote: data?.quote,
+      history: hist,
       userHasPosition,
+      enrich: {
+        baseScore: aiStockScore?.totalScore ?? null,
+        baseConfidence: confidence ?? cockpitData?.confidence ?? null,
+        baseTarget: projectionMeta.baseCase ?? cockpitData?.baseCase?.targetPrice ?? null,
+        bullTarget: projectionMeta.bullCase ?? cockpitData?.bullCase?.targetPrice ?? null,
+        bearTarget: projectionMeta.bearCase ?? cockpitData?.bearCase?.targetPrice ?? null,
+        baseReturn: cockpitData?.baseCase?.expectedReturn ?? null,
+        forecastHorizons,
+        whaleScore,
+        institutionalScore: cockpitData?.instAccumScore ?? null,
+        sentimentScore: cockpitData?.sentimentScore ?? null,
+        momentumScore: cockpitData?.momentumScore ?? null,
+        smartMoneyScore: cockpitData?.smScore ?? null,
+        levels: activeLevels,
+        stopLossHint: cockpitData?.stopLoss ?? null,
+      },
     });
+    if (!input.currentPrice) {
+      const fallback =
+        Number(projectionMeta.lastClose) ||
+        Number(cockpitData?.entryPrice) ||
+        Number(hist[hist.length - 1]?.close) ||
+        0;
+      if (fallback > 0) input.currentPrice = fallback;
+    }
+    return runQuantumRecommendationEngine(input);
   }, [
     analysisHorizon,
-    data?.quote?.regularMarketPrice,
-    data?.quote?.shortName,
-    data?.quote?.longName,
+    data?.quote,
     data?.ticker,
+    indicatorHistory,
+    chartHistory,
+    visibleBaseHistory,
     projectionMeta,
     cockpitData,
     aiStockScore,
     confidence,
-    technicalBreakdown,
     forecastHorizons,
     whaleAccumulation,
     activeLevels,
@@ -8713,10 +8661,12 @@ export default function App() {
                     currentAction={masterRecommendation?.currentAction ?? horizonView.currentAction.action}
                     currentActionReason={
                       masterRecommendation
-                        ? masterRecommendation.currentAction === 'WAIT' &&
-                          (masterRecommendation.recommendation === 'BUY' ||
-                            masterRecommendation.recommendation === 'STRONG BUY')
-                          ? 'BUY - WAIT for a better entry price.'
+                        ? masterRecommendation.currentAction === 'WAIT' ||
+                          masterRecommendation.currentAction === 'HOLD'
+                          ? masterRecommendation.recommendation === 'BUY' ||
+                            masterRecommendation.recommendation === 'STRONG BUY'
+                            ? 'BUY - WAIT for a better entry price.'
+                            : masterRecommendation.currentActionReason
                           : masterRecommendation.currentActionReason
                         : horizonView.currentAction.reason
                     }

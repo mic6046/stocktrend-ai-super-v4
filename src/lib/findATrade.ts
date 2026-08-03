@@ -1,10 +1,10 @@
 /**
  * Find a Trade — scouts tickers via AI Quantum Score (SSOT).
- * No independent BUY/HOLD/SELL or ranking logic: rank = Quantum Overall Score.
+ * Uses the same market-data → Quantum input builder as Individual Analysis.
  */
 
-import { computeTechnicalIndicators } from './technical';
 import { apiUrl, loggedFetch } from './api';
+import { buildQuantumInputFromMarketData } from './quantumInputBuilder';
 import {
   evaluateStockRecommendation,
   formatActionNote,
@@ -45,22 +45,6 @@ export function parseTickerList(input: string, max = FIND_A_TRADE_MAX): string[]
     if (out.length >= max) break;
   }
   return out;
-}
-
-function roughLevels(closes: number[], px: number) {
-  if (closes.length < 10) {
-    return { s1: px * 0.97, s2: px * 0.94, r1: px * 1.03, r2: px * 1.06 };
-  }
-  const window = closes.slice(-40);
-  const lo = Math.min(...window);
-  const hi = Math.max(...window);
-  const mid = (lo + hi) / 2;
-  return {
-    s1: Math.min(px * 0.98, mid + (lo - mid) * 0.35),
-    s2: lo,
-    r1: Math.max(px * 1.02, mid + (hi - mid) * 0.35),
-    r2: hi,
-  };
 }
 
 async function mapPool<T, R>(
@@ -126,8 +110,9 @@ async function scoutOne(
   fetchJson: (url: string) => Promise<any>
 ): Promise<StockRecommendation & { error?: string }> {
   try {
+    // Match individual-analysis lookback (1y daily) so Quantum inputs align.
     const data = await fetchJson(
-      `/api/stock?ticker=${encodeURIComponent(ticker)}&range=3mo&interval=1d`
+      `/api/stock?ticker=${encodeURIComponent(ticker)}&range=1y&interval=1d`
     );
     const history = (data?.history || []).filter(
       (h: any) => h?.close != null && Number.isFinite(Number(h.close))
@@ -136,86 +121,23 @@ async function scoutOne(
       return errorRecommendation(ticker, 'No price history returned.');
     }
 
-    const px =
-      Number(data?.quote?.regularMarketPrice) ||
-      Number(history[history.length - 1].close) ||
-      0;
-    const tech = computeTechnicalIndicators(history, data?.quote);
-    const closes = history.map((h: any) => Number(h.close));
-    const levels = roughLevels(closes, px);
-    const instFlow = tech?.indicators?.institutionalFlow?.status;
-    const ad = tech?.quantumRefinement?.accumulationDistribution?.status;
-    const sm = tech?.quantumRefinement?.smartMoneyIndex?.status;
-    const sector = tech?.quantumRefinement?.sectorRotation?.status;
-
-    const whaleScore =
-      ad === 'ACCUMULATION' ? 78 : ad === 'DISTRIBUTION' ? 32 : 52;
-    const institutionalScore =
-      instFlow === 'LARGE_INFLOW' || instFlow === 'STEALTH_ACCUMULATION'
-        ? 80
-        : instFlow === 'LARGE_OUTFLOW' || instFlow === 'STEALTH_DISTRIBUTION'
-          ? 30
-          : 55;
-    const smartMoneyScore = sm === 'BULLISH' ? 85 : sm === 'BEARISH' ? 35 : 50;
-
+    const sym = String(data?.ticker || ticker).toUpperCase();
     const companyName =
-      data?.quote?.shortName || data?.quote?.longName || String(data?.ticker || ticker);
+      data?.quote?.shortName || data?.quote?.longName || sym;
 
-    // ONE evaluation — AI Quantum Score is the only recommendation engine.
-    return evaluateStockRecommendation(
-      {
-        horizon,
-        currentPrice: px,
-        baseScore: tech?.masterScores?.aiBuyScore ?? 60,
-        baseConfidence: 65,
-        baseTarget: px * 1.06,
-        bullTarget: px * 1.12,
-        bearTarget: px * 0.92,
-        technical: {
-          rsi: tech?.indicators?.rsi ?? null,
-          macdBullish:
-            tech?.indicators?.macd != null
-              ? tech.indicators.macd.macdLine > tech.indicators.macd.signalLine
-              : null,
-          trend: tech?.quantumRefinement?.trendStrength?.status ?? null,
-          volatility: tech?.indicators?.volatility ?? null,
-          emaBias:
-            tech?.indicators?.ema20 != null && px > tech.indicators.ema20 ? 'bull' : 'bear',
-          smaBias:
-            tech?.indicators?.sma50 != null && px > tech.indicators.sma50 ? 'bull' : 'bear',
-          bollingerBias:
-            tech?.indicators?.bollinger?.percent != null
-              ? tech.indicators.bollinger.percent <= 0.2
-                ? 'oversold'
-                : tech.indicators.bollinger.percent >= 0.8
-                  ? 'overbought'
-                  : 'mid'
-              : null,
-          obvBias: ad === 'ACCUMULATION' ? 'bull' : ad === 'DISTRIBUTION' ? 'bear' : 'neutral',
-          volumeBias:
-            (tech?.quantumRefinement?.rvol?.ratio ?? 1) >= 1.4
-              ? 'high'
-              : (tech?.quantumRefinement?.rvol?.ratio ?? 1) <= 0.7
-                ? 'low'
-                : 'normal',
-        },
-        levels,
-        whaleScore,
-        institutionalScore,
-        sentimentScore: 58,
-        momentumScore: tech?.indicators?.rsi != null ? Math.round(tech.indicators.rsi) : 55,
-        smartMoneyScore,
-        fundFlowBias: ad === 'ACCUMULATION' ? 'inflow' : ad === 'DISTRIBUTION' ? 'outflow' : 'neutral',
-        sectorBias: sector === 'LEADER' ? 'leader' : sector === 'LAGGARD' ? 'laggard' : 'neutral',
-        userHasPosition: false,
-        ticker,
-      },
-      {
-        ticker: String(data?.ticker || ticker).toUpperCase(),
-        companyName,
-        dataTimestamp: Date.now(),
-      }
-    );
+    const input = buildQuantumInputFromMarketData({
+      horizon,
+      ticker: sym,
+      quote: data?.quote,
+      history,
+      userHasPosition: false,
+    });
+
+    return evaluateStockRecommendation(input, {
+      ticker: sym,
+      companyName,
+      dataTimestamp: Date.now(),
+    });
   } catch (err: any) {
     return errorRecommendation(ticker, err?.message || 'Scout failed');
   }
@@ -269,7 +191,6 @@ export async function findATrade(opts: {
     (done, ticker) => opts.onProgress?.({ done, total: tickers.length, current: String(ticker) })
   );
 
-  // Rank EVERY stock by Quantum Overall Score (SSOT) — no secondary tradeScore.
   const scanned = rankByQuantumScore(raw) as Array<StockRecommendation & { error?: string }>;
   const buyCandidates = selectBuyCandidates(scanned);
   const topPick = buyCandidates[0] ?? null;

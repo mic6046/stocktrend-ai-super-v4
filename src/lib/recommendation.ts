@@ -58,19 +58,20 @@ export function isQuantumBuy(rec: RecommendationLabel): boolean {
 }
 
 /**
- * User-facing stance line. If Quantum says BUY but live action is WAIT,
+ * User-facing stance line.
+ * If Quantum says BUY but live action is WAIT/HOLD (no fresh entry),
  * display: "BUY - WAIT for a better entry price."
  */
 export function formatRecommendationDisplay(rec: StockRecommendation): string {
   const label = rec.recommendation;
-  if (isQuantumBuy(label) && rec.currentAction === 'WAIT') {
+  if (isQuantumBuy(label) && (rec.currentAction === 'WAIT' || rec.currentAction === 'HOLD')) {
     return `${label} - WAIT for a better entry price.`;
   }
   return label;
 }
 
 export function formatActionNote(rec: StockRecommendation): string {
-  if (isQuantumBuy(rec.recommendation) && rec.currentAction === 'WAIT') {
+  if (isQuantumBuy(rec.recommendation) && (rec.currentAction === 'WAIT' || rec.currentAction === 'HOLD')) {
     return 'BUY - WAIT for a better entry price.';
   }
   return `Do now: ${rec.currentAction}`;

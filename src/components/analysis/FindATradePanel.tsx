@@ -161,9 +161,9 @@ export function FindATradePanel({
 
       <p className="text-[11px] text-gray-400 leading-relaxed">
         Choose a market and theme, paste your own list (memorized), or fill from the curated
-        universe. Every ticker is scored once by{' '}
-        <span className="text-emerald-300 font-semibold">AI Quantum Score</span> — Top Pick and
-        candidates are ranked by that score only.
+        universe. Every ticker is scored once with the{' '}
+        <span className="text-emerald-300 font-semibold">same AI Quantum Score inputs</span> as
+        full analysis (chart features shared; predict enrich applies after you open a ticker).
       </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
