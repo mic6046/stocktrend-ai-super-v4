@@ -1,6 +1,6 @@
 /**
  * Curated popular-market universes for Find a Trade +.
- * Kept modest (≤20 per scout) so Consensus scanning stays within API limits.
+ * Kept modest (≤30 per scout) so Consensus scanning stays within API limits.
  */
 
 export type SuggestMarket = 'US' | 'HK' | 'JP' | 'EU' | 'ALL';
@@ -52,6 +52,16 @@ export const POPULAR_UNIVERSE: UniverseName[] = [
   { ticker: 'BRK-B', name: 'Berkshire Hathaway', market: 'US', themes: ['VALUE'] },
   { ticker: 'CRM', name: 'Salesforce', market: 'US', themes: ['AI', 'GROWTH'] },
   { ticker: 'ORCL', name: 'Oracle', market: 'US', themes: ['AI', 'GROWTH', 'DIVIDEND'] },
+  { ticker: 'NFLX', name: 'Netflix', market: 'US', themes: ['GROWTH'] },
+  { ticker: 'INTC', name: 'Intel', market: 'US', themes: ['AI', 'VALUE'] },
+  { ticker: 'QCOM', name: 'Qualcomm', market: 'US', themes: ['AI', 'GROWTH', 'DIVIDEND'] },
+  { ticker: 'MU', name: 'Micron', market: 'US', themes: ['AI', 'GROWTH'] },
+  { ticker: 'AMAT', name: 'Applied Materials', market: 'US', themes: ['AI', 'GROWTH'] },
+  { ticker: 'NOW', name: 'ServiceNow', market: 'US', themes: ['AI', 'GROWTH'] },
+  { ticker: 'UBER', name: 'Uber', market: 'US', themes: ['GROWTH'] },
+  { ticker: 'ABBV', name: 'AbbVie', market: 'US', themes: ['VALUE', 'DIVIDEND'] },
+  { ticker: 'PG', name: 'Procter & Gamble', market: 'US', themes: ['VALUE', 'DIVIDEND'] },
+  { ticker: 'HD', name: 'Home Depot', market: 'US', themes: ['GROWTH', 'DIVIDEND'] },
 
   // —— Hong Kong ——
   { ticker: '0700.HK', name: 'Tencent', market: 'HK', themes: ['AI', 'GROWTH'] },
@@ -73,6 +83,17 @@ export const POPULAR_UNIVERSE: UniverseName[] = [
   { ticker: '9961.HK', name: 'Trip.com', market: 'HK', themes: ['GROWTH'] },
   { ticker: '2382.HK', name: 'Sunny Optical', market: 'HK', themes: ['GROWTH'] },
   { ticker: '0669.HK', name: 'Techtronic', market: 'HK', themes: ['GROWTH'] },
+  { ticker: '2015.HK', name: 'Li Auto', market: 'HK', themes: ['GROWTH'] },
+  { ticker: '9868.HK', name: 'XPeng', market: 'HK', themes: ['GROWTH'] },
+  { ticker: '9866.HK', name: 'NIO', market: 'HK', themes: ['GROWTH'] },
+  { ticker: '9626.HK', name: 'Bilibili', market: 'HK', themes: ['GROWTH'] },
+  { ticker: '0981.HK', name: 'SMIC', market: 'HK', themes: ['AI', 'GROWTH'] },
+  { ticker: '2388.HK', name: 'BOC Hong Kong', market: 'HK', themes: ['VALUE', 'DIVIDEND'] },
+  { ticker: '0011.HK', name: 'Hang Seng Bank', market: 'HK', themes: ['VALUE', 'DIVIDEND'] },
+  { ticker: '1109.HK', name: 'China Resources Land', market: 'HK', themes: ['VALUE', 'DIVIDEND'] },
+  { ticker: '2688.HK', name: 'ENN Energy', market: 'HK', themes: ['VALUE', 'DIVIDEND'] },
+  { ticker: '1177.HK', name: 'Sino Biopharm', market: 'HK', themes: ['GROWTH'] },
+  { ticker: '0883.HK', name: 'CNOOC', market: 'HK', themes: ['VALUE', 'DIVIDEND'] },
 
   // —— Japan ——
   { ticker: '7203.T', name: 'Toyota', market: 'JP', themes: ['VALUE', 'DIVIDEND'] },
@@ -95,6 +116,16 @@ export const POPULAR_UNIVERSE: UniverseName[] = [
   { ticker: '8316.T', name: 'Sumitomo Mitsui', market: 'JP', themes: ['VALUE', 'DIVIDEND'] },
   { ticker: '4568.T', name: 'Daiichi Sankyo', market: 'JP', themes: ['GROWTH'] },
   { ticker: '9983.T', name: 'Fast Retailing', market: 'JP', themes: ['GROWTH'] },
+  { ticker: '6902.T', name: 'Denso', market: 'JP', themes: ['GROWTH'] },
+  { ticker: '6752.T', name: 'Panasonic', market: 'JP', themes: ['VALUE', 'DIVIDEND'] },
+  { ticker: '8001.T', name: 'Itochu', market: 'JP', themes: ['VALUE', 'DIVIDEND'] },
+  { ticker: '8058.T', name: 'Mitsubishi Corp', market: 'JP', themes: ['VALUE', 'DIVIDEND'] },
+  { ticker: '9433.T', name: 'KDDI', market: 'JP', themes: ['VALUE', 'DIVIDEND'] },
+  { ticker: '6594.T', name: 'Nidec', market: 'JP', themes: ['GROWTH'] },
+  { ticker: '4901.T', name: 'Fujifilm', market: 'JP', themes: ['GROWTH', 'DIVIDEND'] },
+  { ticker: '6954.T', name: 'Fanuc', market: 'JP', themes: ['GROWTH'] },
+  { ticker: '6273.T', name: 'SMC', market: 'JP', themes: ['GROWTH'] },
+  { ticker: '8411.T', name: 'Mizuho', market: 'JP', themes: ['VALUE', 'DIVIDEND'] },
 
   // —— Europe ——
   { ticker: 'ASML.AS', name: 'ASML', market: 'EU', themes: ['AI', 'GROWTH'] },
@@ -117,6 +148,16 @@ export const POPULAR_UNIVERSE: UniverseName[] = [
   { ticker: 'PRX.AS', name: 'Prosus', market: 'EU', themes: ['GROWTH', 'VALUE'] },
   { ticker: 'RMS.PA', name: 'Hermès', market: 'EU', themes: ['GROWTH'] },
   { ticker: 'IBE.MC', name: 'Iberdrola', market: 'EU', themes: ['VALUE', 'DIVIDEND'] },
+  { ticker: 'BMW.DE', name: 'BMW', market: 'EU', themes: ['VALUE', 'DIVIDEND'] },
+  { ticker: 'VOW3.DE', name: 'Volkswagen', market: 'EU', themes: ['VALUE'] },
+  { ticker: 'ALV.DE', name: 'Allianz', market: 'EU', themes: ['VALUE', 'DIVIDEND'] },
+  { ticker: 'DTE.DE', name: 'Deutsche Telekom', market: 'EU', themes: ['VALUE', 'DIVIDEND'] },
+  { ticker: 'IFX.DE', name: 'Infineon', market: 'EU', themes: ['AI', 'GROWTH'] },
+  { ticker: 'SU.PA', name: 'Schneider Electric', market: 'EU', themes: ['GROWTH', 'DIVIDEND'] },
+  { ticker: 'TTE.PA', name: 'TotalEnergies', market: 'EU', themes: ['VALUE', 'DIVIDEND'] },
+  { ticker: 'ABI.BR', name: 'AB InBev', market: 'EU', themes: ['VALUE', 'DIVIDEND'] },
+  { ticker: 'KER.PA', name: 'Kering', market: 'EU', themes: ['GROWTH'] },
+  { ticker: 'ENI.MI', name: 'Eni', market: 'EU', themes: ['VALUE', 'DIVIDEND'] },
 ];
 
 /** Deduped universe (fixes accidental duplicate entries). */
@@ -139,7 +180,7 @@ const DEDUPED: UniverseName[] = (() => {
 export function buildSuggestUniverse(
   market: SuggestMarket,
   theme: SuggestTheme,
-  max = 20
+  max = 30
 ): UniverseName[] {
   let pool = DEDUPED;
   if (market !== 'ALL') {
@@ -177,6 +218,6 @@ export function buildSuggestUniverse(
   return picked;
 }
 
-export function universeTickers(market: SuggestMarket, theme: SuggestTheme, max = 20): string[] {
+export function universeTickers(market: SuggestMarket, theme: SuggestTheme, max = 30): string[] {
   return buildSuggestUniverse(market, theme, max).map((r) => r.ticker);
 }

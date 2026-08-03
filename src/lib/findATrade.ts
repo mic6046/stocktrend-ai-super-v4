@@ -12,7 +12,7 @@ import {
 } from './quantumRecommendationEngine';
 import type { HorizonKey } from '../components/analysis/analysisTheme';
 
-export const FIND_A_TRADE_MAX = 20;
+export const FIND_A_TRADE_MAX = 30;
 
 export type FindATradeCandidate = {
   ticker: string;
