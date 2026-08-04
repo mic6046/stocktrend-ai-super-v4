@@ -676,9 +676,9 @@ export function HistoricalValuationDashboard({
           />
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 items-stretch">
           {/* PE-only valuation chart */}
-          <div className="xl:col-span-2 rounded-2xl border border-white/10 bg-black/30 p-3 sm:p-4">
+          <div className="xl:col-span-2 rounded-2xl border border-white/10 bg-black/30 p-3 sm:p-4 flex flex-col">
             <div className="flex flex-wrap items-start justify-between gap-2 mb-3">
               <div className="min-w-0">
                 <p className="text-[11px] font-bold text-white tracking-wide">PE vs Own History</p>
@@ -910,116 +910,11 @@ export function HistoricalValuationDashboard({
             <p className="mt-2 text-[9px] font-mono text-gray-600 tracking-wide">
               PE multiples only · market price is not plotted · Overheat L3 = max heat band
             </p>
-
-            {/* AI Valuation Brief — combined into PE history card */}
-            <div className="mt-4 pt-4 border-t border-white/10">
-              <div className="flex items-center gap-2 mb-2 min-w-0">
-                <Sparkles className="w-3.5 h-3.5 text-violet-400 shrink-0" />
-                <p className="text-[10px] font-mono uppercase tracking-wider text-gray-300 font-bold truncate">
-                  AI Valuation Brief
-                </p>
-              </div>
-              <p className="text-[12px] text-gray-300 leading-relaxed break-words">
-                At the{' '}
-                <span className={cn('font-semibold', tone.text)}>
-                  {analytics.pctile}% historical percentile
-                </span>
-                , heat status is{' '}
-                <span className={cn('font-semibold', tone.text)}>{tone.badge}</span>
-                {analytics.overheatLevel > 0 ? (
-                  <>
-                    {' '}
-                    (
-                    <span className={cn('font-semibold', tone.text)}>
-                      Overheat Level {analytics.overheatLevel} of 3
-                      {analytics.overheatLevel === 3 ? ' · Max' : ''}
-                    </span>
-                    )
-                  </>
-                ) : null}
-                . Current PE is{' '}
-                {Math.abs(analytics.premiumPct) < 3
-                  ? 'near'
-                  : analytics.premiumPct < 0
-                    ? 'below'
-                    : 'above'}{' '}
-                the {range === 'MAX' ? 'full-history' : range} historical average. The stock trades at{' '}
-                <span className="text-violet-300 font-semibold">{analytics.latestPe.toFixed(1)}×</span> versus{' '}
-                <span className="text-white font-semibold">{analytics.avgPe.toFixed(1)}×</span> average — a{' '}
-                <span
-                  className={cn(
-                    'font-semibold',
-                    analytics.premiumPct >= 0 ? 'text-rose-400' : 'text-emerald-400'
-                  )}
-                >
-                  {Math.abs(analytics.premiumPct).toFixed(1)}% valuation{' '}
-                  {analytics.premiumPct >= 0 ? 'premium' : 'discount'}
-                </span>
-                . Intrinsic estimate{' '}
-                <span className="text-white font-semibold">
-                  {sym}
-                  {analytics.intrinsic.toFixed(2)}
-                </span>{' '}
-                · margin of safety{' '}
-                <span
-                  className={cn(
-                    'font-semibold',
-                    analytics.marginOfSafety >= 0 ? 'text-emerald-400' : 'text-rose-400'
-                  )}
-                >
-                  {analytics.marginOfSafety >= 0 ? '+' : ''}
-                  {analytics.marginOfSafety.toFixed(1)}%
-                </span>
-                .
-              </p>
-              <div className="mt-3 space-y-2">
-                {aiParagraphs.map((para, i) => (
-                  <p key={i} className="text-[11px] text-gray-400 leading-relaxed break-words">
-                    {para}
-                  </p>
-                ))}
-              </div>
-              <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-violet-500/30 bg-violet-500/10 px-2.5 py-1.5 min-w-0 max-w-full overflow-hidden">
-                <span className="text-[9px] font-mono uppercase tracking-wider text-violet-300 shrink-0">
-                  Valuation Heat
-                </span>
-                <FitText maxPx={12} minPx={9} maxLines={2} className="font-black text-white flex-1">
-                  {analytics.status.toUpperCase()}
-                </FitText>
-              </div>
-              {analytics.overheatLevel > 0 && (
-                <div
-                  className={cn(
-                    'mt-2 rounded-lg border px-2.5 py-2',
-                    analytics.overheatLevel === 3
-                      ? 'border-rose-500/35 bg-rose-500/10'
-                      : 'border-orange-500/30 bg-orange-500/10'
-                  )}
-                >
-                  <p
-                    className={cn(
-                      'text-[10px] font-mono font-bold',
-                      analytics.overheatLevel === 3 ? 'text-rose-300' : 'text-orange-300'
-                    )}
-                  >
-                    {overheat.warningTitle}
-                  </p>
-                  <p className="mt-1 text-[10px] text-gray-400 leading-relaxed">{overheat.warningBody}</p>
-                </div>
-              )}
-              {masterRecommendation && (
-                <p className="mt-2 text-[10px] text-gray-500 font-mono">
-                  Master trading stance:{' '}
-                  <span className="text-violet-300 font-bold">{masterRecommendation}</span>
-                  {masterHorizonLabel ? ` · ${masterHorizonLabel}` : ''} — separate from valuation heat
-                </p>
-              )}
-            </div>
           </div>
 
-          {/* Right valuation panel */}
-          <div className="space-y-3">
-            <div className="rounded-2xl border border-white/10 bg-black/30 p-4 min-w-0 overflow-visible">
+          {/* Right valuation panel — stretch to match chart column height */}
+          <div className="flex flex-col gap-3 h-full min-h-0">
+            <div className="rounded-2xl border border-white/10 bg-black/30 p-4 min-w-0 overflow-visible shrink-0">
               <p className="text-[10px] font-mono uppercase tracking-wider text-gray-400 mb-3">Valuation Snapshot</p>
               <div className="space-y-2 mb-3">
                 <PanelRow label="Current PE" value={`${analytics.latestPe.toFixed(2)}×`} />
@@ -1063,7 +958,7 @@ export function HistoricalValuationDashboard({
               </div>
             </div>
 
-            <div className="rounded-2xl border border-white/10 bg-[#121214] p-4 min-w-0 overflow-visible">
+            <div className="rounded-2xl border border-white/10 bg-[#121214] p-4 min-w-0 overflow-visible shrink-0">
               <p className="text-[10px] font-mono uppercase tracking-wider text-gray-400 mb-1">
                 Master Recommendation
               </p>
@@ -1146,7 +1041,7 @@ export function HistoricalValuationDashboard({
               </div>
             </div>
 
-            <div className="rounded-2xl border border-white/10 bg-black/30 p-4 min-w-0 overflow-hidden">
+            <div className="rounded-2xl border border-white/10 bg-black/30 p-4 min-w-0 overflow-hidden flex-1 flex flex-col">
               <div className="flex items-center gap-2 mb-2 min-w-0">
                 <Activity className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
                 <p className="text-[10px] font-mono uppercase tracking-wider text-gray-300 font-bold truncate">
@@ -1157,7 +1052,7 @@ export function HistoricalValuationDashboard({
                 {analytics.corr.title}
               </FitText>
               <p className="mt-1.5 text-[11px] text-gray-400 leading-relaxed break-words">{analytics.corr.detail}</p>
-              <div className="mt-3 space-y-1.5 text-[9px] font-mono text-gray-500">
+              <div className="mt-auto pt-3 space-y-1.5 text-[9px] font-mono text-gray-500">
                 <p className="flex items-start gap-1.5 min-w-0">
                   <TrendingUp className="w-3 h-3 text-emerald-400 shrink-0 mt-0.5" />
                   <span className="min-w-0 break-words">Price ↑ PE ↑ = Healthy rerating</span>
@@ -1175,6 +1070,118 @@ export function HistoricalValuationDashboard({
                   <span className="min-w-0 break-words">Price ↓ PE ↓ = Bearish trend</span>
                 </p>
               </div>
+            </div>
+          </div>
+        </div>
+
+        {/* AI Valuation Brief — full width under chart + side panels (no empty right column) */}
+        <div className="rounded-2xl border border-white/10 bg-gradient-to-br from-violet-500/5 to-black/20 p-4 min-w-0 overflow-hidden">
+          <div className="flex items-center gap-2 mb-2 min-w-0">
+            <Sparkles className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+            <p className="text-[10px] font-mono uppercase tracking-wider text-gray-300 font-bold truncate">
+              AI Valuation Brief
+            </p>
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+            <div className="lg:col-span-3 min-w-0">
+              <p className="text-[12px] text-gray-300 leading-relaxed break-words">
+                At the{' '}
+                <span className={cn('font-semibold', tone.text)}>
+                  {analytics.pctile}% historical percentile
+                </span>
+                , heat status is{' '}
+                <span className={cn('font-semibold', tone.text)}>{tone.badge}</span>
+                {analytics.overheatLevel > 0 ? (
+                  <>
+                    {' '}
+                    (
+                    <span className={cn('font-semibold', tone.text)}>
+                      Overheat Level {analytics.overheatLevel} of 3
+                      {analytics.overheatLevel === 3 ? ' · Max' : ''}
+                    </span>
+                    )
+                  </>
+                ) : null}
+                . Current PE is{' '}
+                {Math.abs(analytics.premiumPct) < 3
+                  ? 'near'
+                  : analytics.premiumPct < 0
+                    ? 'below'
+                    : 'above'}{' '}
+                the {range === 'MAX' ? 'full-history' : range} historical average. The stock trades at{' '}
+                <span className="text-violet-300 font-semibold">{analytics.latestPe.toFixed(1)}×</span> versus{' '}
+                <span className="text-white font-semibold">{analytics.avgPe.toFixed(1)}×</span> average — a{' '}
+                <span
+                  className={cn(
+                    'font-semibold',
+                    analytics.premiumPct >= 0 ? 'text-rose-400' : 'text-emerald-400'
+                  )}
+                >
+                  {Math.abs(analytics.premiumPct).toFixed(1)}% valuation{' '}
+                  {analytics.premiumPct >= 0 ? 'premium' : 'discount'}
+                </span>
+                . Intrinsic estimate{' '}
+                <span className="text-white font-semibold">
+                  {sym}
+                  {analytics.intrinsic.toFixed(2)}
+                </span>{' '}
+                · margin of safety{' '}
+                <span
+                  className={cn(
+                    'font-semibold',
+                    analytics.marginOfSafety >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                  )}
+                >
+                  {analytics.marginOfSafety >= 0 ? '+' : ''}
+                  {analytics.marginOfSafety.toFixed(1)}%
+                </span>
+                .
+              </p>
+              <div className="mt-3 space-y-2">
+                {aiParagraphs.map((para, i) => (
+                  <p key={i} className="text-[11px] text-gray-400 leading-relaxed break-words">
+                    {para}
+                  </p>
+                ))}
+              </div>
+            </div>
+            <div className="lg:col-span-2 min-w-0 flex flex-col gap-2">
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-violet-500/30 bg-violet-500/10 px-2.5 py-1.5 min-w-0 overflow-hidden">
+                <span className="text-[9px] font-mono uppercase tracking-wider text-violet-300 shrink-0">
+                  Valuation Heat
+                </span>
+                <FitText maxPx={12} minPx={9} maxLines={2} className="font-black text-white flex-1">
+                  {analytics.status.toUpperCase()}
+                </FitText>
+              </div>
+              {analytics.overheatLevel > 0 && (
+                <div
+                  className={cn(
+                    'rounded-lg border px-2.5 py-2',
+                    analytics.overheatLevel === 3
+                      ? 'border-rose-500/35 bg-rose-500/10'
+                      : 'border-orange-500/30 bg-orange-500/10'
+                  )}
+                >
+                  <p
+                    className={cn(
+                      'text-[10px] font-mono font-bold',
+                      analytics.overheatLevel === 3 ? 'text-rose-300' : 'text-orange-300'
+                    )}
+                  >
+                    {overheat.warningTitle}
+                  </p>
+                  <p className="mt-1 text-[10px] text-gray-400 leading-relaxed">{overheat.warningBody}</p>
+                  <OverheatLevelMeter level={analytics.overheatLevel} className="mt-2" />
+                </div>
+              )}
+              {masterRecommendation && (
+                <p className="text-[10px] text-gray-500 font-mono mt-auto">
+                  Master trading stance:{' '}
+                  <span className="text-violet-300 font-bold">{masterRecommendation}</span>
+                  {masterHorizonLabel ? ` · ${masterHorizonLabel}` : ''} — separate from valuation heat
+                </p>
+              )}
             </div>
           </div>
         </div>
