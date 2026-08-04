@@ -11839,31 +11839,6 @@ export default function App() {
                     </div>
                 </div>
 
-                {data && (
-                  <div className="mt-6 space-y-4">
-                    <HistoricalValuationDashboard
-                      data={historicalPEData}
-                      ticker={data.ticker}
-                      stockName={data.quote?.shortName || data.quote?.longName || ''}
-                      currentPe={getStockPE(data.ticker, data.quote).pe}
-                      currentPrice={
-                        Number(
-                          data.quote?.regularMarketPrice ||
-                            data.quote?.price ||
-                            (historicalPEData.length
-                              ? historicalPEData[historicalPEData.length - 1].price
-                              : 0)
-                        ) || 0
-                      }
-                      currency={data.quote?.currency || 'USD'}
-                      eps={getStockPE(data.ticker, data.quote).eps}
-                      masterRecommendation={horizonView.ratingLabel}
-                      masterExpectedReturn={horizonView.expectedReturn}
-                      masterHorizonLabel={horizonView.horizonLabel}
-                    />
-                  </div>
-                )}
-
 </motion.div>
 
               {/* Right column: AI Stock Score, Advisory, PDF, alerts (continuous stack) */}
@@ -12847,6 +12822,31 @@ export default function App() {
                 </div>
               </motion.div>
 
+              {/* Full-width PE valuation — not trapped in the left 7/12 column */}
+              {data && (
+                <div className="col-span-12 space-y-4">
+                  <HistoricalValuationDashboard
+                    data={historicalPEData}
+                    ticker={data.ticker}
+                    stockName={data.quote?.shortName || data.quote?.longName || ''}
+                    currentPe={getStockPE(data.ticker, data.quote).pe}
+                    currentPrice={
+                      Number(
+                        data.quote?.regularMarketPrice ||
+                          data.quote?.price ||
+                          (historicalPEData.length
+                            ? historicalPEData[historicalPEData.length - 1].price
+                            : 0)
+                      ) || 0
+                    }
+                    currency={data.quote?.currency || 'USD'}
+                    eps={getStockPE(data.ticker, data.quote).eps}
+                    masterRecommendation={horizonView.ratingLabel}
+                    masterExpectedReturn={horizonView.expectedReturn}
+                    masterHorizonLabel={horizonView.horizonLabel}
+                  />
+                </div>
+              )}
 
 
 
