@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Crosshair, Loader2, Rocket, Search, ListPlus } from 'lucide-react';
 import { cn } from '../../lib/utils';
@@ -17,6 +17,7 @@ import {
   SUGGEST_MARKETS,
   SUGGEST_THEMES,
   buildSuggestUniverse,
+  listMatchesMarket,
   universeTickers,
   type SuggestMarket,
   type SuggestTheme,
@@ -25,17 +26,7 @@ import {
 const LIST_STORAGE_KEY = 'qn-find-a-trade-list';
 const MARKET_KEY = 'qn-find-market';
 const THEME_KEY = 'qn-find-theme';
-const DEFAULT_LIST = 'AAPL, NVDA, MSFT, TSLA, 0700.HK';
-
-function loadSavedList(): string {
-  try {
-    const raw = localStorage.getItem(LIST_STORAGE_KEY);
-    if (raw != null && raw.trim()) return raw;
-  } catch {
-    /* ignore */
-  }
-  return DEFAULT_LIST;
-}
+const LIST_SOURCE_KEY = 'qn-find-list-source';
 
 function loadMarket(): SuggestMarket {
   try {
@@ -61,6 +52,36 @@ function loadTheme(): SuggestTheme {
   return 'ALL';
 }
 
+function loadListSource(): 'market' | 'custom' {
+  try {
+    const v = localStorage.getItem(LIST_SOURCE_KEY);
+    if (v === 'custom' || v === 'market') return v;
+  } catch {
+    /* ignore */
+  }
+  return 'market';
+}
+
+function loadInitialList(market: SuggestMarket, theme: SuggestTheme): string {
+  const curated = universeTickers(market, theme, FIND_A_TRADE_MAX);
+  const curatedText = curated.join(', ');
+  try {
+    const raw = localStorage.getItem(LIST_STORAGE_KEY);
+    const source = loadListSource();
+    if (raw != null && raw.trim()) {
+      const parsed = parseTickerList(raw);
+      // Keep a custom paste only when Market is All markets, or it already matches the market
+      if (source === 'custom' && (market === 'ALL' || listMatchesMarket(parsed, market))) {
+        return raw;
+      }
+      if (listMatchesMarket(parsed, market) && curated.length === 0) return raw;
+    }
+  } catch {
+    /* ignore */
+  }
+  return curatedText || 'AAPL, NVDA, MSFT, TSLA, 0700.HK';
+}
+
 type FindATradePanelProps = {
   horizon?: HorizonKey;
   onOpenTicker: (ticker: string) => void;
@@ -77,21 +98,34 @@ export function FindATradePanel({
   className,
   compact = false,
 }: FindATradePanelProps) {
-  const [listText, setListText] = useState(loadSavedList);
-  const [market, setMarket] = useState<SuggestMarket>(loadMarket);
-  const [theme, setTheme] = useState<SuggestTheme>(loadTheme);
+  const initialMarket = loadMarket();
+  const initialTheme = loadTheme();
+  const [listText, setListText] = useState(() => loadInitialList(initialMarket, initialTheme));
+  const [market, setMarket] = useState<SuggestMarket>(initialMarket);
+  const [theme, setTheme] = useState<SuggestTheme>(initialTheme);
+  const [listSource, setListSource] = useState<'market' | 'custom'>(() => {
+    const src = loadListSource();
+    const curated = universeTickers(initialMarket, initialTheme, FIND_A_TRADE_MAX);
+    const initial = loadInitialList(initialMarket, initialTheme);
+    if (src === 'custom' && (initialMarket === 'ALL' || listMatchesMarket(parseTickerList(initial), initialMarket))) {
+      return 'custom';
+    }
+    return curated.length ? 'market' : src;
+  });
   const [scanning, setScanning] = useState(false);
   const [progress, setProgress] = useState<FindATradeProgress | null>(null);
   const [result, setResult] = useState<FindATradeResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const skipMarketSync = useRef(true);
 
   useEffect(() => {
     try {
       localStorage.setItem(LIST_STORAGE_KEY, listText);
+      localStorage.setItem(LIST_SOURCE_KEY, listSource);
     } catch {
       /* ignore */
     }
-  }, [listText]);
+  }, [listText, listSource]);
 
   useEffect(() => {
     try {
@@ -102,6 +136,23 @@ export function FindATradePanel({
     }
   }, [market, theme]);
 
+  // Keep Find list aligned with Market × Theme (unless user keeps a custom All-markets paste)
+  useEffect(() => {
+    if (skipMarketSync.current) {
+      skipMarketSync.current = false;
+      return;
+    }
+    const tickers = universeTickers(market, theme, FIND_A_TRADE_MAX);
+    if (!tickers.length) {
+      setError('No names in this market/theme combo. Try All themes.');
+      return;
+    }
+    setError(null);
+    setListSource('market');
+    setListText(tickers.join(', '));
+    setResult(null);
+  }, [market, theme]);
+
   const parsed = useMemo(() => parseTickerList(listText), [listText]);
   const universe = useMemo(
     () => buildSuggestUniverse(market, theme, FIND_A_TRADE_MAX),
@@ -110,6 +161,7 @@ export function FindATradePanel({
   const horizonLabel = HORIZON_OPTIONS.find((o) => o.key === horizon)?.label ?? horizon;
   const marketLabel = SUGGEST_MARKETS.find((m) => m.key === market)?.label ?? market;
   const themeLabel = SUGGEST_THEMES.find((t) => t.key === theme)?.label ?? theme;
+  const listAligned = market === 'ALL' || listMatchesMarket(parsed, market);
 
   const fillFromMarketTheme = () => {
     const tickers = universeTickers(market, theme, FIND_A_TRADE_MAX);
@@ -118,25 +170,34 @@ export function FindATradePanel({
       return;
     }
     setError(null);
+    setListSource('market');
     setListText(tickers.join(', '));
+    setResult(null);
+  };
+
+  const onListChange = (value: string) => {
+    setListText(value);
+    setListSource('custom');
   };
 
   const runScout = async () => {
     if (scanning) return;
 
-    // Paste list wins when non-empty; otherwise scout curated market × theme.
-    const pasted = parseTickerList(listText);
-    const tickers =
-      pasted.length > 0
-        ? pasted
-        : universe.map((u) => u.ticker).slice(0, FIND_A_TRADE_MAX);
+    // If Market is specific but paste list is another region, force curated market list
+    let tickers = parseTickerList(listText);
+    if (market !== 'ALL' && (!tickers.length || !listMatchesMarket(tickers, market))) {
+      tickers = universeTickers(market, theme, FIND_A_TRADE_MAX);
+      if (tickers.length) {
+        setListSource('market');
+        setListText(tickers.join(', '));
+      }
+    }
+    if (!tickers.length) {
+      tickers = universe.map((u) => u.ticker).slice(0, FIND_A_TRADE_MAX);
+    }
 
     if (!tickers.length) {
-      setError(
-        pasted.length === 0
-          ? 'Paste tickers or pick a market/theme with names, then scan.'
-          : 'Enter tickers separated by commas or spaces.'
-      );
+      setError('Pick a market/theme with names, or paste tickers for All markets.');
       return;
     }
 
@@ -162,9 +223,9 @@ export function FindATradePanel({
 
   const canScan = !scanning && (parsed.length > 0 || universe.length > 0);
   const scoutSource =
-    parsed.length > 0
-      ? `paste list · ${parsed.length} ticker${parsed.length === 1 ? '' : 's'}`
-      : `market/theme · ${universe.length} name${universe.length === 1 ? '' : 's'}`;
+    listSource === 'market' || (market !== 'ALL' && listAligned)
+      ? `${marketLabel} · ${themeLabel} · ${parsed.length || universe.length} ticker${(parsed.length || universe.length) === 1 ? '' : 's'}`
+      : `custom paste · ${parsed.length} ticker${parsed.length === 1 ? '' : 's'}`;
 
   return (
     <GlassCard className={cn('space-y-3', className)}>
@@ -173,11 +234,10 @@ export function FindATradePanel({
       </SectionLabel>
 
       <p className="text-[11px] text-gray-400 leading-relaxed">
-        Paste up to {FIND_A_TRADE_MAX} tickers (memorized in this browser), or leave the list empty and
-        scout a curated <span className="text-emerald-300 font-semibold">market × theme</span> universe.
-        Surfaces names with{' '}
-        <span className="text-emerald-300 font-semibold">BUY / STRONG BUY</span> — matching the
-        Recommendation card score bands (70+) and any open/cached analysis.
+        Changing <span className="text-emerald-300 font-semibold">Market / Theme</span> refreshes the Find
+        list to that curated universe. Use <span className="text-white/80">All markets</span> if you want a
+        custom mixed paste. Surfaces{' '}
+        <span className="text-emerald-300 font-semibold">BUY / STRONG BUY</span> (score 70+).
       </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -233,12 +293,30 @@ export function FindATradePanel({
 
       <textarea
         value={listText}
-        onChange={(e) => setListText(e.target.value)}
+        onChange={(e) => onListChange(e.target.value)}
         rows={compact ? 2 : 3}
-        placeholder="AAPL, NVDA, MSFT, 0700.HK — or clear to use market/theme"
-        className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-[12px] font-mono text-gray-200 placeholder:text-gray-600 focus:outline-none focus:border-emerald-500/40 resize-y min-h-[56px]"
+        placeholder="0700.HK, 9988.HK — or pick Market/Theme to auto-fill"
+        className={cn(
+          'w-full rounded-xl border bg-black/40 px-3 py-2.5 text-[12px] font-mono text-gray-200 placeholder:text-gray-600 focus:outline-none resize-y min-h-[56px]',
+          listAligned ? 'border-white/10 focus:border-emerald-500/40' : 'border-amber-500/40 focus:border-amber-400/50'
+        )}
       />
 
+      {!listAligned && market !== 'ALL' && parsed.length > 0 && (
+        <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 px-3 py-2 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[11px] text-amber-100/90 leading-relaxed">
+            Find list doesn’t match <span className="font-semibold">{marketLabel}</span>. Scan will use the
+            curated {marketLabel} list unless you switch Market to All markets.
+          </p>
+          <button
+            type="button"
+            onClick={fillFromMarketTheme}
+            className="shrink-0 rounded-full border border-amber-400/40 bg-amber-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-amber-200 cursor-pointer hover:bg-amber-500/20"
+          >
+            Load {marketLabel} names
+          </button>
+        </div>
+      )}
       {parsed.length === 0 && universe.length > 0 && (
         <div className="rounded-xl border border-white/8 bg-black/25 px-3 py-2">
           <p className="text-[9px] font-mono uppercase tracking-wider text-gray-500 mb-1.5">

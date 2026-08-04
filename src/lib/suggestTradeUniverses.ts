@@ -180,3 +180,25 @@ export function buildSuggestUniverse(
 export function universeTickers(market: SuggestMarket, theme: SuggestTheme, max = 20): string[] {
   return buildSuggestUniverse(market, theme, max).map((r) => r.ticker);
 }
+
+/** Infer listing region from ticker suffix (for Find-list ↔ market alignment). */
+export function inferTickerMarket(ticker: string): Exclude<SuggestMarket, 'ALL'> | null {
+  const t = String(ticker || '')
+    .trim()
+    .toUpperCase();
+  if (!t) return null;
+  if (t.endsWith('.HK')) return 'HK';
+  if (t.endsWith('.T')) return 'JP';
+  if (/\.(AS|DE|PA|SW|L|MC)$/.test(t)) return 'EU';
+  // Plain US symbols (incl. BRK-B) and rare .US
+  if (!t.includes('.') || t.endsWith('.US')) return 'US';
+  return null;
+}
+
+/** True when most tickers in the paste list belong to the selected market. */
+export function listMatchesMarket(tickers: string[], market: SuggestMarket): boolean {
+  if (market === 'ALL') return true;
+  if (!tickers.length) return false;
+  const matched = tickers.filter((t) => inferTickerMarket(t) === market).length;
+  return matched / tickers.length >= 0.6;
+}
