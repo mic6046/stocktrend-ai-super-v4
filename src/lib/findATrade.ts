@@ -15,6 +15,15 @@ import type { HorizonKey } from '../components/analysis/analysisTheme';
 
 export const FIND_A_TRADE_MAX = 20;
 
+export type FindATradeKnownHint = {
+  recommendation?: string | null;
+  score?: number | null;
+  confidence?: number | null;
+  expectedReturn?: number | null;
+  price?: number | null;
+  name?: string | null;
+};
+
 export type FindATradeCandidate = {
   ticker: string;
   name: string;
@@ -59,6 +68,61 @@ export function parseTickerList(input: string, max = FIND_A_TRADE_MAX): string[]
 
 function clamp(n: number, lo: number, hi: number) {
   return Math.min(hi, Math.max(lo, n));
+}
+
+/** Same score→label bands as the Recommendation / Quantum score card. */
+export function recommendationFromScore(score: number): RecommendationLabel {
+  if (score >= 85) return 'STRONG BUY';
+  if (score >= 70) return 'BUY';
+  if (score >= 60) return 'HOLD';
+  if (score >= 50) return 'REDUCE';
+  if (score >= 40) return 'SELL';
+  return 'AVOID NEW POSITION';
+}
+
+const REC_RANK: Record<RecommendationLabel, number> = {
+  'STRONG BUY': 6,
+  BUY: 5,
+  HOLD: 4,
+  REDUCE: 3,
+  SELL: 2,
+  'AVOID NEW POSITION': 1,
+};
+
+function parseRecommendationLabel(raw: string | null | undefined): RecommendationLabel | null {
+  const s = String(raw || '')
+    .trim()
+    .toUpperCase();
+  if (!s) return null;
+  if (s.includes('STRONG BUY') || s.includes('VERY STRONG') || s.includes('EXCEPTIONAL')) return 'STRONG BUY';
+  if (s.includes('ACCUMULAT')) return 'BUY';
+  if (s === 'BUY' || (s.includes('BUY') && !s.includes('AVOID'))) return 'BUY';
+  if (s.includes('REDUCE')) return 'REDUCE';
+  if (s.includes('SELL') && !s.includes('STRONG')) return 'SELL';
+  if (s.includes('AVOID') || s.includes('STRONG SELL')) return 'AVOID NEW POSITION';
+  if (s.includes('HOLD') || s.includes('NEUTRAL')) return 'HOLD';
+  return null;
+}
+
+function mostBullish(labels: Array<RecommendationLabel | null | undefined>): RecommendationLabel {
+  let best: RecommendationLabel = 'HOLD';
+  for (const lab of labels) {
+    if (!lab) continue;
+    if (REC_RANK[lab] > REC_RANK[best]) best = lab;
+  }
+  return best;
+}
+
+function techSignalLabel(tech: any): RecommendationLabel | null {
+  const sig = String(tech?.masterScores?.signal || tech?.advancedIndicators?.aiBuyScore?.signal || '')
+    .trim()
+    .toUpperCase();
+  if (sig === 'STRONG_BUY') return 'STRONG BUY';
+  if (sig === 'BUY') return 'BUY';
+  if (sig === 'HOLD') return 'HOLD';
+  if (sig === 'REDUCE') return 'REDUCE';
+  if (sig === 'SELL') return 'SELL';
+  return null;
 }
 
 /** Technical-only Quantum-ish score so scout BUYs track chart analysis when full AI score is absent. */
@@ -154,7 +218,8 @@ function rankScore(c: FindATradeCandidate): number {
 async function scoutOne(
   ticker: string,
   horizon: HorizonKey,
-  fetchJson: (url: string) => Promise<any>
+  fetchJson: (url: string) => Promise<any>,
+  known?: FindATradeKnownHint | null
 ): Promise<FindATradeCandidate> {
   try {
     const data = await fetchJson(
@@ -164,6 +229,25 @@ async function scoutOne(
       (h: any) => h?.close != null && Number.isFinite(Number(h.close))
     );
     if (!history.length) {
+      // Still honor an already-analyzed BUY from the open Recommendation card / predict cache
+      const knownRec =
+        parseRecommendationLabel(known?.recommendation) ||
+        (known?.score != null ? recommendationFromScore(Number(known.score)) : null);
+      if (knownRec === 'BUY' || knownRec === 'STRONG BUY') {
+        return {
+          ticker,
+          name: known?.name || ticker,
+          price: Number(known?.price) || 0,
+          recommendation: knownRec,
+          currentAction: 'WAIT',
+          confidence: Number(known?.confidence) || 70,
+          score: Number(known?.score) || 70,
+          expectedReturn: Number(known?.expectedReturn) || 3,
+          why: 'Using your open analysis / cached Quantum score (no fresh history in scout).',
+          tradeScore: 0,
+          isBuyCandidate: true,
+        };
+      }
       return {
         ticker,
         name: ticker,
@@ -183,6 +267,7 @@ async function scoutOne(
     const px =
       Number(data?.quote?.regularMarketPrice) ||
       Number(history[history.length - 1].close) ||
+      Number(known?.price) ||
       0;
     const tech = computeTechnicalIndicators(history, data?.quote);
     const closes = history.map((h: any) => Number(h.close));
@@ -201,7 +286,11 @@ async function scoutOne(
           ? 30
           : 55;
     const smartMoneyScore = sm === 'BULLISH' ? 85 : sm === 'BEARISH' ? 35 : 50;
-    const baseScore = scoutBaseScore(tech, px);
+    const knownScore =
+      known?.score != null && Number.isFinite(Number(known.score)) ? Number(known.score) : null;
+    const techScore = scoutBaseScore(tech, px);
+    // Prefer the live Quantum / Recommendation card score when we already analyzed this ticker
+    const baseScore = clamp(Math.round(knownScore ?? techScore), 1, 99);
     // Horizon-scaled target so 1M/3M BUY can clear return + buy gates like the main card
     const horizonLift = horizon === '1W' ? 0.03 : horizon === '1M' ? 0.06 : horizon === '3M' ? 0.1 : 0.16;
     const bullLift = horizonLift * 1.7;
@@ -211,11 +300,22 @@ async function scoutOne(
       horizon,
       currentPrice: px,
       baseScore,
-      baseConfidence: clamp(Math.round(baseScore * 0.85 + 8), 45, 88),
+      baseConfidence: clamp(
+        Math.round(
+          known?.confidence != null && Number.isFinite(Number(known.confidence))
+            ? Number(known.confidence)
+            : baseScore * 0.85 + 8
+        ),
+        45,
+        92
+      ),
       baseTarget: px * (1 + horizonLift),
       bullTarget: px * (1 + bullLift),
       bearTarget: px * (1 - bearLift),
-      baseReturn: horizonLift * 100,
+      baseReturn:
+        known?.expectedReturn != null && Number.isFinite(Number(known.expectedReturn))
+          ? Number(known.expectedReturn)
+          : horizonLift * 100,
       technical: {
         rsi: tech?.indicators?.rsi ?? null,
         macdBullish:
@@ -256,23 +356,39 @@ async function scoutOne(
       ticker,
     });
 
-    // Match what the Recommendation card shows: horizon BUY/STRONG BUY is enough.
-    // Live zone action (BUY vs WAIT) only affects ranking, not eligibility —
-    // otherwise WAIT entries (common when price sits above the buy zone) were dropped
-    // even though the card still says BUY / No Position: BUY.
-    const isBuyCandidate =
-      engine.finalVerdict === 'BUY' || engine.finalVerdict === 'STRONG BUY';
+    // Align Find a Trade with the Recommendation card:
+    // 1) already-analyzed Quantum score / rating (known hint)
+    // 2) score bands (70+ = BUY) — engine buy-gates often collapse BUY→HOLD in scout
+    // 3) technical master signal
+    // 4) engine finalVerdict
+    const knownRec = parseRecommendationLabel(known?.recommendation);
+    const scoreRec = recommendationFromScore(
+      Math.max(baseScore, engine.score, Number.isFinite(techScore) ? techScore : 0)
+    );
+    const techRec = techSignalLabel(tech);
+    const recommendation = mostBullish([knownRec, scoreRec, techRec, engine.finalVerdict]);
+    const isBuyCandidate = recommendation === 'BUY' || recommendation === 'STRONG BUY';
 
     const candidate: FindATradeCandidate = {
       ticker: String(data?.ticker || ticker).toUpperCase(),
-      name: data?.quote?.shortName || data?.quote?.longName || ticker,
-      price: engine.currentPrice,
-      recommendation: engine.finalVerdict,
+      name: known?.name || data?.quote?.shortName || data?.quote?.longName || ticker,
+      price: engine.currentPrice || px,
+      recommendation,
       currentAction: engine.currentAction.action,
-      confidence: engine.confidence,
-      score: engine.score,
-      expectedReturn: engine.expectedReturn,
-      why: engine.whyWins,
+      confidence: Math.round(
+        known?.confidence != null && Number.isFinite(Number(known.confidence))
+          ? Number(known.confidence)
+          : engine.confidence
+      ),
+      score: Math.round(Math.max(baseScore, engine.score)),
+      expectedReturn:
+        known?.expectedReturn != null && Number.isFinite(Number(known.expectedReturn))
+          ? Number(known.expectedReturn)
+          : engine.expectedReturn,
+      why:
+        knownRec && (knownRec === 'BUY' || knownRec === 'STRONG BUY')
+          ? `Matched open/cached analysis (${knownRec}). ${engine.whyWins}`
+          : engine.whyWins,
       tradeScore: 0,
       isBuyCandidate,
     };
@@ -307,12 +423,15 @@ export async function findATrade(opts: {
   tickers: string[];
   horizon?: HorizonKey;
   concurrency?: number;
+  /** Already-analyzed names (open card + predict cache) — keeps scout aligned with Recommendation. */
+  knownByTicker?: Record<string, FindATradeKnownHint>;
   fetchJson?: (url: string) => Promise<any>;
   onProgress?: (p: FindATradeProgress) => void;
 }): Promise<FindATradeResult> {
   const tickers = opts.tickers.slice(0, FIND_A_TRADE_MAX);
   const horizon = opts.horizon ?? '1M';
   const concurrency = opts.concurrency ?? 3;
+  const knownByTicker = opts.knownByTicker || {};
   const fetchJson =
     opts.fetchJson ??
     (async (url: string) => {
@@ -340,9 +459,15 @@ export async function findATrade(opts: {
   const scanned = await mapPool(
     tickers,
     concurrency,
-    (ticker) => scoutOne(ticker, horizon, fetchJson),
+    (ticker) => {
+      const key = normalizeTicker(ticker);
+      return scoutOne(ticker, horizon, fetchJson, knownByTicker[key] || null);
+    },
     (done, ticker) => opts.onProgress?.({ done, total: tickers.length, current: String(ticker) })
   );
+
+  // Recompute rank after known overrides
+  for (const c of scanned) c.tradeScore = rankScore(c);
 
   const buyCandidates = scanned
     .filter((c) => c.isBuyCandidate)

@@ -9,6 +9,7 @@ import {
   findATrade,
   parseTickerList,
   type FindATradeCandidate,
+  type FindATradeKnownHint,
   type FindATradeProgress,
   type FindATradeResult,
 } from '../../lib/findATrade';
@@ -63,6 +64,8 @@ function loadTheme(): SuggestTheme {
 type FindATradePanelProps = {
   horizon?: HorizonKey;
   onOpenTicker: (ticker: string) => void;
+  /** Open Recommendation card + predict-cache hints so scout matches BUY labels users already see. */
+  knownByTicker?: Record<string, FindATradeKnownHint>;
   className?: string;
   compact?: boolean;
 };
@@ -70,6 +73,7 @@ type FindATradePanelProps = {
 export function FindATradePanel({
   horizon = '1M',
   onOpenTicker,
+  knownByTicker,
   className,
   compact = false,
 }: FindATradePanelProps) {
@@ -145,6 +149,7 @@ export function FindATradePanel({
         tickers,
         horizon,
         concurrency: 3,
+        knownByTicker,
         onProgress: setProgress,
       });
       setResult(out);
@@ -170,8 +175,9 @@ export function FindATradePanel({
       <p className="text-[11px] text-gray-400 leading-relaxed">
         Paste up to {FIND_A_TRADE_MAX} tickers (memorized in this browser), or leave the list empty and
         scout a curated <span className="text-emerald-300 font-semibold">market × theme</span> universe.
-        Consensus AI only surfaces{' '}
-        <span className="text-emerald-300 font-semibold">BUY / STRONG BUY</span> — never forced.
+        Surfaces names with{' '}
+        <span className="text-emerald-300 font-semibold">BUY / STRONG BUY</span> — matching the
+        Recommendation card score bands (70+) and any open/cached analysis.
       </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -298,10 +304,10 @@ export function FindATradePanel({
             {result.buyCandidates.length > 1 && (
               <div>
                 <p className="text-[10px] font-mono uppercase tracking-wider text-gray-500 mb-2">
-                  Other BUY candidates
+                  Other BUY candidates ({result.buyCandidates.length - 1})
                 </p>
                 <div className="space-y-1.5">
-                  {result.buyCandidates.slice(1, 5).map((c) => (
+                  {result.buyCandidates.slice(1, 12).map((c) => (
                     <CandidateRow key={c.ticker} c={c} onOpen={onOpenTicker} />
                   ))}
                 </div>

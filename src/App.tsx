@@ -7083,6 +7083,107 @@ export default function App() {
     userHasPosition,
   ]);
 
+  /** Seed Find a Trade with open card + predict-cache BUYs so scout matches Recommendation labels. */
+  const findATradeKnownByTicker = React.useMemo(() => {
+    const map: Record<
+      string,
+      {
+        recommendation?: string | null;
+        score?: number | null;
+        confidence?: number | null;
+        expectedReturn?: number | null;
+        price?: number | null;
+        name?: string | null;
+      }
+    > = {};
+
+    const upsert = (
+      rawTicker: string | null | undefined,
+      hint: {
+        recommendation?: string | null;
+        score?: number | null;
+        confidence?: number | null;
+        expectedReturn?: number | null;
+        price?: number | null;
+        name?: string | null;
+      }
+    ) => {
+      const key = String(rawTicker || '')
+        .trim()
+        .toUpperCase();
+      if (!key) return;
+      const prev = map[key] || {};
+      map[key] = {
+        recommendation: hint.recommendation ?? prev.recommendation,
+        score:
+          hint.score != null && Number.isFinite(Number(hint.score))
+            ? Number(hint.score)
+            : prev.score,
+        confidence:
+          hint.confidence != null && Number.isFinite(Number(hint.confidence))
+            ? Number(hint.confidence)
+            : prev.confidence,
+        expectedReturn:
+          hint.expectedReturn != null && Number.isFinite(Number(hint.expectedReturn))
+            ? Number(hint.expectedReturn)
+            : prev.expectedReturn,
+        price:
+          hint.price != null && Number.isFinite(Number(hint.price))
+            ? Number(hint.price)
+            : prev.price,
+        name: hint.name ?? prev.name,
+      };
+    };
+
+    if (data?.ticker) {
+      upsert(data.ticker, {
+        recommendation: horizonView.ratingLabel,
+        score: horizonView.score,
+        confidence: horizonView.confidence,
+        expectedReturn: horizonView.expectedReturn,
+        price: horizonView.currentPrice,
+        name: data.quote?.shortName || data.quote?.longName || data.ticker,
+      });
+      if (aiStockScore?.totalScore != null) {
+        upsert(data.ticker, {
+          recommendation: aiStockScore.rating || horizonView.ratingLabel,
+          score: aiStockScore.totalScore,
+        });
+      }
+    }
+
+    for (const [cacheKey, cached] of Object.entries(predictCache || {})) {
+      const ticker = String(cacheKey.split('_')[0] || '')
+        .trim()
+        .toUpperCase();
+      if (!ticker) continue;
+      const score = cached?.aiStockScore?.totalScore;
+      const rating =
+        cached?.aiStockScore?.rating ||
+        (typeof cached?.recommendation === 'string'
+          ? cached.recommendation
+          : cached?.recommendation?.rating || cached?.rating);
+      upsert(ticker, {
+        recommendation: rating,
+        score: score != null ? Number(score) : null,
+        confidence: cached?.confidence != null ? Number(cached.confidence) : null,
+      });
+    }
+
+    return map;
+  }, [
+    data?.ticker,
+    data?.quote?.shortName,
+    data?.quote?.longName,
+    horizonView.ratingLabel,
+    horizonView.score,
+    horizonView.confidence,
+    horizonView.expectedReturn,
+    horizonView.currentPrice,
+    aiStockScore,
+    predictCache,
+  ]);
+
   /**
    * Consistency layer: strip conflicting chart markers and stamp ONLY the Master Recommendation
    * on the latest bar for the selected Investment Horizon.
@@ -7598,6 +7699,7 @@ export default function App() {
             >
               <FindATradePanel
                 horizon={analysisHorizon}
+                knownByTicker={findATradeKnownByTicker}
                 onOpenTicker={(sym) => {
                   if (!assertAnalysisCredits()) return;
                   setShowFindATrade(false);
