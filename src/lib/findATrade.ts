@@ -1,7 +1,7 @@
 /**
- * Find a Trade — batch scout over user ticker lists using Consensus AI.
- * Surfaces names whose horizon recommendation is BUY / STRONG BUY
- * (matches the Recommendation card users see), then ranks by setup quality.
+ * Find a Trade — batch scout over user ticker lists using Quantum AI Score.
+ * Surfaces names whose AI Quantum Score is BUY / STRONG BUY (score ≥ 70),
+ * matching the Recommendation card users see after /api/predict.
  */
 
 import { computeTechnicalIndicators } from './technical';
@@ -12,6 +12,7 @@ import {
   type ZoneAction,
 } from './quantumRecommendationEngine';
 import type { HorizonKey } from '../components/analysis/analysisTheme';
+import { persistQuantumHint } from './quantumScoreCache';
 
 export const FIND_A_TRADE_MAX = 20;
 
@@ -36,6 +37,9 @@ export type FindATradeCandidate = {
   why: string;
   tradeScore: number;
   isBuyCandidate: boolean;
+  /** Where the Quantum score came from */
+  scoreSource?: 'predict' | 'cache' | 'known';
+  cachedPredict?: boolean;
   error?: string;
 };
 
@@ -70,7 +74,7 @@ function clamp(n: number, lo: number, hi: number) {
   return Math.min(hi, Math.max(lo, n));
 }
 
-/** Same score→label bands as the Recommendation / Quantum score card. */
+/** Same score→label bands as the Recommendation / Quantum score card (display). */
 export function recommendationFromScore(score: number): RecommendationLabel {
   if (score >= 85) return 'STRONG BUY';
   if (score >= 70) return 'BUY';
@@ -79,15 +83,6 @@ export function recommendationFromScore(score: number): RecommendationLabel {
   if (score >= 40) return 'SELL';
   return 'AVOID NEW POSITION';
 }
-
-const REC_RANK: Record<RecommendationLabel, number> = {
-  'STRONG BUY': 6,
-  BUY: 5,
-  HOLD: 4,
-  REDUCE: 3,
-  SELL: 2,
-  'AVOID NEW POSITION': 1,
-};
 
 function parseRecommendationLabel(raw: string | null | undefined): RecommendationLabel | null {
   const s = String(raw || '')
@@ -104,144 +99,25 @@ function parseRecommendationLabel(raw: string | null | undefined): Recommendatio
   return null;
 }
 
-function mostBullish(labels: Array<RecommendationLabel | null | undefined>): RecommendationLabel {
-  let best: RecommendationLabel = 'HOLD';
-  for (const lab of labels) {
-    if (!lab) continue;
-    if (REC_RANK[lab] > REC_RANK[best]) best = lab;
-  }
-  return best;
+/** BUY gate: Quantum AI Score ≥ 70 or rating already BUY / STRONG BUY. */
+export function isQuantumBuy(
+  score: number | null | undefined,
+  recommendation?: string | null
+): boolean {
+  const rec = parseRecommendationLabel(recommendation);
+  if (rec === 'BUY' || rec === 'STRONG BUY') return true;
+  if (score != null && Number.isFinite(Number(score)) && Number(score) >= 70) return true;
+  return false;
 }
 
-function techSignalLabel(tech: any): RecommendationLabel | null {
-  const sig = String(tech?.masterScores?.signal || tech?.advancedIndicators?.aiBuyScore?.signal || '')
-    .trim()
-    .toUpperCase();
-  if (sig === 'STRONG_BUY') return 'STRONG BUY';
-  if (sig === 'BUY') return 'BUY';
-  if (sig === 'HOLD') return 'HOLD';
-  if (sig === 'REDUCE') return 'REDUCE';
-  if (sig === 'SELL') return 'SELL';
-  return null;
-}
-
-/** Find-scout score: don't let a single short-term outflow veto bullish structure. */
-function scoutBaseScore(tech: any, px: number): number {
-  const masters = tech?.masterScores;
-  const ai = masters?.aiBuyScore;
-  const trendScore = Number(masters?.trendScore);
-  const smartScore = Number(masters?.smartMoneyScore);
-  const valueScore = Number(masters?.valueScore);
-  const sentScore = Number(masters?.sentimentScore);
-  const qr = tech?.quantumRefinement;
-  const rsScore = Number(qr?.relativeStrength?.score);
-
-  // Prefer a balanced blend when master board exists — raw aiBuyScore over-punishes one flow print.
-  // Cap the weight of a weak trendScore so mega-caps in MA repair (e.g. NVDA) aren't buried.
-  const blendParts = [trendScore, smartScore, valueScore, sentScore].filter((n) => Number.isFinite(n));
-  let s =
-    blendParts.length >= 3
-      ? blendParts.reduce((a, b) => a + b, 0) / blendParts.length
-      : ai != null && Number.isFinite(Number(ai))
-        ? Number(ai)
-        : 58;
-  if (Number.isFinite(trendScore) && trendScore < 40 && blendParts.length >= 3) {
-    // Re-blend with floored trend so one death-cross print doesn't dominate the scout
-    const repaired = [Math.max(trendScore, 48), smartScore, valueScore, sentScore].filter((n) =>
-      Number.isFinite(n)
-    );
-    s = Math.max(s, repaired.reduce((a, b) => a + b, 0) / repaired.length);
-  }
-  if (ai != null && Number.isFinite(Number(ai))) {
-    s = Math.max(s, Number(ai));
-  }
-
-  const rsi = tech?.indicators?.rsi;
-  const macd = tech?.indicators?.macd;
-  const macdBull =
-    macd != null && Number.isFinite(macd.macdLine) && Number.isFinite(macd.signalLine)
-      ? macd.macdLine > macd.signalLine
-      : null;
-  const aboveEma = tech?.indicators?.ema20 != null ? px > tech.indicators.ema20 : null;
-  const aboveSma = tech?.indicators?.sma50 != null ? px > tech.indicators.sma50 : null;
-  const ad = qr?.accumulationDistribution?.status;
-  const trend = String(qr?.trendStrength?.status || '');
-  const sm = qr?.smartMoneyIndex?.status;
-  const instFlow = tech?.indicators?.institutionalFlow?.status;
-  const bb = tech?.indicators?.bollinger?.percent;
-  const chip = String(qr?.chipProfitRatio?.status || '');
-  const shortStatus = String(qr?.shortSelling?.status || '');
-
-  // Structure boosts — keep modest so soft reclaim tapes land BUY, not inflated STRONG BUY
-  if (/BULL/i.test(trend)) s += 10;
-  else if (/BEAR/i.test(trend)) s -= 2; // soft — MA stack can lag price reclaim
-  if (ad === 'ACCUMULATION') s += 10;
-  else if (ad === 'DISTRIBUTION') s -= 10;
-  if (sm === 'BULLISH') s += 6;
-  else if (sm === 'BEARISH') s -= 6;
-  if (instFlow === 'LARGE_INFLOW' || instFlow === 'STEALTH_ACCUMULATION') s += 6;
-  if (instFlow === 'LARGE_OUTFLOW' || instFlow === 'STEALTH_DISTRIBUTION') s -= 3;
-
-  if (macdBull === true) s += 4;
-  else if (macdBull === false) s -= 3;
-  if (aboveEma === true) s += 3;
-  else if (aboveEma === false) s -= 3;
-  if (aboveSma === true) s += 3;
-  else if (aboveSma === false) s -= 2;
-
-  if (rsi != null && Number.isFinite(rsi)) {
-    if (rsi < 35) s += 5;
-    else if (rsi > 78) s -= 7;
-    else if (rsi > 70) s -= 2;
-    else if (rsi >= 45 && rsi <= 65) s += 2;
-  }
-  if (bb != null && Number.isFinite(bb)) {
-    if (bb <= 0.25) s += 5;
-    else if (bb >= 1.05) s -= 3;
-  }
-
-  // Momentum / positioning edges the Recommendation card often weights more than raw aiBuyScore
-  if (Number.isFinite(rsScore)) {
-    if (rsScore >= 70) s += 4;
-    else if (rsScore >= 60) s += 2;
-    else if (rsScore < 40) s -= 3;
-  }
-  if (/BULL/i.test(chip)) s += 3;
-  else if (/BEAR/i.test(chip)) s -= 3;
-  if (/DECREASING|COVER/i.test(shortStatus)) s += 3;
-  else if (/INCREASING|SQUEEZE_RISK|HEAVY/i.test(shortStatus)) s -= 2;
-
-  // Price reclaim + momentum while MA stack still tagged BEARISH (common on NVDA-like repairs)
-  const priceReclaim =
-    aboveEma === true &&
-    aboveSma === true &&
-    macdBull === true &&
-    ad !== 'DISTRIBUTION' &&
-    (Number.isFinite(rsScore) ? rsScore >= 65 : true);
-
-  const hardConstructive =
-    (/BULL/i.test(trend) && ad === 'ACCUMULATION') ||
-    (ad === 'ACCUMULATION' && (instFlow === 'LARGE_INFLOW' || sm === 'BULLISH')) ||
-    (Number.isFinite(trendScore) &&
-      Number.isFinite(smartScore) &&
-      trendScore >= 60 &&
-      smartScore >= 60 &&
-      ad !== 'DISTRIBUTION');
-  const softConstructive =
-    priceReclaim &&
-    Number.isFinite(sentScore) &&
-    sentScore >= 60 &&
-    Number.isFinite(valueScore) &&
-    valueScore >= 55;
-
-  if (hardConstructive) s = Math.max(s, 72);
-  else if (softConstructive) {
-    s = Math.max(s, 70);
-    // Soft reclaim alone should surface as BUY, not dominate as STRONG BUY
-    s = Math.min(s, 82);
-  }
-
-  return clamp(Math.round(s), 35, 95);
+function labelFromQuantum(
+  score: number,
+  recommendation?: string | null
+): RecommendationLabel {
+  const parsed = parseRecommendationLabel(recommendation);
+  if (parsed === 'STRONG BUY' || parsed === 'BUY') return parsed;
+  if (parsed && !isQuantumBuy(score, recommendation)) return parsed;
+  return recommendationFromScore(score);
 }
 
 function roughLevels(closes: number[], px: number) {
@@ -264,14 +140,17 @@ async function mapPool<T, R>(
   items: T[],
   concurrency: number,
   worker: (item: T, index: number) => Promise<R>,
-  onProgress?: (done: number, item: T) => void
+  onProgress?: (done: number, item: T) => void,
+  shouldStop?: () => boolean
 ): Promise<R[]> {
   const results: R[] = new Array(items.length);
   let next = 0;
   let done = 0;
   async function run() {
     while (next < items.length) {
+      if (shouldStop?.()) break;
       const i = next++;
+      if (i >= items.length) break;
       const item = items[i];
       results[i] = await worker(item, i);
       done += 1;
@@ -285,7 +164,6 @@ async function mapPool<T, R>(
 
 function rankScore(c: FindATradeCandidate): number {
   if (!c.isBuyCandidate) return -1e9;
-  // Prefer live BUY-zone entries, but still rank WAIT/HOLD thesis BUYs highly
   const actionBoost =
     c.currentAction === 'BUY'
       ? 18
@@ -297,40 +175,100 @@ function rankScore(c: FindATradeCandidate): number {
             ? -8
             : 0;
   const recBoost = c.recommendation === 'STRONG BUY' ? 14 : c.recommendation === 'BUY' ? 10 : 0;
-  return c.score * 0.35 + c.confidence * 0.3 + Math.max(0, c.expectedReturn) * 2.2 + actionBoost + recBoost;
+  // Quantum AI Score dominates ranking
+  return c.score * 0.55 + c.confidence * 0.2 + Math.max(0, c.expectedReturn) * 1.8 + actionBoost + recBoost;
+}
+
+export class FindQuotaExceededError extends Error {
+  usage?: any;
+  constructor(message: string, usage?: any) {
+    super(message);
+    this.name = 'FindQuotaExceededError';
+    this.usage = usage;
+  }
+}
+
+type PredictResult = {
+  score: number;
+  recommendation: string | null;
+  confidence: number | null;
+  expectedReturn: number | null;
+  why: string;
+  source: 'predict' | 'cache' | 'known';
+  cachedPredict?: boolean;
+  usage?: any;
+};
+
+function extractQuantumFromPredict(result: any): Omit<PredictResult, 'source' | 'cachedPredict' | 'usage'> {
+  const score = Number(result?.aiStockScore?.totalScore ?? result?.overallScore ?? result?.score);
+  const recommendation =
+    (typeof result?.aiStockScore?.rating === 'string' && result.aiStockScore.rating) ||
+    (typeof result?.recommendation === 'string' && result.recommendation) ||
+    (typeof result?.rating === 'string' && result.rating) ||
+    null;
+  const confidence =
+    result?.confidence != null && Number.isFinite(Number(result.confidence))
+      ? Number(result.confidence)
+      : null;
+  const expectedReturn =
+    result?.forecastHorizons?.[1]?.expectedReturn != null
+      ? Number(result.forecastHorizons[1].expectedReturn)
+      : result?.ensembleForecast?.baseCase?.expectedReturn != null
+        ? Number(result.ensembleForecast.baseCase.expectedReturn)
+        : null;
+  const why =
+    result?.aiStockScore?.overallExplanation ||
+    result?.whyBuyNow ||
+    result?.newsSummary ||
+    'Quantum AI Score from full analysis.';
+  return {
+    score: Number.isFinite(score) ? score : 0,
+    recommendation,
+    confidence,
+    expectedReturn,
+    why: String(why).slice(0, 280),
+  };
 }
 
 async function scoutOne(
   ticker: string,
   horizon: HorizonKey,
   fetchJson: (url: string) => Promise<any>,
-  known?: FindATradeKnownHint | null
+  postPredict: (body: any) => Promise<{ ok: boolean; status: number; data: any }>,
+  known?: FindATradeKnownHint | null,
+  email?: string | null,
+  onHint?: (hint: FindATradeKnownHint & { ticker: string }) => void
 ): Promise<FindATradeCandidate> {
   try {
+    // Prefer 1y history so Quantum predict matches the main Recommendation card lookback
     const data = await fetchJson(
-      `/api/stock?ticker=${encodeURIComponent(ticker)}&range=3mo&interval=1d`
+      `/api/stock?ticker=${encodeURIComponent(ticker)}&range=1y&interval=1d`
     );
     const history = (data?.history || []).filter(
       (h: any) => h?.close != null && Number.isFinite(Number(h.close))
     );
+
+    const knownScore =
+      known?.score != null && Number.isFinite(Number(known.score)) ? Number(known.score) : null;
+    const knownRec = parseRecommendationLabel(known?.recommendation);
+
     if (!history.length) {
-      // Still honor an already-analyzed BUY from the open Recommendation card / predict cache
-      const knownRec =
-        parseRecommendationLabel(known?.recommendation) ||
-        (known?.score != null ? recommendationFromScore(Number(known.score)) : null);
-      if (knownRec === 'BUY' || knownRec === 'STRONG BUY') {
+      if (knownScore != null || knownRec) {
+        const recommendation = labelFromQuantum(knownScore ?? 0, known?.recommendation);
+        const isBuyCandidate = isQuantumBuy(knownScore, known?.recommendation);
         return {
           ticker,
           name: known?.name || ticker,
           price: Number(known?.price) || 0,
-          recommendation: knownRec,
+          recommendation,
           currentAction: 'WAIT',
           confidence: Number(known?.confidence) || 70,
-          score: Number(known?.score) || 70,
+          score: knownScore ?? (isBuyCandidate ? 70 : 0),
           expectedReturn: Number(known?.expectedReturn) || 3,
-          why: 'Using your open analysis / cached Quantum score (no fresh history in scout).',
+          why: 'Using cached Quantum AI Score (no fresh history).',
           tradeScore: 0,
-          isBuyCandidate: true,
+          isBuyCandidate,
+          scoreSource: 'known',
         };
       }
       return {
@@ -362,8 +300,74 @@ async function scoutOne(
     const sm = tech?.quantumRefinement?.smartMoneyIndex?.status;
     const sector = tech?.quantumRefinement?.sectorRotation?.status;
 
-    const whaleScore =
-      ad === 'ACCUMULATION' ? 78 : ad === 'DISTRIBUTION' ? 32 : 52;
+    let quantum: PredictResult;
+
+    // Reuse an already-analyzed Quantum AI Score (open card / predict-cache / persistence)
+    if (knownScore != null || knownRec) {
+      quantum = {
+        score: knownScore ?? (knownRec === 'STRONG BUY' ? 88 : knownRec === 'BUY' ? 75 : 60),
+        recommendation: known?.recommendation || knownRec,
+        confidence: known?.confidence != null ? Number(known.confidence) : null,
+        expectedReturn: known?.expectedReturn != null ? Number(known.expectedReturn) : null,
+        why: `Cached Quantum AI Score (${knownRec || recommendationFromScore(knownScore!)}).`,
+        source: 'known',
+      };
+    } else {
+      const predictRes = await postPredict({
+        ticker,
+        history,
+        quote: data?.quote,
+        indicators: tech,
+        news: [],
+        bypassCache: false,
+        email: email || undefined,
+      });
+
+      if (predictRes.status === 402) {
+        throw new FindQuotaExceededError(
+          predictRes.data?.error ||
+            'Daily AI analysis credits are out. Reload credits to continue Find a Trade.',
+          predictRes.data?.usage
+        );
+      }
+      if (!predictRes.ok) {
+        throw new Error(predictRes.data?.error || `Predict HTTP ${predictRes.status}`);
+      }
+
+      const extracted = extractQuantumFromPredict(predictRes.data);
+      quantum = {
+        ...extracted,
+        source: predictRes.data?.cached ? 'cache' : 'predict',
+        cachedPredict: !!predictRes.data?.cached,
+        usage: predictRes.data?.usage,
+      };
+
+      onHint?.({
+        ticker,
+        recommendation: quantum.recommendation,
+        score: quantum.score,
+        confidence: quantum.confidence,
+        expectedReturn: quantum.expectedReturn,
+        price: px,
+        name: data?.quote?.shortName || data?.quote?.longName || ticker,
+      });
+      persistQuantumHint({
+        ticker,
+        recommendation: quantum.recommendation,
+        score: quantum.score,
+        confidence: quantum.confidence,
+        expectedReturn: quantum.expectedReturn,
+        price: px,
+        name: data?.quote?.shortName || data?.quote?.longName || ticker,
+      });
+    }
+
+    const aiScore = clamp(Math.round(quantum.score), 1, 99);
+    const recommendation = labelFromQuantum(aiScore, quantum.recommendation);
+    // Sole BUY filter: Quantum AI Score / rating — not technical scout proxies
+    const isBuyCandidate = isQuantumBuy(aiScore, quantum.recommendation);
+
+    const whaleScore = ad === 'ACCUMULATION' ? 78 : ad === 'DISTRIBUTION' ? 32 : 52;
     const institutionalScore =
       instFlow === 'LARGE_INFLOW' || instFlow === 'STEALTH_ACCUMULATION'
         ? 80
@@ -371,35 +375,24 @@ async function scoutOne(
           ? 30
           : 55;
     const smartMoneyScore = sm === 'BULLISH' ? 85 : sm === 'BEARISH' ? 35 : 50;
-    const knownScore =
-      known?.score != null && Number.isFinite(Number(known.score)) ? Number(known.score) : null;
-    const techScore = scoutBaseScore(tech, px);
-    // Prefer the higher of live Quantum card score and constructive scout score
-    const baseScore = clamp(Math.round(Math.max(knownScore ?? 0, techScore)), 1, 99);
-    // Horizon-scaled target so 1M/3M BUY can clear return + buy gates like the main card
     const horizonLift = horizon === '1W' ? 0.03 : horizon === '1M' ? 0.06 : horizon === '3M' ? 0.1 : 0.16;
-    const bullLift = horizonLift * 1.7;
-    const bearLift = horizonLift * 0.9;
 
+    // Engine only for entry timing (Do Now) — baseScore is the Quantum AI Score
     const engine = runQuantumRecommendationEngine({
       horizon,
       currentPrice: px,
-      baseScore,
+      baseScore: aiScore,
       baseConfidence: clamp(
-        Math.round(
-          known?.confidence != null && Number.isFinite(Number(known.confidence))
-            ? Number(known.confidence)
-            : baseScore * 0.85 + 8
-        ),
+        Math.round(quantum.confidence != null ? quantum.confidence : aiScore * 0.85 + 8),
         45,
         92
       ),
       baseTarget: px * (1 + horizonLift),
-      bullTarget: px * (1 + bullLift),
-      bearTarget: px * (1 - bearLift),
+      bullTarget: px * (1 + horizonLift * 1.7),
+      bearTarget: px * (1 - horizonLift * 0.9),
       baseReturn:
-        known?.expectedReturn != null && Number.isFinite(Number(known.expectedReturn))
-          ? Number(known.expectedReturn)
+        quantum.expectedReturn != null && Number.isFinite(quantum.expectedReturn)
+          ? quantum.expectedReturn
           : horizonLift * 100,
       technical: {
         rsi: tech?.indicators?.rsi ?? null,
@@ -441,19 +434,6 @@ async function scoutOne(
       ticker,
     });
 
-    // Align Find a Trade with the Recommendation card:
-    // 1) already-analyzed Quantum score / rating (known hint)
-    // 2) score bands (70+ = BUY) — engine buy-gates often collapse BUY→HOLD in scout
-    // 3) technical master signal
-    // 4) engine finalVerdict
-    const knownRec = parseRecommendationLabel(known?.recommendation);
-    const scoreRec = recommendationFromScore(
-      Math.max(baseScore, engine.score, Number.isFinite(techScore) ? techScore : 0)
-    );
-    const techRec = techSignalLabel(tech);
-    const recommendation = mostBullish([knownRec, scoreRec, techRec, engine.finalVerdict]);
-    const isBuyCandidate = recommendation === 'BUY' || recommendation === 'STRONG BUY';
-
     const candidate: FindATradeCandidate = {
       ticker: String(data?.ticker || ticker).toUpperCase(),
       name: known?.name || data?.quote?.shortName || data?.quote?.longName || ticker,
@@ -461,25 +441,25 @@ async function scoutOne(
       recommendation,
       currentAction: engine.currentAction.action,
       confidence: Math.round(
-        known?.confidence != null && Number.isFinite(Number(known.confidence))
-          ? Number(known.confidence)
+        quantum.confidence != null && Number.isFinite(quantum.confidence)
+          ? quantum.confidence
           : engine.confidence
       ),
-      score: Math.round(Math.max(baseScore, engine.score)),
+      score: aiScore,
       expectedReturn:
-        known?.expectedReturn != null && Number.isFinite(Number(known.expectedReturn))
-          ? Number(known.expectedReturn)
+        quantum.expectedReturn != null && Number.isFinite(quantum.expectedReturn)
+          ? quantum.expectedReturn
           : engine.expectedReturn,
-      why:
-        knownRec && (knownRec === 'BUY' || knownRec === 'STRONG BUY')
-          ? `Matched open/cached analysis (${knownRec}). ${engine.whyWins}`
-          : engine.whyWins,
+      why: `Quantum AI Score ${aiScore}/100 · ${recommendation}. ${quantum.why}`,
       tradeScore: 0,
       isBuyCandidate,
+      scoreSource: quantum.source,
+      cachedPredict: quantum.cachedPredict,
     };
     candidate.tradeScore = rankScore(candidate);
     return candidate;
   } catch (err: any) {
+    if (err instanceof FindQuotaExceededError) throw err;
     return {
       ticker,
       name: ticker,
@@ -502,32 +482,60 @@ export type FindATradeResult = {
   buyCandidates: FindATradeCandidate[];
   topPick: FindATradeCandidate | null;
   message: string;
+  quotaExceeded?: boolean;
+  usage?: any;
+  predictCalls?: number;
 };
 
 export async function findATrade(opts: {
   tickers: string[];
   horizon?: HorizonKey;
   concurrency?: number;
-  /** Already-analyzed names (open card + predict cache) — keeps scout aligned with Recommendation. */
+  /** Already-analyzed Quantum scores (open card + predict cache + persistence). */
   knownByTicker?: Record<string, FindATradeKnownHint>;
+  email?: string | null;
   fetchJson?: (url: string) => Promise<any>;
+  postPredict?: (body: any) => Promise<{ ok: boolean; status: number; data: any }>;
   onProgress?: (p: FindATradeProgress) => void;
+  onHint?: (hint: FindATradeKnownHint & { ticker: string }) => void;
+  onUsage?: (usage: any) => void;
 }): Promise<FindATradeResult> {
   const tickers = opts.tickers.slice(0, FIND_A_TRADE_MAX);
   const horizon = opts.horizon ?? '1M';
-  const concurrency = opts.concurrency ?? 3;
+  const concurrency = opts.concurrency ?? 2;
   const knownByTicker = opts.knownByTicker || {};
   const fetchJson =
     opts.fetchJson ??
     (async (url: string) => {
       const res = await loggedFetch(apiUrl(url), {
         __qnMeta: {
-          reason: 'find-or-suggest-trade',
-          userAction: 'Click Find/Suggest Trade',
+          reason: 'find-a-trade-stock',
+          userAction: 'Click Find a Trade +',
         },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
+    });
+  const postPredict =
+    opts.postPredict ??
+    (async (body: any) => {
+      const res = await loggedFetch(apiUrl('/api/predict'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        __qnMeta: {
+          reason: 'find-a-trade-quantum-score',
+          userAction: 'Click Find a Trade +',
+        },
+      } as any);
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch {
+        data = { error: `HTTP ${res.status}` };
+      }
+      if (data?.usage) opts.onUsage?.(data.usage);
+      return { ok: res.ok, status: res.status, data };
     });
 
   if (!tickers.length) {
@@ -541,24 +549,103 @@ export async function findATrade(opts: {
 
   opts.onProgress?.({ done: 0, total: tickers.length });
 
+  let quotaExceeded = false;
+  let quotaUsage: any;
+  let quotaMessage = '';
+  let predictCalls = 0;
+  const stop = () => quotaExceeded;
+
   const scanned = await mapPool(
     tickers,
     concurrency,
-    (ticker) => {
+    async (ticker) => {
+      if (quotaExceeded) {
+        return {
+          ticker,
+          name: ticker,
+          price: 0,
+          recommendation: 'HOLD' as RecommendationLabel,
+          currentAction: 'WAIT' as ZoneAction,
+          confidence: 0,
+          score: 0,
+          expectedReturn: 0,
+          why: 'Skipped — analysis credits exhausted mid-scan.',
+          tradeScore: -1e9,
+          isBuyCandidate: false,
+          error: 'quota_skipped',
+        };
+      }
       const key = normalizeTicker(ticker);
-      return scoutOne(ticker, horizon, fetchJson, knownByTicker[key] || null);
+      const known = knownByTicker[key] || null;
+      const needsPredict =
+        !(known?.score != null && Number.isFinite(Number(known.score))) &&
+        !parseRecommendationLabel(known?.recommendation);
+      try {
+        const c = await scoutOne(
+          ticker,
+          horizon,
+          fetchJson,
+          postPredict,
+          known,
+          opts.email,
+          opts.onHint
+        );
+        if (needsPredict && c.scoreSource === 'predict') predictCalls += 1;
+        return c;
+      } catch (err: any) {
+        if (err instanceof FindQuotaExceededError) {
+          quotaExceeded = true;
+          quotaUsage = err.usage;
+          quotaMessage = err.message;
+          if (err.usage) opts.onUsage?.(err.usage);
+          return {
+            ticker,
+            name: ticker,
+            price: 0,
+            recommendation: 'HOLD' as RecommendationLabel,
+            currentAction: 'WAIT' as ZoneAction,
+            confidence: 0,
+            score: 0,
+            expectedReturn: 0,
+            why: err.message,
+            tradeScore: -1e9,
+            isBuyCandidate: false,
+            error: 'quota_exceeded',
+          };
+        }
+        throw err;
+      }
     },
-    (done, ticker) => opts.onProgress?.({ done, total: tickers.length, current: String(ticker) })
+    (done, ticker) => opts.onProgress?.({ done, total: tickers.length, current: String(ticker) }),
+    stop
   );
 
-  // Recompute rank after known overrides
+  // Fill any slots never started after quota abort
+  for (let i = 0; i < scanned.length; i++) {
+    if (!scanned[i]) {
+      scanned[i] = {
+        ticker: tickers[i],
+        name: tickers[i],
+        price: 0,
+        recommendation: 'HOLD',
+        currentAction: 'WAIT',
+        confidence: 0,
+        score: 0,
+        expectedReturn: 0,
+        why: 'Skipped — analysis credits exhausted mid-scan.',
+        tradeScore: -1e9,
+        isBuyCandidate: false,
+        error: 'quota_skipped',
+      };
+    }
+  }
+
   for (const c of scanned) c.tradeScore = rankScore(c);
 
   const buyCandidates = scanned
     .filter((c) => c.isBuyCandidate)
     .sort((a, b) => b.tradeScore - a.tradeScore);
 
-  // Prefer live action BUY over WAIT when ranking top pick, but never hide WAIT thesis BUYs
   const actionable = buyCandidates.filter((c) => c.currentAction === 'BUY');
   const topPick = (actionable[0] || buyCandidates[0]) ?? null;
 
@@ -569,12 +656,20 @@ export async function findATrade(opts: {
         ? ` · Do now: ${topPick.currentAction}`
         : '';
 
+  const quotaNote = quotaExceeded ? ` · Scan stopped: analysis credits out.` : '';
+
   return {
     scanned,
     buyCandidates,
     topPick,
+    quotaExceeded,
+    usage: quotaUsage,
+    predictCalls,
     message: topPick
-      ? `Top trade: ${topPick.ticker} · ${topPick.recommendation}${waitOnly}`
-      : 'No BUY / STRONG BUY recommendation in this list. Try another paste list or market/theme.',
+      ? `Top trade: ${topPick.ticker} · Quantum ${topPick.recommendation} (${topPick.score})${waitOnly}${quotaNote}`
+      : quotaExceeded
+        ? quotaMessage ||
+          'No Quantum BUY found before analysis credits ran out. Reload credits and retry.'
+        : 'No Quantum AI Score BUY / STRONG BUY (70+) in this list. Try another paste list or market/theme.',
   };
 }

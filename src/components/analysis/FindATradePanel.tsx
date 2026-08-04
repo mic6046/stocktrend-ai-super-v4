@@ -13,6 +13,7 @@ import {
   type FindATradeProgress,
   type FindATradeResult,
 } from '../../lib/findATrade';
+import { persistQuantumHint } from '../../lib/quantumScoreCache';
 import {
   SUGGEST_MARKETS,
   SUGGEST_THEMES,
@@ -87,6 +88,12 @@ type FindATradePanelProps = {
   onOpenTicker: (ticker: string) => void;
   /** Open Recommendation card + predict-cache hints so scout matches BUY labels users already see. */
   knownByTicker?: Record<string, FindATradeKnownHint>;
+  /** Signed-in email — required to charge / reuse Quantum AI analysis credits. */
+  email?: string | null;
+  /** Return false to abort scout (e.g. out of analysis credits). */
+  onBeforeScan?: () => boolean;
+  onUsage?: (usage: any) => void;
+  onQuantumHint?: (hint: FindATradeKnownHint & { ticker: string }) => void;
   className?: string;
   compact?: boolean;
 };
@@ -95,6 +102,10 @@ export function FindATradePanel({
   horizon = '1M',
   onOpenTicker,
   knownByTicker,
+  email,
+  onBeforeScan,
+  onUsage,
+  onQuantumHint,
   className,
   compact = false,
 }: FindATradePanelProps) {
@@ -182,6 +193,10 @@ export function FindATradePanel({
 
   const runScout = async () => {
     if (scanning) return;
+    if (onBeforeScan && !onBeforeScan()) {
+      setError('Sign in and keep AI analysis credits available to run Find a Trade +.');
+      return;
+    }
 
     // If Market is specific but paste list is another region, force curated market list
     let tickers = parseTickerList(listText);
@@ -209,11 +224,20 @@ export function FindATradePanel({
       const out = await findATrade({
         tickers,
         horizon,
-        concurrency: 3,
+        concurrency: 2,
         knownByTicker,
+        email,
         onProgress: setProgress,
+        onUsage,
+        onHint: (hint) => {
+          persistQuantumHint(hint);
+          onQuantumHint?.(hint);
+        },
       });
       setResult(out);
+      if (out.quotaExceeded) {
+        setError(out.message);
+      }
     } catch (e: any) {
       setError(e?.message || 'Find a Trade + failed');
     } finally {
@@ -234,10 +258,11 @@ export function FindATradePanel({
       </SectionLabel>
 
       <p className="text-[11px] text-gray-400 leading-relaxed">
-        Changing <span className="text-emerald-300 font-semibold">Market / Theme</span> refreshes the Find
-        list to that curated universe. Use <span className="text-white/80">All markets</span> if you want a
-        custom mixed paste. Surfaces{' '}
-        <span className="text-emerald-300 font-semibold">BUY / STRONG BUY</span> (score 70+).
+        Filters by <span className="text-emerald-300 font-semibold">Quantum AI Score</span> only — same
+        score as the Recommendation card. Surfaces{' '}
+        <span className="text-emerald-300 font-semibold">BUY / STRONG BUY</span> when score ≥ 70. Unscored
+        names run full AI analysis (1 credit each; server cache free ~30m). Changing{' '}
+        <span className="text-white/80">Market / Theme</span> refreshes the curated list.
       </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -373,8 +398,8 @@ export function FindATradePanel({
                 <p className="text-[12px] text-amber-100 font-semibold">No trade found</p>
                 <p className="mt-1 text-[11px] text-gray-400 leading-relaxed">{result.message}</p>
                 <p className="mt-1 text-[10px] text-gray-500">
-                  Scout looks for horizon BUY / STRONG BUY (same label as the Recommendation card). Live WAIT
-                  still counts — it only means wait for a better entry, not “skip the name.”
+                  Scout requires Quantum AI Score BUY / STRONG BUY (70+), same as the Recommendation card.
+                  Live WAIT still counts — it only means wait for a better entry, not “skip the name.”
                 </p>
               </div>
             )}
@@ -400,7 +425,12 @@ export function FindATradePanel({
                 <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
                   {result.scanned.map((c) => (
                     <p key={`log-${c.ticker}`} className="text-[10px] font-mono text-gray-500">
-                      {c.ticker}: {c.error ? `ERR ${c.error}` : `${c.recommendation} · ${c.currentAction}`}
+                      {c.ticker}:{' '}
+                      {c.error
+                        ? `ERR ${c.error}`
+                        : `QAI ${c.score} · ${c.recommendation} · ${c.currentAction}${
+                            c.scoreSource ? ` · ${c.scoreSource}` : ''
+                          }`}
                     </p>
                   ))}
                 </div>
@@ -440,7 +470,7 @@ function TopPickCard({
           <p className="text-white">{pick.confidence}%</p>
         </div>
         <div className="rounded-lg bg-black/30 border border-white/8 px-2 py-1.5">
-          <p className="text-gray-500 uppercase text-[8px]">Score</p>
+          <p className="text-gray-500 uppercase text-[8px]">QAI</p>
           <p className="text-white">{pick.score}</p>
         </div>
         <div className="rounded-lg bg-black/30 border border-white/8 px-2 py-1.5">
@@ -479,7 +509,7 @@ function CandidateRow({
       <div className="min-w-0">
         <p className="text-[12px] font-bold text-white">{c.ticker}</p>
         <p className="text-[10px] text-gray-500 truncate">
-          {c.recommendation} · {c.currentAction}
+          {c.recommendation} · {c.currentAction} · QAI {c.score}
         </p>
       </div>
       <div className="text-right shrink-0 font-mono text-[10px]">

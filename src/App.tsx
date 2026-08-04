@@ -1392,6 +1392,7 @@ export default function App() {
   const [srStyle, setSrStyle] = useState<'Line' | 'Zone'>('Line');
   const [srLookback, setSrLookback] = useState<number>(100);
   const [predictCache, setPredictCache] = useState<Record<string, any>>({});
+  const [quantumHintEpoch, setQuantumHintEpoch] = useState(0);
   const [predicting, setPredicting] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [picks, setPicks] = useState<any[]>([]);
@@ -7192,6 +7193,7 @@ export default function App() {
     horizonView.currentPrice,
     aiStockScore,
     predictCache,
+    quantumHintEpoch,
   ]);
 
   // Keep Find a Trade aligned with the Recommendation card after every analysis
@@ -7740,6 +7742,13 @@ export default function App() {
               <FindATradePanel
                 horizon={analysisHorizon}
                 knownByTicker={findATradeKnownByTicker}
+                email={user?.email}
+                onBeforeScan={() => assertAnalysisCredits()}
+                onUsage={(snap) => {
+                  if (snap) setUsage(snap);
+                  else void refreshUsage();
+                }}
+                onQuantumHint={() => setQuantumHintEpoch((n) => n + 1)}
                 onOpenTicker={(sym) => {
                   if (!assertAnalysisCredits()) return;
                   setShowFindATrade(false);
