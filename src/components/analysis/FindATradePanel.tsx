@@ -289,7 +289,8 @@ export function FindATradePanel({
                 <p className="text-[12px] text-amber-100 font-semibold">No trade found</p>
                 <p className="mt-1 text-[11px] text-gray-400 leading-relaxed">{result.message}</p>
                 <p className="mt-1 text-[10px] text-gray-500">
-                  Try another paste list or market/theme, or wait for better setups.
+                  Scout looks for horizon BUY / STRONG BUY (same label as the Recommendation card). Live WAIT
+                  still counts — it only means wait for a better entry, not “skip the name.”
                 </p>
               </div>
             )}

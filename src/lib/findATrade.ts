@@ -1,6 +1,7 @@
 /**
  * Find a Trade — batch scout over user ticker lists using Consensus AI.
- * Only surfaces names that clear BUY / STRONG BUY with a constructive live action.
+ * Surfaces names whose horizon recommendation is BUY / STRONG BUY
+ * (matches the Recommendation card users see), then ranks by setup quality.
  */
 
 import { computeTechnicalIndicators } from './technical';
@@ -56,6 +57,44 @@ export function parseTickerList(input: string, max = FIND_A_TRADE_MAX): string[]
   return out;
 }
 
+function clamp(n: number, lo: number, hi: number) {
+  return Math.min(hi, Math.max(lo, n));
+}
+
+/** Technical-only Quantum-ish score so scout BUYs track chart analysis when full AI score is absent. */
+function scoutBaseScore(tech: any, px: number): number {
+  const ai = tech?.masterScores?.aiBuyScore;
+  if (ai != null && Number.isFinite(Number(ai))) return clamp(Math.round(Number(ai)), 1, 99);
+
+  let s = 58;
+  const rsi = tech?.indicators?.rsi;
+  if (rsi != null && Number.isFinite(rsi)) {
+    if (rsi < 32) s += 10;
+    else if (rsi < 45) s += 6;
+    else if (rsi > 72) s -= 12;
+    else if (rsi > 65) s -= 5;
+    else s += 3;
+  }
+  const macd = tech?.indicators?.macd;
+  if (macd != null) {
+    s += macd.macdLine > macd.signalLine ? 7 : -6;
+  }
+  if (tech?.indicators?.ema20 != null) s += px > tech.indicators.ema20 ? 5 : -5;
+  if (tech?.indicators?.sma50 != null) s += px > tech.indicators.sma50 ? 5 : -4;
+  const ad = tech?.quantumRefinement?.accumulationDistribution?.status;
+  if (ad === 'ACCUMULATION') s += 8;
+  if (ad === 'DISTRIBUTION') s -= 8;
+  const trend = tech?.quantumRefinement?.trendStrength?.status;
+  if (typeof trend === 'string') {
+    if (/strong|bull|up/i.test(trend)) s += 6;
+    if (/weak|bear|down/i.test(trend)) s -= 6;
+  }
+  const sm = tech?.quantumRefinement?.smartMoneyIndex?.status;
+  if (sm === 'BULLISH') s += 5;
+  if (sm === 'BEARISH') s -= 5;
+  return clamp(Math.round(s), 35, 92);
+}
+
 function roughLevels(closes: number[], px: number) {
   if (closes.length < 10) {
     return { s1: px * 0.97, s2: px * 0.94, r1: px * 1.03, r2: px * 1.06 };
@@ -97,8 +136,18 @@ async function mapPool<T, R>(
 
 function rankScore(c: FindATradeCandidate): number {
   if (!c.isBuyCandidate) return -1e9;
-  const actionBoost = c.currentAction === 'BUY' ? 18 : c.currentAction === 'WAIT' ? 4 : 0;
-  const recBoost = c.recommendation === 'STRONG BUY' ? 12 : c.recommendation === 'BUY' ? 8 : 0;
+  // Prefer live BUY-zone entries, but still rank WAIT/HOLD thesis BUYs highly
+  const actionBoost =
+    c.currentAction === 'BUY'
+      ? 18
+      : c.currentAction === 'WAIT'
+        ? 10
+        : c.currentAction === 'HOLD'
+          ? 6
+          : c.currentAction === 'AVOID NEW POSITION'
+            ? -8
+            : 0;
+  const recBoost = c.recommendation === 'STRONG BUY' ? 14 : c.recommendation === 'BUY' ? 10 : 0;
   return c.score * 0.35 + c.confidence * 0.3 + Math.max(0, c.expectedReturn) * 2.2 + actionBoost + recBoost;
 }
 
@@ -152,15 +201,21 @@ async function scoutOne(
           ? 30
           : 55;
     const smartMoneyScore = sm === 'BULLISH' ? 85 : sm === 'BEARISH' ? 35 : 50;
+    const baseScore = scoutBaseScore(tech, px);
+    // Horizon-scaled target so 1M/3M BUY can clear return + buy gates like the main card
+    const horizonLift = horizon === '1W' ? 0.03 : horizon === '1M' ? 0.06 : horizon === '3M' ? 0.1 : 0.16;
+    const bullLift = horizonLift * 1.7;
+    const bearLift = horizonLift * 0.9;
 
     const engine = runQuantumRecommendationEngine({
       horizon,
       currentPrice: px,
-      baseScore: tech?.masterScores?.aiBuyScore ?? 60,
-      baseConfidence: 65,
-      baseTarget: px * 1.06,
-      bullTarget: px * 1.12,
-      bearTarget: px * 0.92,
+      baseScore,
+      baseConfidence: clamp(Math.round(baseScore * 0.85 + 8), 45, 88),
+      baseTarget: px * (1 + horizonLift),
+      bullTarget: px * (1 + bullLift),
+      bearTarget: px * (1 - bearLift),
+      baseReturn: horizonLift * 100,
       technical: {
         rsi: tech?.indicators?.rsi ?? null,
         macdBullish:
@@ -201,10 +256,12 @@ async function scoutOne(
       ticker,
     });
 
+    // Match what the Recommendation card shows: horizon BUY/STRONG BUY is enough.
+    // Live zone action (BUY vs WAIT) only affects ranking, not eligibility —
+    // otherwise WAIT entries (common when price sits above the buy zone) were dropped
+    // even though the card still says BUY / No Position: BUY.
     const isBuyCandidate =
-      (engine.finalVerdict === 'BUY' || engine.finalVerdict === 'STRONG BUY') &&
-      (engine.currentAction.action === 'BUY' || engine.currentAction.action === 'WAIT') &&
-      engine.expectedReturn > 0;
+      engine.finalVerdict === 'BUY' || engine.finalVerdict === 'STRONG BUY';
 
     const candidate: FindATradeCandidate = {
       ticker: String(data?.ticker || ticker).toUpperCase(),
@@ -291,16 +348,23 @@ export async function findATrade(opts: {
     .filter((c) => c.isBuyCandidate)
     .sort((a, b) => b.tradeScore - a.tradeScore);
 
-  // Prefer live action BUY over WAIT when ranking top pick
+  // Prefer live action BUY over WAIT when ranking top pick, but never hide WAIT thesis BUYs
   const actionable = buyCandidates.filter((c) => c.currentAction === 'BUY');
   const topPick = (actionable[0] || buyCandidates[0]) ?? null;
+
+  const waitOnly =
+    topPick && topPick.currentAction !== 'BUY'
+      ? ` · Do now: ${topPick.currentAction} (entry timing — thesis is still ${topPick.recommendation})`
+      : topPick
+        ? ` · Do now: ${topPick.currentAction}`
+        : '';
 
   return {
     scanned,
     buyCandidates,
     topPick,
     message: topPick
-      ? `Top trade: ${topPick.ticker} · ${topPick.recommendation} · Do now: ${topPick.currentAction}`
-      : 'No BUY trade cleared Consensus gates in this list. Wait or refresh the universe.',
+      ? `Top trade: ${topPick.ticker} · ${topPick.recommendation}${waitOnly}`
+      : 'No BUY / STRONG BUY recommendation in this list. Try another paste list or market/theme.',
   };
 }
