@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Activity, Check, Gem, Loader2, Rocket } from 'lucide-react';
 import { AuthModal } from './AuthModal';
 import { LegalLinks } from './LegalDocs';
 import { openLegalDoc } from '../lib/legal';
 import { SignInNotAllowedError, useAuth } from '../lib/auth';
 import { PUBLIC_OVERAGES, PUBLIC_PLANS } from '../lib/pricingPlans';
+import { startStripeCheckout, type SubscriptionPlan } from '../lib/subscription';
 import { cn } from '../lib/utils';
 
 function GoogleIcon({ className }: { className?: string }) {
@@ -30,11 +31,25 @@ function GoogleIcon({ className }: { className?: string }) {
   );
 }
 
-/** Public front page — shown only before login. Dashboard never mounts here. */
-export function LandingPage() {
-  const { signInWithGoogle, clearAccessDenied } = useAuth();
+type LandingPageProps = {
+  /** When true, user is signed in and must pick Basic/Pro on this same page. */
+  subscribeMode?: boolean;
+};
+
+/** Single public page — hero + subscription plans. Dashboard never mounts here. */
+export function LandingPage({ subscribeMode = false }: LandingPageProps) {
+  const { user, signInWithGoogle, signOut, clearAccessDenied } = useAuth();
+  const awaitingPlan = subscribeMode || !!user;
   const [busy, setBusy] = useState(false);
+  const [busyPlan, setBusyPlan] = useState<SubscriptionPlan | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [acceptedLegal, setAcceptedLegal] = useState(false);
+
+  useEffect(() => {
+    if (!awaitingPlan) return;
+    const el = document.getElementById('plans');
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [awaitingPlan]);
 
   const handleGoogleSignIn = async () => {
     setError(null);
@@ -60,6 +75,43 @@ export function LandingPage() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const handleCheckout = async (plan: SubscriptionPlan) => {
+    if (!user?.email) {
+      setError('Please sign in with Google first.');
+      return;
+    }
+    if (!acceptedLegal) {
+      setError('Please confirm the Terms, Privacy Policy, and Risk Warning before checkout.');
+      return;
+    }
+    setError(null);
+    setBusyPlan(plan);
+    try {
+      const { url } = await startStripeCheckout(plan, user.email);
+      window.location.href = url;
+    } catch (err: any) {
+      setError(err?.message || 'Unable to start checkout.');
+      setBusyPlan(null);
+    }
+  };
+
+  const planCta = (planId: SubscriptionPlan, planName: string) => {
+    if (!awaitingPlan) {
+      return {
+        label: `Sign in to get ${planName}`,
+        disabled: busy,
+        onClick: handleGoogleSignIn,
+        spinning: false,
+      };
+    }
+    return {
+      label: busyPlan === planId ? 'Redirecting…' : `Subscribe · ${planName}`,
+      disabled: busyPlan !== null || !acceptedLegal,
+      onClick: () => handleCheckout(planId),
+      spinning: busyPlan === planId,
+    };
   };
 
   return (
@@ -91,20 +143,29 @@ export function LandingPage() {
           >
             Plans
           </a>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={handleGoogleSignIn}
-            className="rounded-xl bg-emerald-500 px-4 py-2 text-[11px] font-sans font-bold uppercase tracking-wide text-black hover:bg-emerald-400 cursor-pointer disabled:opacity-60"
-          >
-            Sign in
-          </button>
+          {awaitingPlan && user ? (
+            <button
+              type="button"
+              onClick={() => signOut()}
+              className="rounded-xl border border-white/10 px-4 py-2 text-[11px] font-sans font-bold uppercase tracking-wide text-gray-300 hover:bg-white/5 cursor-pointer"
+            >
+              Sign out
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={handleGoogleSignIn}
+              className="rounded-xl bg-emerald-500 px-4 py-2 text-[11px] font-sans font-bold uppercase tracking-wide text-black hover:bg-emerald-400 cursor-pointer disabled:opacity-60"
+            >
+              Sign in
+            </button>
+          )}
         </div>
       </header>
 
       <main className="relative z-10 flex-1 px-6 pb-16">
-        {/* Hero — one composition */}
-        <section className="min-h-[70vh] flex items-center justify-center">
+        <section className={cn('flex items-center justify-center', awaitingPlan ? 'min-h-[42vh]' : 'min-h-[70vh]')}>
           <div className="w-full max-w-lg text-center">
             <p className="text-[11px] font-mono uppercase tracking-[0.28em] text-emerald-400 mb-4">
               AI equity terminal
@@ -113,7 +174,9 @@ export function LandingPage() {
               Quantum<span className="text-emerald-500">Node</span>
             </h1>
             <p className="text-base sm:text-lg text-gray-400 font-sans leading-relaxed mb-6 max-w-md mx-auto">
-              Sign in to open your private dashboard. Charts, news, and AI analysis stay behind the gate.
+              {awaitingPlan
+                ? 'Choose Basic or Pro below to unlock your private dashboard.'
+                : 'Sign in to open your private dashboard. Charts, news, and AI analysis stay behind the gate.'}
             </p>
             <p className="mb-8 text-[11px] text-gray-500 leading-relaxed max-w-sm mx-auto">
               Analysis tool only — not financial advice.{' '}
@@ -132,22 +195,29 @@ export function LandingPage() {
               </p>
             )}
 
-            <button
-              type="button"
-              disabled={busy}
-              onClick={handleGoogleSignIn}
-              className="inline-flex w-full max-w-sm mx-auto items-center justify-center gap-3 rounded-xl bg-white px-5 py-3.5 text-sm font-bold text-gray-900 transition hover:bg-gray-100 cursor-pointer disabled:opacity-60"
-            >
-              {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <GoogleIcon className="h-5 w-5" />}
-              Continue with Google
-            </button>
-            <p className="mt-4 text-xs text-gray-600 font-sans">
-              After sign-in, choose Basic or Pro to unlock the dashboard.
-            </p>
+            {!awaitingPlan && (
+              <>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={handleGoogleSignIn}
+                  className="inline-flex w-full max-w-sm mx-auto items-center justify-center gap-3 rounded-xl bg-white px-5 py-3.5 text-sm font-bold text-gray-900 transition hover:bg-gray-100 cursor-pointer disabled:opacity-60"
+                >
+                  {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <GoogleIcon className="h-5 w-5" />}
+                  Continue with Google
+                </button>
+                <p className="mt-4 text-xs text-gray-600 font-sans">
+                  After sign-in, pick a plan on this same page.
+                </p>
+              </>
+            )}
+
+            {awaitingPlan && user?.email && (
+              <p className="text-xs font-mono text-gray-500">Signed in as {user.email}</p>
+            )}
           </div>
         </section>
 
-        {/* Subscription plans */}
         <section id="plans" className="mx-auto max-w-4xl pt-4 pb-8 scroll-mt-20">
           <div className="text-center mb-8">
             <p className="text-[10px] font-mono uppercase tracking-[0.25em] text-emerald-400 mb-2">
@@ -157,62 +227,119 @@ export function LandingPage() {
               Subscription plans
             </h2>
             <p className="mt-2 text-sm text-gray-400 max-w-lg mx-auto">
-              Clear daily AI limits. Sign in first, then subscribe on the next step.
+              {awaitingPlan
+                ? 'Accept the legal terms, then subscribe with Stripe.'
+                : 'Clear daily AI limits. Sign in first, then subscribe here — one page only.'}
             </p>
           </div>
 
-          <div className="grid gap-5 md:grid-cols-2">
-            {PUBLIC_PLANS.map((plan) => (
-              <div
-                key={plan.id}
-                className={cn(
-                  'rounded-2xl border bg-[#0c0c0e]/90 backdrop-blur-sm p-6 flex flex-col text-left',
-                  plan.highlight
-                    ? 'border-emerald-500/40 shadow-[0_0_36px_rgba(16,185,129,0.12)]'
-                    : 'border-white/10'
-                )}
-              >
-                <div className="mb-4 flex items-center gap-2">
-                  {plan.icon === 'gem' ? (
-                    <Gem className="h-4 w-4 text-emerald-400" />
-                  ) : (
-                    <Rocket className="h-4 w-4 text-sky-400" />
-                  )}
-                  <h3 className="text-lg font-bold text-white">{plan.name}</h3>
-                  {plan.badge && (
-                    <span className="ml-auto rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider text-emerald-400">
-                      {plan.badge}
-                    </span>
-                  )}
-                </div>
-                <div className="mb-2 flex items-baseline gap-1">
-                  <span className="text-4xl font-bold text-white">{plan.price}</span>
-                  <span className="text-sm text-gray-500">{plan.period}</span>
-                </div>
-                <p className="mb-5 text-sm text-gray-400">{plan.blurb}</p>
-                <ul className="mb-6 space-y-2 flex-1">
-                  {plan.features.map((f) => (
-                    <li key={f} className="flex items-start gap-2 text-sm text-gray-300">
-                      <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
-                      {f}
-                    </li>
-                  ))}
-                </ul>
+          {awaitingPlan && (
+            <label className="mb-6 flex items-start gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3 cursor-pointer max-w-4xl mx-auto">
+              <input
+                type="checkbox"
+                checked={acceptedLegal}
+                onChange={(e) => setAcceptedLegal(e.target.checked)}
+                className="mt-1 h-4 w-4 rounded border-white/20 bg-black accent-emerald-500 cursor-pointer"
+              />
+              <span className="text-xs text-gray-400 leading-relaxed text-left">
+                I agree to the{' '}
                 <button
                   type="button"
-                  disabled={busy}
-                  onClick={handleGoogleSignIn}
+                  className="text-emerald-400 hover:underline"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    openLegalDoc('terms');
+                  }}
+                >
+                  Terms of Use
+                </button>
+                ,{' '}
+                <button
+                  type="button"
+                  className="text-emerald-400 hover:underline"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    openLegalDoc('privacy');
+                  }}
+                >
+                  Privacy Policy
+                </button>
+                , and{' '}
+                <button
+                  type="button"
+                  className="text-emerald-400 hover:underline"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    openLegalDoc('risk');
+                  }}
+                >
+                  Risk Warning
+                </button>
+                . I understand Quantum Node is not a licensed financial adviser and that markets involve risk of
+                loss.
+              </span>
+            </label>
+          )}
+
+          <div className="grid gap-5 md:grid-cols-2">
+            {PUBLIC_PLANS.map((plan) => {
+              const cta = planCta(plan.id, plan.name);
+              return (
+                <div
+                  key={plan.id}
                   className={cn(
-                    'flex w-full items-center justify-center rounded-xl py-2.5 text-sm font-bold transition cursor-pointer disabled:opacity-60',
+                    'rounded-2xl border bg-[#0c0c0e]/90 backdrop-blur-sm p-6 flex flex-col text-left',
                     plan.highlight
-                      ? 'bg-emerald-500 text-black hover:bg-emerald-400'
-                      : 'border border-white/10 bg-white/5 text-white hover:bg-white/10'
+                      ? 'border-emerald-500/40 shadow-[0_0_36px_rgba(16,185,129,0.12)]'
+                      : 'border-white/10'
                   )}
                 >
-                  Sign in to get {plan.name}
-                </button>
-              </div>
-            ))}
+                  <div className="mb-4 flex items-center gap-2">
+                    {plan.icon === 'gem' ? (
+                      <Gem className="h-4 w-4 text-emerald-400" />
+                    ) : (
+                      <Rocket className="h-4 w-4 text-sky-400" />
+                    )}
+                    <h3 className="text-lg font-bold text-white">{plan.name}</h3>
+                    {plan.badge && (
+                      <span className="ml-auto rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider text-emerald-400">
+                        {plan.badge}
+                      </span>
+                    )}
+                  </div>
+                  <div className="mb-2 flex items-baseline gap-1">
+                    <span className="text-4xl font-bold text-white">{plan.price}</span>
+                    <span className="text-sm text-gray-500">{plan.period}</span>
+                  </div>
+                  <p className="mb-5 text-sm text-gray-400">{plan.blurb}</p>
+                  <ul className="mb-6 space-y-2 flex-1">
+                    {plan.features.map((f) => (
+                      <li key={f} className="flex items-start gap-2 text-sm text-gray-300">
+                        <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
+                        {f}
+                      </li>
+                    ))}
+                  </ul>
+                  <button
+                    type="button"
+                    disabled={cta.disabled}
+                    onClick={cta.onClick}
+                    className={cn(
+                      'flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-bold transition cursor-pointer disabled:opacity-60',
+                      plan.highlight
+                        ? 'bg-emerald-500 text-black hover:bg-emerald-400'
+                        : 'border border-white/10 bg-white/5 text-white hover:bg-white/10'
+                    )}
+                  >
+                    {cta.spinning && <Loader2 className="h-4 w-4 animate-spin" />}
+                    {cta.label}
+                  </button>
+                </div>
+              );
+            })}
           </div>
 
           <div className="mt-6 rounded-2xl border border-white/10 bg-[#0c0c0e]/80 px-5 py-4">
@@ -241,7 +368,6 @@ export function LandingPage() {
         <LegalLinks />
       </footer>
 
-      {/* Access-denied overlay only — no second login gate on load */}
       <AuthModal open={false} onClose={() => undefined} />
     </div>
   );
