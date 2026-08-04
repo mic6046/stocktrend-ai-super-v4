@@ -907,62 +907,209 @@ function fairTargetPrice(input: QuantumEngineInput, netWeight: number): number {
   return round2(px * (1 + move));
 }
 
-function buildZones(
+function atrAbsolute(
   px: number,
-  target: number,
-  rec: RecommendationLabel,
-  levels: QuantumEngineInput['levels'],
-  stopHint: number | null | undefined,
-  vol: number | null
-) {
+  atrPct: number | null | undefined,
+  vol: number | null | undefined
+): number {
+  if (atrPct != null && Number.isFinite(atrPct) && atrPct > 0) {
+    return Math.max(px * 0.004, (atrPct / 100) * px);
+  }
+  // Annualized vol → approximate daily ATR as % of price
+  const v = vol != null && Number.isFinite(vol) && vol > 0 ? vol : 22;
+  return Math.max(px * 0.004, px * (v / 100) / Math.sqrt(252));
+}
+
+function buyWidthBounds(horizon: HorizonKey): { minPct: number; maxPct: number; atrMult: number } {
+  switch (horizon) {
+    case '1W':
+      return { minPct: 0.03, maxPct: 0.05, atrMult: 1.15 };
+    case '1M':
+      return { minPct: 0.03, maxPct: 0.08, atrMult: 1.55 };
+    case '3M':
+      return { minPct: 0.04, maxPct: 0.08, atrMult: 1.85 };
+    case '1Y':
+    default:
+      return { minPct: 0.05, maxPct: 0.08, atrMult: 2.1 };
+  }
+}
+
+type ZoneBuildOpts = {
+  px: number;
+  target: number;
+  rec: RecommendationLabel;
+  levels: QuantumEngineInput['levels'];
+  stopHint?: number | null;
+  vol?: number | null;
+  horizon?: HorizonKey;
+  atrPct?: number | null;
+  institutionalScore?: number | null;
+  whaleScore?: number | null;
+  smartMoneyScore?: number | null;
+  trend?: string | null;
+  emaBias?: 'bull' | 'bear' | 'neutral' | null;
+  bollingerBias?: 'oversold' | 'overbought' | 'mid' | null;
+};
+
+/**
+ * Trade Management Zones — Buy Zone is the optimal accumulation pocket
+ * (support + ATR + structure), typically 3–8% wide for 1M.
+ * NOT a broad band from stop-loss up to spot.
+ */
+function buildZones(opts: ZoneBuildOpts) {
+  const {
+    px,
+    target,
+    rec,
+    levels,
+    stopHint,
+    vol,
+    horizon = '1M',
+    atrPct,
+    institutionalScore,
+    whaleScore,
+    smartMoneyScore,
+    trend,
+    emaBias,
+    bollingerBias,
+  } = opts;
+
   /**
-   * Strict non-overlapping ascending ladder (Step 8):
-   * STOP < BUY.max < ADD.min < ADD.max < HOLD.min < HOLD.max < TP.min < TP.max < REDUCE.min < REDUCE.max < EXIT.min
+   * Strict non-overlapping ascending ladder:
+   * STOP < BUY.max < ADD.min < ADD.max < WAIT/HOLD.min < … < TP < REDUCE < EXIT
    */
   const eps = Math.max(round2(px * 0.0008), 0.01);
-  const band = Math.max(px * 0.006, ((vol ?? 22) / 100 / Math.sqrt(252)) * px * 2.5);
-  const s2 = levels?.s2 && Number.isFinite(levels.s2) ? levels.s2 : px * 0.94;
-  const s1 = levels?.s1 && Number.isFinite(levels.s1) ? levels.s1 : px * 0.97;
-  const r1 = levels?.r1 && Number.isFinite(levels.r1) ? levels.r1 : px * 1.03;
-  const r2 = levels?.r2 && Number.isFinite(levels.r2) ? levels.r2 : px * 1.07;
+  const atr = atrAbsolute(px, atrPct, vol);
+  const { minPct, maxPct, atrMult } = buyWidthBounds(horizon);
+
+  const s2Raw = levels?.s2 && Number.isFinite(levels.s2) ? Number(levels.s2) : null;
+  const s1Raw = levels?.s1 && Number.isFinite(levels.s1) ? Number(levels.s1) : null;
+  const r1 = levels?.r1 && Number.isFinite(levels.r1) ? Number(levels.r1) : px * 1.03;
+  const r2 = levels?.r2 && Number.isFinite(levels.r2) ? Number(levels.r2) : px * 1.07;
+
+  const s1 =
+    s1Raw != null && s1Raw > px * 0.88 && s1Raw < px * 0.998 ? s1Raw : null;
+  const s2 =
+    s2Raw != null && s2Raw > px * 0.8 && s2Raw < px * 0.98 ? s2Raw : null;
+
   const bullish = rec === 'STRONG BUY' || rec === 'BUY';
   const bearish = rec === 'SELL' || rec === 'AVOID NEW POSITION' || rec === 'REDUCE';
 
+  // Accumulation bias from institutional / whale / smart money (0–100 → −0.5…+0.5)
+  const flowScore = meanFinite([
+    institutionalScore,
+    whaleScore,
+    smartMoneyScore,
+  ]);
+  const accumBias = clamp(((flowScore ?? 55) - 50) / 100, -0.45, 0.45);
+
+  // --- Buy zone width: ATR-based, clamped to 3–8% (horizon-aware) ---
+  let buyWidth = atr * atrMult;
+  // Higher vol → slightly wider, but never beyond maxPct
+  const volFactor = clamp((vol ?? 22) / 22, 0.85, 1.25);
+  buyWidth *= volFactor;
+  buyWidth = clamp(buyWidth, px * minPct, px * maxPct);
+
+  // --- Structure anchor: recent support / pullback pocket (not the stop) ---
+  // Strong inflow / oversold → shallower dip OK; weak flow → deeper support.
+  const pullbackAtrs = clamp(1.05 - accumBias * 0.55, 0.55, 1.45);
+  let structureAnchor = px - atr * pullbackAtrs;
+  if (s1 != null) {
+    // Blend chart support with ATR pullback — prefer s1 when it is a real nearby shelf
+    structureAnchor = s1 * 0.72 + structureAnchor * 0.28;
+  }
+  if (bollingerBias === 'oversold') structureAnchor = Math.max(structureAnchor, px - atr * 0.7);
+  if (bollingerBias === 'overbought') structureAnchor = Math.min(structureAnchor, px - atr * 1.15);
+  if (emaBias === 'bull' && trend && /STRONG|UPTREND|BULL/i.test(String(trend))) {
+    structureAnchor = Math.max(structureAnchor, px - atr * (0.85 - accumBias * 0.2));
+  }
+  // Keep anchor below spot — buy zone is accumulation, not chase
+  structureAnchor = clamp(structureAnchor, px * 0.9, px - eps * 2);
+
+  // Place narrow band around structure: mostly below spot, hi capped under last
+  let buyHi = Math.min(structureAnchor + buyWidth * 0.4, px * 0.992, px - eps);
+  let buyLo = buyHi - buyWidth;
+  if (buyLo >= buyHi) {
+    buyHi = round2(px * 0.99);
+    buyLo = round2(buyHi - buyWidth);
+  }
+  // If still too close to spot on a deep selloff name, pin to support shelf
+  if (s1 != null && buyHi < s1 * 0.97) {
+    buyHi = Math.min(s1 + buyWidth * 0.35, px * 0.992);
+    buyLo = buyHi - buyWidth;
+  }
+  buyLo = round2(Math.max(buyLo, px * 0.88));
+  buyHi = round2(Math.max(buyHi, buyLo + px * minPct * 0.85));
+  // Re-clamp width to max after repairs
+  if (buyHi - buyLo > px * maxPct) {
+    buyLo = round2(buyHi - px * maxPct);
+  }
+  if (buyHi - buyLo < px * minPct * 0.9) {
+    buyLo = round2(buyHi - px * minPct);
+  }
+
+  // --- Stop: outside Buy Zone (structure failure / ATR), never inside ---
+  const stopCushion = Math.max(eps, atr * 0.4, px * 0.008);
+  let stop =
+    stopHint != null && Number.isFinite(stopHint)
+      ? Number(stopHint)
+      : s2 != null
+        ? Math.min(s2, buyLo - stopCushion)
+        : buyLo - atr * 1.05;
+  stop = Math.min(stop, buyLo - stopCushion);
+  if (!(stop < buyLo)) stop = buyLo - stopCushion;
+  // Floor: don't place absurd stops for 1M (beyond ~12% unless s2 demands)
+  const stopFloor = px * (horizon === '1W' ? 0.94 : horizon === '1M' ? 0.9 : 0.86);
+  if (stop < stopFloor && (s2 == null || s2 >= stopFloor)) {
+    stop = Math.min(stopFloor, buyLo - stopCushion);
+  }
+  stop = round2(stop);
+
+  // Ensure buy still above stop after stop floor adjustments
+  if (!(stop < buyLo)) {
+    buyLo = round2(stop + stopCushion);
+    buyHi = round2(Math.max(buyHi, buyLo + px * minPct));
+    if (buyHi - buyLo > px * maxPct) buyHi = round2(buyLo + px * maxPct);
+    if (buyHi >= px) {
+      buyHi = round2(px - eps);
+      buyLo = round2(Math.min(buyLo, buyHi - px * minPct));
+      stop = round2(Math.min(stop, buyLo - stopCushion));
+    }
+  }
+
   // Primary target for take-profit midpoint
-  let tpAnchor = bullish ? Math.max(target, r1, px * 1.02) : bearish ? Math.min(Math.max(target, px * 0.99), r1) : Math.max(target, px * 1.015);
+  let tpAnchor = bullish
+    ? Math.max(target, r1, px * 1.02)
+    : bearish
+      ? Math.min(Math.max(target, px * 0.99), r1)
+      : Math.max(target, px * 1.015);
   if (!(tpAnchor > px)) tpAnchor = px * (bullish ? 1.04 : 1.02);
 
-  let stop =
-    stopHint != null && Number.isFinite(stopHint) ? Math.min(stopHint, Math.min(s2, px) * 0.995) : Math.min(s2, px * 0.94) * 0.99;
-  if (!(stop < px * 0.999)) stop = px * 0.94;
+  // Step band for non-buy zones (smaller than old "band from stop")
+  const step = Math.max(px * 0.008, atr * 0.65, (buyHi - buyLo) * 0.35);
 
-  // Build contiguous non-overlapping steps from stop upward
-  let buyLo = round2(stop + eps);
-  let buyHi = round2(Math.min(Math.max(s1, buyLo + band), px * 0.995));
-  if (buyHi <= buyLo) buyHi = round2(buyLo + band);
-
+  // ADD: thin scale-in shelf just above Buy — not a second wide buy band
   let addLo = round2(buyHi + eps);
-  let addHi = round2(Math.max(addLo + band * 0.7, Math.min(px * 0.998, (addLo + px) / 2)));
-  if (addHi <= addLo) addHi = round2(addLo + band * 0.7);
+  let addHi = round2(addLo + clamp(buyWidth * 0.4, px * 0.012, px * 0.028));
+  if (addHi <= addLo) addHi = round2(addLo + step * 0.5);
 
+  // WAIT / HOLD: clearly separated — begins above ADD (chase region / hold region)
   let holdLo = round2(addHi + eps);
-  let holdHi = round2(Math.max(holdLo + band, Math.min(Math.max(r1, px * 1.005), tpAnchor * 0.97)));
-  if (holdHi <= holdLo) holdHi = round2(holdLo + band);
+  let holdHi = round2(
+    Math.max(holdLo + step, Math.min(Math.max(r1, px * 1.008), tpAnchor * 0.97))
+  );
+  if (holdHi <= holdLo) holdHi = round2(holdLo + step);
 
   let tpLo = round2(holdHi + eps);
-  let tpHi = round2(Math.max(tpLo + band, tpAnchor));
-  if (tpHi <= tpLo) tpHi = round2(tpLo + band);
+  let tpHi = round2(Math.max(tpLo + step, tpAnchor));
+  if (tpHi <= tpLo) tpHi = round2(tpLo + step);
 
   let reduceLo = round2(tpHi + eps);
-  let reduceHi = round2(Math.max(reduceLo + band * 0.6, Math.max(r2, tpHi * 1.015)));
-  if (reduceHi <= reduceLo) reduceHi = round2(reduceLo + band * 0.6);
+  let reduceHi = round2(Math.max(reduceLo + step * 0.6, Math.max(r2, tpHi * 1.015)));
+  if (reduceHi <= reduceLo) reduceHi = round2(reduceLo + step * 0.6);
 
   let exitLo = round2(reduceHi + eps);
-  let exitHi = round2(exitLo + band);
-
-  // Ensure stop strictly below buy
-  stop = round2(Math.min(stop, buyLo - eps));
-  if (!(stop < buyLo)) stop = round2(buyLo - eps);
+  let exitHi = round2(exitLo + step);
 
   // Soft repair pass if any inversion slipped through
   const steps = [
@@ -974,10 +1121,10 @@ function buildZones(
     { lo: exitLo, hi: exitHi },
   ];
   for (let i = 0; i < steps.length; i++) {
-    if (steps[i].hi <= steps[i].lo) steps[i].hi = round2(steps[i].lo + band * 0.5);
+    if (steps[i].hi <= steps[i].lo) steps[i].hi = round2(steps[i].lo + step * 0.5);
     if (i > 0 && !(steps[i - 1].hi + eps <= steps[i].lo + 1e-9)) {
       steps[i].lo = round2(steps[i - 1].hi + eps);
-      if (steps[i].hi <= steps[i].lo) steps[i].hi = round2(steps[i].lo + band * 0.5);
+      if (steps[i].hi <= steps[i].lo) steps[i].hi = round2(steps[i].lo + step * 0.5);
     }
   }
   [buyLo, buyHi] = [steps[0].lo, steps[0].hi];
@@ -986,7 +1133,8 @@ function buildZones(
   [tpLo, tpHi] = [steps[3].lo, steps[3].hi];
   [reduceLo, reduceHi] = [steps[4].lo, steps[4].hi];
   [exitLo, exitHi] = [steps[5].lo, steps[5].hi];
-  stop = round2(Math.min(stop, buyLo - eps));
+  stop = round2(Math.min(stop, buyLo - stopCushion));
+  if (!(stop < buyLo)) stop = round2(buyLo - stopCushion);
 
   return {
     buyZone: { lo: round2(buyLo), hi: round2(buyHi) },
@@ -998,6 +1146,12 @@ function buildZones(
     stopLoss: round2(stop),
     takeProfit: round2(tpHi),
   };
+}
+
+function meanFinite(vals: Array<number | null | undefined>): number | null {
+  const xs = vals.filter((v): v is number => v != null && Number.isFinite(v));
+  if (!xs.length) return null;
+  return xs.reduce((a, b) => a + b, 0) / xs.length;
 }
 
 function zonesAreConsistent(z: ReturnType<typeof buildZones>): boolean {
@@ -1141,7 +1295,7 @@ function resolveLiveAction(
     }
     return {
       action: 'BUY',
-      reason: 'Price is in the BUY zone — best entry for a new position. ADD POSITION is hidden because you do not own the stock.',
+      reason: 'Price is in the BUY zone — optimal accumulation pocket for a new position. ADD POSITION is hidden because you do not own the stock.',
       confidence: conf,
       zoneKey: 'buy',
     };
@@ -1606,11 +1760,32 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
       api.vol ??
       (input.horizon === '1W' ? 26 : input.horizon === '1Y' ? 17 : 21);
     const risk = riskFromVolatility(vol, input.horizon);
-    let zones = buildZones(px, target, rec, input.levels, input.stopLossHint, vol);
-    // Auto-repair overlapping zones up to 3 times
+    const zoneOpts = {
+      px,
+      target,
+      rec,
+      levels: input.levels,
+      stopHint: input.stopLossHint,
+      vol,
+      horizon: input.horizon,
+      atrPct: input.technical?.atrPct,
+      institutionalScore: input.institutionalScore,
+      whaleScore: input.whaleScore,
+      smartMoneyScore: input.smartMoneyScore,
+      trend: input.technical?.trend,
+      emaBias: input.technical?.emaBias,
+      bollingerBias: input.technical?.bollingerBias,
+    };
+    let zones = buildZones(zoneOpts);
+    // Auto-repair overlapping zones up to 3 times (nudge target / stop, keep Buy width logic)
     for (let zAttempt = 0; zAttempt < 3 && !zonesAreConsistent(zones); zAttempt++) {
       const widen = 1 + zAttempt * 0.015;
-      zones = buildZones(px, target * widen, rec, input.levels, zones.stopLoss * (1 - zAttempt * 0.002), (vol ?? 22) * widen);
+      zones = buildZones({
+        ...zoneOpts,
+        target: target * widen,
+        stopHint: zones.stopLoss * (1 - zAttempt * 0.002),
+        vol: (vol ?? 22) * widen,
+      });
     }
     const zonesConsistent = zonesAreConsistent(zones);
     const targets = buildTargets(px, target, rec, input.levels);

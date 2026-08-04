@@ -45,6 +45,10 @@ function scaleFromSpot(px: number, level: number, scale: number) {
   return px + (level - px) * scale;
 }
 
+function clamp(n: number, lo: number, hi: number) {
+  return Math.min(hi, Math.max(lo, n));
+}
+
 function formatRange(lo: number, hi: number, currency?: string) {
   return `${formatMoney(Math.min(lo, hi), currency)} – ${formatMoney(Math.max(lo, hi), currency)}`;
 }
@@ -130,8 +134,17 @@ export function TradeZonesPanel({
             : s2 * 0.98;
 
       const eps = Math.max(px * 0.0008, 0.01);
-      buy = { lo: Math.min(s2, s1), hi: Math.max(s2, s1) };
-      add = { lo: buy.hi + eps, hi: buy.hi + eps + Math.max(px * 0.01, (px - buy.hi) * 0.4) };
+      // Fallback: narrow accumulation near s1 (≈3–8%), stop below — not s2→s1 full span
+      const atrGuess = px * 0.02;
+      let buyHi = Math.min(Math.max(s1, px - atrGuess * 0.6), px * 0.992);
+      let buyLo = Math.max(buyHi - clamp(atrGuess * 1.5, px * 0.03, px * 0.08), px * 0.9);
+      if (buyHi <= buyLo) {
+        buyHi = px * 0.99;
+        buyLo = buyHi - px * 0.04;
+      }
+      buy = { lo: buyLo, hi: buyHi };
+      if (!(sl < buy.lo)) sl = buy.lo - Math.max(eps, px * 0.01);
+      add = { lo: buy.hi + eps, hi: buy.hi + eps + Math.max(px * 0.012, (px - buy.hi) * 0.25) };
       hold = { lo: add.hi + eps, hi: Math.max(add.hi + eps + px * 0.01, Math.min(r1, px * 1.02)) };
       takeProfit = { lo: hold.hi + eps, hi: Math.max(hold.hi + eps + px * 0.01, tpHi) };
       reduce = { lo: takeProfit.hi + eps, hi: takeProfit.hi + eps + px * 0.012 };
@@ -168,8 +181,8 @@ export function TradeZonesPanel({
         key: 'buy' as const,
         emoji: '🟢',
         title: 'BUY ZONE',
-        subtitle: 'Best entry for a new position',
-        detail: null as string | null,
+        subtitle: 'Optimal accumulation pocket (support + ATR)',
+        detail: 'High-probability entry — not every price below spot.',
         price: formatRange(buy.lo, buy.hi, currency),
         className: 'border-emerald-500/35 bg-emerald-500/10',
         titleClass: 'text-emerald-300',
@@ -188,8 +201,10 @@ export function TradeZonesPanel({
         key: 'hold' as const,
         emoji: '🟡',
         title: userHasPosition ? 'HOLD' : 'WAIT',
-        subtitle: userHasPosition ? 'No action required.' : 'Wait for a better entry — do not chase.',
-        detail: userHasPosition ? 'Continue holding existing position.' : 'Prefer BUY zone before opening.',
+        subtitle: userHasPosition ? 'No action required.' : 'Above Buy Zone — wait for the accumulation pocket.',
+        detail: userHasPosition
+          ? 'Continue holding existing position.'
+          : 'Do not chase. Prefer a dip into BUY ZONE before opening.',
         price: formatRange(hold.lo, hold.hi, currency),
         className: 'border-amber-500/35 bg-amber-500/10',
         titleClass: 'text-amber-300',
