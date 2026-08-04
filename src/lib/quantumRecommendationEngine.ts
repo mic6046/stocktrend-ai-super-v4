@@ -6,6 +6,7 @@
 
 import type { HorizonKey } from '../components/analysis/analysisTheme';
 import { HORIZON_OPTIONS } from '../components/analysis/analysisTheme';
+import { doNowFromRecommendation, type DoNowAudienceBrief } from './doNowActions';
 
 export type RecommendationLabel =
   | 'STRONG BUY'
@@ -182,6 +183,8 @@ export type QuantumEngineOutput = {
   zoneScale: number;
   userHasPosition: boolean;
   currentAction: LiveActionBrief;
+  /** Dual-audience DO NOW derived from final recommendation (holding vs no position). */
+  doNowActions: DoNowAudienceBrief;
   /** Zones shown for this position state (no contradictory actions) */
   visibleZoneKeys: Array<'buy' | 'add' | 'hold' | 'takeProfit' | 'reduce' | 'exit' | 'stop'>;
   zonesConsistent: boolean;
@@ -1483,6 +1486,7 @@ function emptyOutput(horizon: HorizonKey, horizonLabel: string, input: QuantumEn
       confidence: 40,
       zoneKey: 'hold',
     },
+    doNowActions: doNowFromRecommendation('HOLD'),
     visibleZoneKeys: visibleZonesFor(hasPos),
     zonesConsistent: false,
     keyReasons: ['Awaiting price data'],
@@ -1682,6 +1686,7 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
       zoneScale,
       userHasPosition,
       currentAction,
+      doNowActions: doNowFromRecommendation(rec),
       visibleZoneKeys,
       zonesConsistent,
       keyReasons,
@@ -1727,6 +1732,7 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
     last.expectedReturn = round2(((last.targetPrice - last.currentPrice) / last.currentPrice) * 100);
     last.finalVerdict = last.ratingLabel;
     last.chartStance = chartStanceFromRecommendation(last.ratingLabel);
+    last.doNowActions = doNowFromRecommendation(last.ratingLabel);
     last.supportFailureProbability = 100 - last.supportHoldProbability;
     last.resistanceRejectionProbability = 100 - last.resistanceBreakProbability;
     last.validationStatus = validate(last) ? '✓ Internal Consistency Passed' : '✗ Recalculate';
