@@ -146,6 +146,41 @@ export function resolveStatusVisual(label: string): StatusVisual {
       dot: 'bg-cyan-400',
     };
   }
+  if (s.includes('overheat level 1') || s.includes('overheat l1') || (s.includes('mild') && s.includes('overheat'))) {
+    return {
+      icon: '🟡',
+      text: 'text-orange-400',
+      bg: 'bg-orange-500/10',
+      border: 'border-orange-500/30',
+      glow: 'shadow-[0_0_16px_rgba(251,146,60,0.12)]',
+      dot: 'bg-orange-400',
+    };
+  }
+  if (s.includes('overheat level 2') || s.includes('overheat l2') || (s.includes('elevated') && s.includes('overheat'))) {
+    return {
+      icon: '🟠',
+      text: 'text-orange-500',
+      bg: 'bg-orange-600/15',
+      border: 'border-orange-500/40',
+      glow: 'shadow-[0_0_18px_rgba(249,115,22,0.16)]',
+      dot: 'bg-orange-500',
+    };
+  }
+  if (
+    s.includes('overheat level 3') ||
+    s.includes('overheat l3') ||
+    s.includes('max overheat') ||
+    (s.includes('overheat') && s.includes('max'))
+  ) {
+    return {
+      icon: '🔴',
+      text: 'text-rose-400',
+      bg: 'bg-rose-500/15',
+      border: 'border-rose-500/45',
+      glow: 'shadow-[0_0_22px_rgba(244,63,94,0.2)]',
+      dot: 'bg-rose-400',
+    };
+  }
   if (s.includes('slightly') || s === 'reduce') {
     return {
       icon: '🟡',
@@ -166,7 +201,7 @@ export function resolveStatusVisual(label: string): StatusVisual {
       dot: 'bg-red-700',
     };
   }
-  if (s === 'sell' || s.includes('overvalued')) {
+  if (s === 'sell' || s.includes('overvalued') || s.includes('overheat')) {
     return {
       icon: '🔴',
       text: 'text-rose-400',

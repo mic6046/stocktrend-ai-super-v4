@@ -35,12 +35,17 @@ export type ValuationPoint = {
 
 type RangeKey = '1M' | '3M' | '6M' | '1Y' | '3Y' | '5Y' | '10Y' | 'MAX';
 
+/** Valuation heat — overheat levels 1–3 (3 = max). */
 type ValuationStatus =
   | 'Deeply Undervalued'
   | 'Undervalued'
   | 'Fair Value'
-  | 'Slightly Overvalued'
-  | 'Overvalued';
+  | 'Overheat Level 1'
+  | 'Overheat Level 2'
+  | 'Overheat Level 3';
+
+/** 0 = cool / fair; 1–3 = overheat intensity (3 = max). */
+type OverheatLevel = 0 | 1 | 2 | 3;
 
 type RecommendationAction = 'Strong Buy' | 'Buy' | 'Hold' | 'Reduce' | 'Sell';
 
@@ -98,14 +103,63 @@ function percentileRank(sortedAsc: number[], value: number): number {
   return Math.round((below / sortedAsc.length) * 100);
 }
 
-/** Single source of truth: Current Position % → status */
+/** Single source of truth: historical percentile → valuation / overheat status */
 function statusFromPercentile(percentile: number): ValuationStatus {
   const p = Math.min(100, Math.max(0, percentile));
   if (p < 20) return 'Deeply Undervalued';
   if (p < 40) return 'Undervalued';
   if (p < 60) return 'Fair Value';
-  if (p < 80) return 'Slightly Overvalued';
-  return 'Overvalued';
+  if (p < 75) return 'Overheat Level 1';
+  if (p < 90) return 'Overheat Level 2';
+  return 'Overheat Level 3';
+}
+
+function overheatLevelFromStatus(status: ValuationStatus): OverheatLevel {
+  if (status === 'Overheat Level 1') return 1;
+  if (status === 'Overheat Level 2') return 2;
+  if (status === 'Overheat Level 3') return 3;
+  return 0;
+}
+
+function overheatMeta(level: OverheatLevel): {
+  short: string;
+  severity: string;
+  warningTitle: string;
+  warningBody: string;
+} {
+  switch (level) {
+    case 1:
+      return {
+        short: 'L1 Mild',
+        severity: 'Mild overheat',
+        warningTitle: 'Overheat Warning · Level 1 of 3',
+        warningBody:
+          'Multiples are modestly rich versus this stock’s own history. Momentum can still work, but new size should wait for a cooler entry.',
+      };
+    case 2:
+      return {
+        short: 'L2 Elevated',
+        severity: 'Elevated overheat',
+        warningTitle: 'Overheat Warning · Level 2 of 3',
+        warningBody:
+          'Valuation is stretched into the upper historical band. Upside is less reliable — prefer holding or trimming rather than chasing.',
+      };
+    case 3:
+      return {
+        short: 'L3 Max',
+        severity: 'Maximum overheat',
+        warningTitle: 'Overheat Warning · Level 3 of 3 (Max)',
+        warningBody:
+          'PE sits near the hottest historical extremes. This is the strongest valuation caution — wait for mean reversion before adding risk.',
+      };
+    default:
+      return {
+        short: 'Cool',
+        severity: 'No overheat',
+        warningTitle: 'Valuation Cool',
+        warningBody: 'Multiples are not in an overheat band relative to this stock’s own history.',
+      };
+  }
 }
 
 function statusTone(status: ValuationStatus) {
@@ -119,6 +173,7 @@ function statusTone(status: ValuationStatus) {
       icon: '🟢',
       label: 'Deeply Undervalued',
       badge: '🟢 Deeply Undervalued',
+      subtitle: 'Deep discount vs history',
     };
   }
   if (status === 'Undervalued') {
@@ -131,9 +186,10 @@ function statusTone(status: ValuationStatus) {
       icon: '🟢',
       label: 'Undervalued',
       badge: '🟢 Undervalued',
+      subtitle: 'Attractive vs history',
     };
   }
-  if (status === 'Slightly Overvalued') {
+  if (status === 'Overheat Level 1') {
     return {
       text: 'text-orange-400',
       bg: 'bg-orange-500/10',
@@ -141,20 +197,35 @@ function statusTone(status: ValuationStatus) {
       dot: 'bg-orange-400',
       gauge: '#fb923c',
       icon: '🟡',
-      label: 'Slightly Overvalued',
-      badge: '🟡 Slightly Overvalued',
+      label: 'Overheat Level 1',
+      badge: '🟡 Overheat L1 · Mild',
+      subtitle: 'Mild overheat — wait for a better entry',
     };
   }
-  if (status === 'Overvalued') {
+  if (status === 'Overheat Level 2') {
+    return {
+      text: 'text-orange-500',
+      bg: 'bg-orange-600/15',
+      border: 'border-orange-500/40',
+      dot: 'bg-orange-500',
+      gauge: '#f97316',
+      icon: '🟠',
+      label: 'Overheat Level 2',
+      badge: '🟠 Overheat L2 · Elevated',
+      subtitle: 'Elevated overheat — avoid chasing',
+    };
+  }
+  if (status === 'Overheat Level 3') {
     return {
       text: 'text-rose-400',
-      bg: 'bg-rose-500/10',
-      border: 'border-rose-500/30',
+      bg: 'bg-rose-500/15',
+      border: 'border-rose-500/45',
       dot: 'bg-rose-400',
       gauge: '#f43f5e',
       icon: '🔴',
-      label: 'Overvalued',
-      badge: '🔴 Overvalued',
+      label: 'Overheat Level 3',
+      badge: '🔴 Overheat L3 · Max',
+      subtitle: 'Maximum overheat — highest valuation caution',
     };
   }
   return {
@@ -166,6 +237,7 @@ function statusTone(status: ValuationStatus) {
     icon: '🔵',
     label: 'Fair Value',
     badge: '🔵 Fair Value',
+    subtitle: 'Balanced vs history',
   };
 }
 
@@ -201,35 +273,72 @@ function recommendationFromStatus(
         expectedReturnPct: Math.min(5, Math.max(-2, -premiumPct * 0.15)),
         signal: 'HOLD / WAIT',
       };
-    case 'Slightly Overvalued':
+    case 'Overheat Level 1':
       return {
         action: 'Reduce',
-        confidence: 72,
-        expectedReturnPct: -Math.min(10, Math.max(3, absPrem * 0.4)),
+        confidence: 70,
+        expectedReturnPct: -Math.min(8, Math.max(2, absPrem * 0.3)),
         signal: 'WAIT FOR BETTER ENTRY',
       };
-    case 'Overvalued':
+    case 'Overheat Level 2':
+      return {
+        action: 'Reduce',
+        confidence: 76,
+        expectedReturnPct: -Math.min(12, Math.max(5, absPrem * 0.4)),
+        signal: 'TRIM / WAIT',
+      };
+    case 'Overheat Level 3':
       return {
         action: 'Sell',
-        confidence: 80,
-        expectedReturnPct: -Math.min(18, Math.max(8, absPrem * 0.5)),
-        signal: 'TRIM / WAIT',
+        confidence: 84,
+        expectedReturnPct: -Math.min(20, Math.max(10, absPrem * 0.55)),
+        signal: 'STAND DOWN · MAX OVERHEAT',
       };
   }
 }
 
-function explanationForStatus(status: ValuationStatus): string {
+function explanationForStatus(status: ValuationStatus, overheat: OverheatLevel): string[] {
+  const heat = overheatMeta(overheat);
   switch (status) {
     case 'Deeply Undervalued':
-      return 'Valuation sits in the cheapest historical band — long-term margin of safety is elevated; weakness is a potential accumulation zone.';
+      return [
+        'Valuation sits in the cheapest historical band — long-term margin of safety is elevated.',
+        'Weakness into this zone is a potential accumulation window, not a reason to abandon the thesis.',
+        'Still size carefully: cheap multiples do not remove near-term price risk.',
+      ];
     case 'Undervalued':
-      return 'Although short-term momentum can still be weak, long-term valuation remains attractive relative to history.';
+      return [
+        'Long-term valuation remains attractive relative to this stock’s own history.',
+        'Short-term momentum can still be soft — prefer staged buys over all-in entries.',
+        'No overheat warning is active; valuation is supportive of a constructive stance.',
+      ];
     case 'Fair Value':
-      return 'Valuation is balanced versus history — accumulate on dips rather than chasing extended multiples.';
-    case 'Slightly Overvalued':
-      return 'Price is modestly rich versus history — prefer waiting for a pullback before adding risk.';
-    case 'Overvalued':
-      return 'Price strength may continue, but historical valuation argues for patience or partial profit-taking.';
+      return [
+        'Multiples are balanced versus history — neither a deep bargain nor an overheat.',
+        'Best practice: accumulate on dips rather than chasing extended prints.',
+        'Valuation is neutral context for the Master Engine trading stance.',
+      ];
+    case 'Overheat Level 1':
+      return [
+        `${heat.warningTitle}: ${heat.severity}.`,
+        heat.warningBody,
+        'Master trading stance can still be constructive, but PE heat says wait for a cooler print before adding size.',
+        'Use pullbacks toward the historical average PE as preferred entry zones.',
+      ];
+    case 'Overheat Level 2':
+      return [
+        `${heat.warningTitle}: ${heat.severity}.`,
+        heat.warningBody,
+        'This is the second of three overheat tiers — valuation risk is material even if momentum remains firm.',
+        'Avoid FOMO adds. Prefer hold / partial trim until percentile cools below the elevated band.',
+      ];
+    case 'Overheat Level 3':
+      return [
+        `${heat.warningTitle}: ${heat.severity} — the strongest valuation caution on this scale.`,
+        heat.warningBody,
+        'Level 3 means PE is in the hottest historical extremes for this ticker. Mean-reversion risk is elevated.',
+        'Do not let a bullish Master stance override entry discipline — wait for a better price or a cooler multiple.',
+      ];
   }
 }
 
@@ -313,9 +422,18 @@ function ValuationTooltip({
           <span className="text-white font-bold">{percentile}%</span>
         </div>
         <div className="flex justify-between gap-4 items-center pt-1 border-t border-white/5 min-w-0">
-          <span className="text-gray-500 shrink-0">Valuation Status</span>
+          <span className="text-gray-500 shrink-0">Valuation Heat</span>
           <span className={cn('font-bold text-right min-w-0 break-words leading-tight', tone.text)}>{status}</span>
         </div>
+        {overheatLevelFromStatus(status) > 0 && (
+          <div className="flex justify-between gap-4 items-center min-w-0">
+            <span className="text-gray-500 shrink-0">Overheat</span>
+            <span className={cn('font-bold text-right', tone.text)}>
+              Level {overheatLevelFromStatus(status)} / 3
+              {overheatLevelFromStatus(status) === 3 ? ' · Max' : ''}
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -407,8 +525,11 @@ export function HistoricalValuationDashboard({
 
     const undervaluedMax = avgPe * 0.92;
     const fairMax = avgPe * 1.08;
+    const overheat1Max = avgPe * 1.2;
+    const overheat2Max = avgPe * 1.35;
     const peMin = Math.min(...pes, undervaluedMax * 0.85);
-    const peMax = Math.max(...pes, fairMax * 1.15);
+    const peMax = Math.max(...pes, overheat2Max * 1.12);
+    const overheatLevel = overheatLevelFromStatus(status);
 
     const chartData = filtered.map((d) => {
       const prem = ((d.pe - avgPe) / avgPe) * 100;
@@ -435,6 +556,7 @@ export function HistoricalValuationDashboard({
       latestPrice,
       premiumPct,
       status,
+      overheatLevel,
       pctile,
       high,
       low,
@@ -445,6 +567,8 @@ export function HistoricalValuationDashboard({
       rec,
       undervaluedMax,
       fairMax,
+      overheat1Max,
+      overheat2Max,
       peMin,
       peMax,
       chartData,
@@ -452,6 +576,8 @@ export function HistoricalValuationDashboard({
   }, [filtered, data, currentPe, currentPrice, eps]);
 
   const tone = statusTone(analytics.status);
+  const overheat = overheatMeta(analytics.overheatLevel);
+  const aiParagraphs = explanationForStatus(analytics.status, analytics.overheatLevel);
   const hasData = filtered.length > 0;
 
   return (
@@ -462,7 +588,7 @@ export function HistoricalValuationDashboard({
           <div className="min-w-0">
             <div className="flex items-center gap-2 min-w-0 flex-wrap">
               <h3 className="text-sm font-bold text-white tracking-wide">Historical PE Valuation</h3>
-              <span title="Historical PE versus its own average — valuation only">
+              <span title="Compares current PE to this stock’s own history — valuation heat only, not a trade order">
                 <Info className="w-3.5 h-3.5 text-gray-500 shrink-0" />
               </span>
             </div>
@@ -475,7 +601,7 @@ export function HistoricalValuationDashboard({
               )}
             </div>
             <p className="mt-1 text-[11px] text-gray-400 leading-relaxed max-w-2xl">
-              Shows how the current PE compares with its historical valuation over the selected period.
+              Maps today’s PE against this ticker’s own history. Overheat runs Level 1 → 3 (3 = max).
             </p>
           </div>
           <div className="flex flex-wrap gap-1">
@@ -499,7 +625,7 @@ export function HistoricalValuationDashboard({
       </div>
 
       <div className="p-4 sm:p-5 space-y-4">
-        {/* Current Valuation — full-width status band (never clipped) */}
+        {/* Valuation Heat — full-width status band */}
         <div
           className={cn(
             'rounded-xl border px-4 py-5 sm:px-6 sm:py-6 flex flex-col items-center justify-center text-center w-full gap-2',
@@ -508,7 +634,7 @@ export function HistoricalValuationDashboard({
           )}
           style={{ boxShadow: `0 0 32px ${tone.gauge}40` }}
         >
-          <p className="text-[9px] font-mono uppercase tracking-wider text-gray-500">Current Valuation</p>
+          <p className="text-[9px] font-mono uppercase tracking-wider text-gray-500">Valuation Heat</p>
           <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 px-2">
             <span className="text-[11px] font-mono font-bold text-white">{ticker.toUpperCase()}</span>
             {displayName && (
@@ -518,7 +644,12 @@ export function HistoricalValuationDashboard({
             )}
           </div>
           <ValuationStatusLabel label={tone.label} textClassName={tone.text} size="lg" />
-          <p className="text-[10px] font-mono text-gray-500 tabular-nums">{analytics.pctile}th historical percentile</p>
+          <p className={cn('text-[11px] font-mono font-bold', tone.text)}>{tone.subtitle}</p>
+          <p className="text-[10px] font-mono text-gray-500 tabular-nums">
+            {analytics.pctile}th historical percentile
+            {analytics.overheatLevel > 0 ? ` · ${overheat.short}` : ''}
+          </p>
+          <OverheatLevelMeter level={analytics.overheatLevel} />
         </div>
 
         {/* Equal metric cards — valuation only */}
@@ -532,9 +663,16 @@ export function HistoricalValuationDashboard({
           />
           <MetricTile label="Historical Percentile" value={`${analytics.pctile}%`} />
           <MetricTile
-            label="Intrinsic Value Est."
-            value={`${sym}${analytics.intrinsic.toFixed(2)}`}
-            sub={`MoS ${analytics.marginOfSafety >= 0 ? '+' : ''}${analytics.marginOfSafety.toFixed(1)}%`}
+            label="Overheat Level"
+            value={analytics.overheatLevel === 0 ? 'None' : `${analytics.overheatLevel} / 3`}
+            sub={analytics.overheatLevel === 3 ? 'Max overheat' : overheat.severity}
+            valueClass={
+              analytics.overheatLevel === 3
+                ? 'text-rose-400'
+                : analytics.overheatLevel >= 1
+                  ? 'text-orange-400'
+                  : 'text-emerald-400'
+            }
           />
         </div>
 
@@ -543,9 +681,9 @@ export function HistoricalValuationDashboard({
           <div className="xl:col-span-2 rounded-2xl border border-white/10 bg-black/30 p-3 sm:p-4">
             <div className="flex flex-wrap items-start justify-between gap-2 mb-3">
               <div className="min-w-0">
-                <p className="text-[11px] font-bold text-white tracking-wide">Historical PE Valuation</p>
+                <p className="text-[11px] font-bold text-white tracking-wide">PE vs Own History</p>
                 <p className="mt-0.5 text-[10px] text-gray-500 leading-snug max-w-md">
-                  Shows how the current PE compares with its historical valuation over the selected period.
+                  Violet line = historical PE. Bands show cool → fair → overheat L1–L3.
                 </p>
               </div>
               <div className="flex flex-wrap gap-x-3 gap-y-1 text-[9px] font-mono text-gray-400">
@@ -556,16 +694,22 @@ export function HistoricalValuationDashboard({
                   <span className="w-3 border-t border-dashed border-slate-400" /> Avg PE
                 </span>
                 <span className="inline-flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-violet-300 shadow-[0_0_8px_rgba(196,181,253,0.9)]" /> Current PE
+                  <span className="w-2 h-2 rounded-full bg-violet-300 shadow-[0_0_8px_rgba(196,181,253,0.9)]" /> Live PE
                 </span>
                 <span className="inline-flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500/35 border border-emerald-500/40" /> Undervalued
+                  <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500/35 border border-emerald-500/40" /> Cool
                 </span>
                 <span className="inline-flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-sm bg-sky-500/35 border border-sky-500/40" /> Fair Value
+                  <span className="w-2.5 h-2.5 rounded-sm bg-sky-500/35 border border-sky-500/40" /> Fair
                 </span>
                 <span className="inline-flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-sm bg-rose-500/35 border border-rose-500/40" /> Overvalued
+                  <span className="w-2.5 h-2.5 rounded-sm bg-orange-400/40 border border-orange-400/45" /> Overheat L1
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-sm bg-orange-500/45 border border-orange-500/50" /> Overheat L2
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-sm bg-rose-500/45 border border-rose-500/50" /> Overheat L3
                 </span>
               </div>
             </div>
@@ -587,9 +731,17 @@ export function HistoricalValuationDashboard({
                         <stop offset="0%" stopColor="#38bdf8" stopOpacity={0.14} />
                         <stop offset="100%" stopColor="#38bdf8" stopOpacity={0.04} />
                       </linearGradient>
-                      <linearGradient id="zoneOvervalued" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#f43f5e" stopOpacity={0.16} />
-                        <stop offset="100%" stopColor="#f43f5e" stopOpacity={0.04} />
+                      <linearGradient id="zoneOverheat1" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#fb923c" stopOpacity={0.14} />
+                        <stop offset="100%" stopColor="#fb923c" stopOpacity={0.04} />
+                      </linearGradient>
+                      <linearGradient id="zoneOverheat2" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#f97316" stopOpacity={0.16} />
+                        <stop offset="100%" stopColor="#f97316" stopOpacity={0.05} />
+                      </linearGradient>
+                      <linearGradient id="zoneOverheat3" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#f43f5e" stopOpacity={0.2} />
+                        <stop offset="100%" stopColor="#f43f5e" stopOpacity={0.06} />
                       </linearGradient>
                       <filter id="currentPeGlow" x="-80%" y="-80%" width="260%" height="260%">
                         <feGaussianBlur stdDeviation="3.5" result="coloredBlur" />
@@ -645,8 +797,24 @@ export function HistoricalValuationDashboard({
                     <ReferenceArea
                       yAxisId="pe"
                       y1={analytics.fairMax}
+                      y2={analytics.overheat1Max}
+                      fill="url(#zoneOverheat1)"
+                      fillOpacity={1}
+                      ifOverflow="extendDomain"
+                    />
+                    <ReferenceArea
+                      yAxisId="pe"
+                      y1={analytics.overheat1Max}
+                      y2={analytics.overheat2Max}
+                      fill="url(#zoneOverheat2)"
+                      fillOpacity={1}
+                      ifOverflow="extendDomain"
+                    />
+                    <ReferenceArea
+                      yAxisId="pe"
+                      y1={analytics.overheat2Max}
                       y2={analytics.peMax * 1.05}
-                      fill="url(#zoneOvervalued)"
+                      fill="url(#zoneOverheat3)"
                       fillOpacity={1}
                       ifOverflow="extendDomain"
                     />
@@ -740,14 +908,14 @@ export function HistoricalValuationDashboard({
               )}
             </div>
             <p className="mt-2 text-[9px] font-mono text-gray-600 tracking-wide">
-              PE multiples only · market price is not plotted on this chart
+              PE multiples only · market price is not plotted · Overheat L3 = max heat band
             </p>
           </div>
 
           {/* Right valuation panel */}
           <div className="space-y-3">
             <div className="rounded-2xl border border-white/10 bg-black/30 p-4 min-w-0 overflow-visible">
-              <p className="text-[10px] font-mono uppercase tracking-wider text-gray-400 mb-3">Valuation Panel</p>
+              <p className="text-[10px] font-mono uppercase tracking-wider text-gray-400 mb-3">Valuation Snapshot</p>
               <div className="space-y-2 mb-3">
                 <PanelRow label="Current PE" value={`${analytics.latestPe.toFixed(2)}×`} />
                 <PanelRow label="Historical Average PE" value={`${analytics.avgPe.toFixed(2)}×`} />
@@ -758,9 +926,20 @@ export function HistoricalValuationDashboard({
                 />
                 <PanelRow label="Historical Percentile" value={`${analytics.pctile}%`} />
                 <PanelRow
-                  label="Current Valuation"
+                  label="Valuation Heat"
                   value={tone.label}
                   valueClass={tone.text}
+                />
+                <PanelRow
+                  label="Overheat Level"
+                  value={analytics.overheatLevel === 0 ? 'None' : `${analytics.overheatLevel} / 3`}
+                  valueClass={
+                    analytics.overheatLevel === 3
+                      ? 'text-rose-400'
+                      : analytics.overheatLevel >= 1
+                        ? 'text-orange-400'
+                        : 'text-emerald-400'
+                  }
                 />
                 <PanelRow label="Intrinsic Value" value={`${sym}${analytics.intrinsic.toFixed(2)}`} />
                 <PanelRow
@@ -773,15 +952,18 @@ export function HistoricalValuationDashboard({
               </div>
               <ValuationMeter percentile={analytics.pctile} />
               <div className="mt-3 grid grid-cols-3 gap-1 text-[8px] sm:text-[9px] font-mono text-gray-500">
-                <span className="text-emerald-400 text-left break-words leading-tight">Undervalued</span>
+                <span className="text-emerald-400 text-left break-words leading-tight">Cool</span>
                 <span className="text-cyan-400 text-center break-words leading-tight">Fair</span>
-                <span className="text-rose-400 text-right break-words leading-tight">Overvalued</span>
+                <span className="text-rose-400 text-right break-words leading-tight">Overheat L3</span>
               </div>
             </div>
 
             <div className="rounded-2xl border border-white/10 bg-[#121214] p-4 min-w-0 overflow-visible">
-              <p className="text-[10px] font-mono uppercase tracking-wider text-gray-400 mb-3">
+              <p className="text-[10px] font-mono uppercase tracking-wider text-gray-400 mb-1">
                 Master Recommendation
+              </p>
+              <p className="text-[9px] text-gray-600 font-mono mb-3">
+                Trading stance from Master Engine — valuation heat does not override it
               </p>
               <div className="w-full overflow-visible">
                 <HeroStatusBlock
@@ -804,12 +986,39 @@ export function HistoricalValuationDashboard({
               </div>
               <p className="mt-3 text-[10px] font-mono font-bold text-violet-300 tracking-wide break-words">
                 {masterHorizonLabel
-                  ? `${masterHorizonLabel} · inherited from Master Decision Engine`
-                  : 'Inherited from Master Decision Engine'}
+                  ? `${masterHorizonLabel} · Master Decision Engine`
+                  : 'Master Decision Engine'}
               </p>
+
+              {analytics.overheatLevel > 0 && (
+                <div
+                  className={cn(
+                    'mt-3 rounded-xl border px-3 py-2.5',
+                    analytics.overheatLevel === 3
+                      ? 'border-rose-500/40 bg-rose-500/10'
+                      : analytics.overheatLevel === 2
+                        ? 'border-orange-500/40 bg-orange-500/10'
+                        : 'border-orange-400/30 bg-orange-400/10'
+                  )}
+                >
+                  <p
+                    className={cn(
+                      'text-[10px] font-mono font-bold uppercase tracking-wider',
+                      analytics.overheatLevel === 3 ? 'text-rose-300' : 'text-orange-300'
+                    )}
+                  >
+                    {overheat.warningTitle}
+                  </p>
+                  <p className="mt-1 text-[11px] text-gray-300 leading-relaxed">{overheat.warningBody}</p>
+                  <OverheatLevelMeter level={analytics.overheatLevel} className="mt-2" />
+                </div>
+              )}
+
               <p className="mt-2 text-[10px] text-gray-500 leading-relaxed">
-                Valuation context only — PE status does not override the trading recommendation.
-                Current valuation: {tone.label}.
+                Valuation context: {tone.label}
+                {analytics.overheatLevel > 0
+                  ? ` — entry discipline still applies even when Master says ${masterRecommendation || 'HOLD'}.`
+                  : '.'}
               </p>
               <div className="mt-3 grid grid-cols-2 gap-2 text-[10px] font-mono">
                 <Stat
@@ -825,7 +1034,10 @@ export function HistoricalValuationDashboard({
                   label="Margin of Safety"
                   value={`${analytics.marginOfSafety >= 0 ? '+' : ''}${analytics.marginOfSafety.toFixed(1)}%`}
                 />
-                <Stat label="Percentile" value={`${analytics.pctile}%`} />
+                <Stat
+                  label="Overheat"
+                  value={analytics.overheatLevel === 0 ? 'None' : `L${analytics.overheatLevel}/3`}
+                />
               </div>
             </div>
           </div>
@@ -836,53 +1048,91 @@ export function HistoricalValuationDashboard({
           <div className="lg:col-span-2 rounded-2xl border border-white/10 bg-gradient-to-br from-violet-500/5 to-transparent p-4 min-w-0 overflow-hidden">
             <div className="flex items-center gap-2 mb-2 min-w-0">
               <Sparkles className="w-3.5 h-3.5 text-violet-400 shrink-0" />
-              <p className="text-[10px] font-mono uppercase tracking-wider text-gray-300 font-bold truncate">AI Explanation</p>
+              <p className="text-[10px] font-mono uppercase tracking-wider text-gray-300 font-bold truncate">
+                AI Valuation Brief
+              </p>
             </div>
             <p className="text-[12px] text-gray-300 leading-relaxed break-words">
               At the{' '}
               <span className={cn('font-semibold', tone.text)}>
                 {analytics.pctile}% historical percentile
               </span>
-              , status is{' '}
+              , heat status is{' '}
               <span className={cn('font-semibold', tone.text)}>{tone.badge}</span>
-              . Current valuation is{' '}
+              {analytics.overheatLevel > 0 ? (
+                <>
+                  {' '}
+                  (
+                  <span className={cn('font-semibold', tone.text)}>
+                    Overheat Level {analytics.overheatLevel} of 3
+                    {analytics.overheatLevel === 3 ? ' · Max' : ''}
+                  </span>
+                  )
+                </>
+              ) : null}
+              . Current PE is{' '}
               {Math.abs(analytics.premiumPct) < 3
                 ? 'near'
                 : analytics.premiumPct < 0
                   ? 'below'
                   : 'above'}{' '}
-              the {range === 'MAX' ? 'full-history' : range} historical average. The stock trades at a PE of{' '}
-              <span className="text-violet-300 font-semibold">{analytics.latestPe.toFixed(1)}×</span> versus the
-              historical average of{' '}
-              <span className="text-white font-semibold">{analytics.avgPe.toFixed(1)}×</span>. This represents a{' '}
+              the {range === 'MAX' ? 'full-history' : range} historical average. The stock trades at{' '}
+              <span className="text-violet-300 font-semibold">{analytics.latestPe.toFixed(1)}×</span> versus{' '}
+              <span className="text-white font-semibold">{analytics.avgPe.toFixed(1)}×</span> average — a{' '}
               <span className={cn('font-semibold', analytics.premiumPct >= 0 ? 'text-rose-400' : 'text-emerald-400')}>
                 {Math.abs(analytics.premiumPct).toFixed(1)}% valuation {analytics.premiumPct >= 0 ? 'premium' : 'discount'}
               </span>
-              . Intrinsic value estimate is{' '}
+              . Intrinsic estimate{' '}
               <span className="text-white font-semibold">
                 {sym}
                 {analytics.intrinsic.toFixed(2)}
               </span>{' '}
-              with a margin of safety of{' '}
+              · margin of safety{' '}
               <span className={cn('font-semibold', analytics.marginOfSafety >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
                 {analytics.marginOfSafety >= 0 ? '+' : ''}
                 {analytics.marginOfSafety.toFixed(1)}%
               </span>
               .
             </p>
-            <p className="mt-2 text-[11px] text-gray-400 leading-relaxed break-words">
-              {explanationForStatus(analytics.status)}
-            </p>
+            <div className="mt-3 space-y-2">
+              {aiParagraphs.map((para, i) => (
+                <p key={i} className="text-[11px] text-gray-400 leading-relaxed break-words">
+                  {para}
+                </p>
+              ))}
+            </div>
             <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-violet-500/30 bg-violet-500/10 px-2.5 py-1.5 min-w-0 max-w-full overflow-hidden">
-              <span className="text-[9px] font-mono uppercase tracking-wider text-violet-300 shrink-0">Valuation Status</span>
+              <span className="text-[9px] font-mono uppercase tracking-wider text-violet-300 shrink-0">
+                Valuation Heat
+              </span>
               <FitText maxPx={12} minPx={9} maxLines={2} className="font-black text-white flex-1">
                 {analytics.status.toUpperCase()}
               </FitText>
             </div>
+            {analytics.overheatLevel > 0 && (
+              <div
+                className={cn(
+                  'mt-2 rounded-lg border px-2.5 py-2',
+                  analytics.overheatLevel === 3
+                    ? 'border-rose-500/35 bg-rose-500/10'
+                    : 'border-orange-500/30 bg-orange-500/10'
+                )}
+              >
+                <p
+                  className={cn(
+                    'text-[10px] font-mono font-bold',
+                    analytics.overheatLevel === 3 ? 'text-rose-300' : 'text-orange-300'
+                  )}
+                >
+                  {overheat.warningTitle}
+                </p>
+                <p className="mt-1 text-[10px] text-gray-400 leading-relaxed">{overheat.warningBody}</p>
+              </div>
+            )}
             {masterRecommendation && (
               <p className="mt-2 text-[10px] text-gray-500 font-mono">
-                Trading stance: <span className="text-violet-300 font-bold">{masterRecommendation}</span>
-                {masterHorizonLabel ? ` · ${masterHorizonLabel}` : ''} (Master Engine)
+                Master trading stance: <span className="text-violet-300 font-bold">{masterRecommendation}</span>
+                {masterHorizonLabel ? ` · ${masterHorizonLabel}` : ''} — separate from valuation heat
               </p>
             )}
           </div>
@@ -890,7 +1140,7 @@ export function HistoricalValuationDashboard({
           <div className="rounded-2xl border border-white/10 bg-black/30 p-4 min-w-0 overflow-hidden">
             <div className="flex items-center gap-2 mb-2 min-w-0">
               <Activity className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-              <p className="text-[10px] font-mono uppercase tracking-wider text-gray-300 font-bold truncate">Correlation Analysis</p>
+              <p className="text-[10px] font-mono uppercase tracking-wider text-gray-300 font-bold truncate">Price–PE Correlation</p>
             </div>
             <FitText maxPx={15} minPx={11} maxLines={2} className="font-bold text-cyan-300">
               {analytics.corr.title}
@@ -930,10 +1180,67 @@ export function HistoricalValuationDashboard({
             <StatCard label="Lowest PE" value={analytics.low.toFixed(1)} />
             <StatCard label="Std Deviation" value={analytics.sd.toFixed(2)} />
             <StatCard label="Percentile Ranking" value={`${analytics.pctile}%`} accent />
-            <StatCard label={`${range} Avg PE`} value={analytics.avgPe.toFixed(1)} />
+            <StatCard
+              label="Overheat Level"
+              value={analytics.overheatLevel === 0 ? 'None' : `L${analytics.overheatLevel}/3`}
+              accent={analytics.overheatLevel >= 2}
+            />
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function OverheatLevelMeter({
+  level,
+  className,
+}: {
+  level: OverheatLevel;
+  className?: string;
+}) {
+  const steps: { n: 1 | 2 | 3; label: string }[] = [
+    { n: 1, label: 'Mild' },
+    { n: 2, label: 'Elevated' },
+    { n: 3, label: 'Max' },
+  ];
+  return (
+    <div className={cn('w-full max-w-xs mx-auto', className)}>
+      <div className="flex gap-1.5">
+        {steps.map((s) => {
+          const active = level >= s.n;
+          const isMax = s.n === 3 && level === 3;
+          return (
+            <div key={s.n} className="flex-1 min-w-0">
+              <div
+                className={cn(
+                  'h-2 rounded-full border transition-colors',
+                  !active && 'bg-white/5 border-white/10',
+                  active && s.n === 1 && 'bg-orange-400/80 border-orange-400/50',
+                  active && s.n === 2 && 'bg-orange-500/85 border-orange-500/55',
+                  active && s.n === 3 && 'bg-rose-500/90 border-rose-400/60',
+                  isMax && 'shadow-[0_0_10px_rgba(244,63,94,0.45)]'
+                )}
+              />
+              <p
+                className={cn(
+                  'mt-1 text-[8px] font-mono text-center leading-tight',
+                  active
+                    ? s.n === 3
+                      ? 'text-rose-300 font-bold'
+                      : 'text-orange-300 font-bold'
+                    : 'text-gray-600'
+                )}
+              >
+                L{s.n} {s.label}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+      <p className="mt-1.5 text-[9px] font-mono text-center text-gray-500">
+        {level === 0 ? 'No overheat' : `Active overheat · Level ${level} of 3`}
+      </p>
     </div>
   );
 }
@@ -1078,6 +1385,7 @@ function ValuationMeter({ percentile }: { percentile: number }) {
   const pct = Math.min(100, Math.max(0, percentile));
   const status = statusFromPercentile(pct);
   const tone = statusTone(status);
+  const level = overheatLevelFromStatus(status);
 
   return (
     <div className="relative pt-1 pb-2 min-w-0 overflow-visible">
@@ -1085,8 +1393,9 @@ function ValuationMeter({ percentile }: { percentile: number }) {
         <div className="flex-[20] bg-emerald-500/85" title="0–20% Deeply Undervalued" />
         <div className="flex-[20] bg-emerald-400/70" title="20–40% Undervalued" />
         <div className="flex-[20] bg-cyan-400/75" title="40–60% Fair Value" />
-        <div className="flex-[20] bg-orange-400/80" title="60–80% Slightly Overvalued" />
-        <div className="flex-[20] bg-rose-500/85" title="80–100% Overvalued" />
+        <div className="flex-[15] bg-orange-400/80" title="60–75% Overheat Level 1" />
+        <div className="flex-[15] bg-orange-500/85" title="75–90% Overheat Level 2" />
+        <div className="flex-[10] bg-rose-500/90" title="90–100% Overheat Level 3 · Max" />
       </div>
       <motion.div
         className="absolute top-0 pointer-events-none"
@@ -1103,6 +1412,7 @@ function ValuationMeter({ percentile }: { percentile: number }) {
       <div className="mt-3 w-full px-1">
         <p className={cn('font-mono font-bold text-center text-[11px] sm:text-[12px] leading-snug break-words', tone.text)}>
           {pct}% · {status}
+          {level > 0 ? ` · L${level}/3` : ''}
         </p>
       </div>
     </div>
