@@ -4,7 +4,6 @@ import { useAuth } from '../lib/auth';
 import { apiUrl, loggedFetch } from '../lib/api';
 import { syncStripeSubscription } from '../lib/subscription';
 import { LandingPage } from './LandingPage';
-import { PricingPage } from './PricingPage';
 import { SubscriptionExpiredPage } from './SubscriptionExpiredPage';
 
 interface SubscriptionGateProps {
@@ -16,7 +15,7 @@ interface SubscriptionGateProps {
 }
 
 /**
- * Public front page only when signed out.
+ * Single public LandingPage (hero + plans) when signed out or awaiting subscription.
  * Dashboard (`children`) mounts only after authorized sign-in with active access.
  */
 export function SubscriptionGate({ children, onActive, onOverageSuccess }: SubscriptionGateProps) {
@@ -114,11 +113,6 @@ export function SubscriptionGate({ children, onActive, onOverageSuccess }: Subsc
     return <SubscriptionExpiredPage />;
   }
 
-  // inactive / none → pricing (user must accept legal terms before Stripe)
-  return (
-    <PricingPage
-      title="Quantum Node pricing"
-      subtitle="Choose Basic or Pro to unlock the dashboard."
-    />
-  );
+  // inactive / none → same landing page, subscribe mode (no second marketing page)
+  return <LandingPage subscribeMode />;
 }

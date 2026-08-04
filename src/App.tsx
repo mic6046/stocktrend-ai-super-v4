@@ -16,7 +16,6 @@ import {
   DecisionBriefPanel,
   RecommendationChangeLogPanel,
   FindATradePanel,
-  SuggestATradePanel,
   MarketDataRefreshBar,
   type HorizonKey,
 } from './components/analysis';
@@ -25,6 +24,10 @@ import {
   type ChangeLogState,
 } from './lib/recommendationChangeLog';
 import { buildHorizonView } from './lib/horizonView';
+import {
+  loadPersistedQuantumHints,
+  persistQuantumHint,
+} from './lib/quantumScoreCache';
 import { TruncatedText } from './components/TruncatedText';
 import { AuthModal } from './components/AuthModal';
 import { UsageQuotaBar, QuotaExhaustedBanner } from './components/UsageQuotaBar';
@@ -1219,7 +1222,6 @@ export default function App() {
   const [analysisHorizon, setAnalysisHorizon] = useState<HorizonKey>('1M');
   const [userHasPosition, setUserHasPosition] = useState(false);
   const [showFindATrade, setShowFindATrade] = useState(false);
-  const [showSuggestATrade, setShowSuggestATrade] = useState(false);
   const [refreshMode, setRefreshMode] = useState<RefreshMode>(() => loadRefreshMode());
   const [autoRefreshIntervalSec, setAutoRefreshIntervalSec] = useState<AutoRefreshIntervalSec>(
     () => loadAutoRefreshIntervalSec()
@@ -1390,6 +1392,7 @@ export default function App() {
   const [srStyle, setSrStyle] = useState<'Line' | 'Zone'>('Line');
   const [srLookback, setSrLookback] = useState<number>(100);
   const [predictCache, setPredictCache] = useState<Record<string, any>>({});
+  const [quantumHintEpoch, setQuantumHintEpoch] = useState(0);
   const [predicting, setPredicting] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [picks, setPicks] = useState<any[]>([]);
@@ -7085,6 +7088,144 @@ export default function App() {
     userHasPosition,
   ]);
 
+  /** Seed Find a Trade with open card + predict-cache + persisted Quantum scores. */
+  const findATradeKnownByTicker = React.useMemo(() => {
+    const map: Record<
+      string,
+      {
+        recommendation?: string | null;
+        score?: number | null;
+        confidence?: number | null;
+        expectedReturn?: number | null;
+        price?: number | null;
+        name?: string | null;
+      }
+    > = {};
+
+    const upsert = (
+      rawTicker: string | null | undefined,
+      hint: {
+        recommendation?: string | null;
+        score?: number | null;
+        confidence?: number | null;
+        expectedReturn?: number | null;
+        price?: number | null;
+        name?: string | null;
+      }
+    ) => {
+      const key = String(rawTicker || '')
+        .trim()
+        .toUpperCase();
+      if (!key) return;
+      const prev = map[key] || {};
+      const nextScore =
+        hint.score != null && Number.isFinite(Number(hint.score))
+          ? Number(hint.score)
+          : prev.score;
+      map[key] = {
+        recommendation: hint.recommendation ?? prev.recommendation,
+        score: nextScore,
+        confidence:
+          hint.confidence != null && Number.isFinite(Number(hint.confidence))
+            ? Number(hint.confidence)
+            : prev.confidence,
+        expectedReturn:
+          hint.expectedReturn != null && Number.isFinite(Number(hint.expectedReturn))
+            ? Number(hint.expectedReturn)
+            : prev.expectedReturn,
+        price:
+          hint.price != null && Number.isFinite(Number(hint.price))
+            ? Number(hint.price)
+            : prev.price,
+        name: hint.name ?? prev.name,
+      };
+    };
+
+    // Persisted scores from prior full analyses (survives navigation)
+    for (const [ticker, hint] of Object.entries(loadPersistedQuantumHints())) {
+      upsert(ticker, hint);
+    }
+
+    if (data?.ticker) {
+      upsert(data.ticker, {
+        recommendation: horizonView.ratingLabel,
+        score: horizonView.score,
+        confidence: horizonView.confidence,
+        expectedReturn: horizonView.expectedReturn,
+        price: horizonView.currentPrice,
+        name: data.quote?.shortName || data.quote?.longName || data.ticker,
+      });
+      if (aiStockScore?.totalScore != null) {
+        upsert(data.ticker, {
+          recommendation: aiStockScore.rating || horizonView.ratingLabel,
+          score: aiStockScore.totalScore,
+        });
+      }
+    }
+
+    for (const [cacheKey, cached] of Object.entries(predictCache || {})) {
+      const ticker = String(cacheKey.split('_')[0] || '')
+        .trim()
+        .toUpperCase();
+      if (!ticker) continue;
+      const score = cached?.aiStockScore?.totalScore;
+      const rating =
+        cached?.aiStockScore?.rating ||
+        (typeof cached?.recommendation === 'string'
+          ? cached.recommendation
+          : cached?.recommendation?.rating || cached?.rating);
+      upsert(ticker, {
+        recommendation: rating,
+        score: score != null ? Number(score) : null,
+        confidence: cached?.confidence != null ? Number(cached.confidence) : null,
+      });
+    }
+
+    return map;
+  }, [
+    data?.ticker,
+    data?.quote?.shortName,
+    data?.quote?.longName,
+    horizonView.ratingLabel,
+    horizonView.score,
+    horizonView.confidence,
+    horizonView.expectedReturn,
+    horizonView.currentPrice,
+    aiStockScore,
+    predictCache,
+    quantumHintEpoch,
+  ]);
+
+  // Keep Find a Trade aligned with the Recommendation card after every analysis
+  React.useEffect(() => {
+    const ticker = data?.ticker;
+    if (!ticker) return;
+    const score = aiStockScore?.totalScore ?? horizonView.score;
+    const recommendation = aiStockScore?.rating || horizonView.ratingLabel;
+    if (score == null && !recommendation) return;
+    persistQuantumHint({
+      ticker,
+      recommendation,
+      score,
+      confidence: horizonView.confidence ?? confidence,
+      expectedReturn: horizonView.expectedReturn,
+      price: horizonView.currentPrice,
+      name: data.quote?.shortName || data.quote?.longName || ticker,
+    });
+  }, [
+    data?.ticker,
+    data?.quote?.shortName,
+    data?.quote?.longName,
+    aiStockScore?.totalScore,
+    aiStockScore?.rating,
+    horizonView.ratingLabel,
+    horizonView.score,
+    horizonView.confidence,
+    horizonView.expectedReturn,
+    horizonView.currentPrice,
+    confidence,
+  ]);
+
   /**
    * Consistency layer: strip conflicting chart markers and stamp ONLY the Master Recommendation
    * on the latest bar for the selected Investment Horizon.
@@ -7436,7 +7577,6 @@ export default function App() {
             onClick={() => {
               setActivePage('DASHBOARD');
               setShowFindATrade((v) => !v);
-              if (!showFindATrade) setShowSuggestATrade(false);
             }}
             className={cn(
               'shrink-0 inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
@@ -7444,30 +7584,11 @@ export default function App() {
                 ? 'bg-emerald-500 text-black border-emerald-400 shadow-[0_0_16px_rgba(16,185,129,0.35)]'
                 : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/25'
             )}
-            title="Paste a ticker list and let Consensus AI find a BUY"
+            title="Find a Trade + — paste tickers or scout by market/theme"
           >
             <Rocket className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Find a Trade</span>
-            <span className="sm:hidden">Find</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setActivePage('DASHBOARD');
-              setShowSuggestATrade((v) => !v);
-              if (!showSuggestATrade) setShowFindATrade(false);
-            }}
-            className={cn(
-              'shrink-0 inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
-              showSuggestATrade
-                ? 'bg-sky-500 text-black border-sky-400 shadow-[0_0_16px_rgba(56,189,248,0.35)]'
-                : 'bg-sky-500/15 text-sky-300 border-sky-500/40 hover:bg-sky-500/25'
-            )}
-            title="Suggest a BUY from popular US / HK / Japan / Europe markets"
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Suggest a Trade</span>
-            <span className="sm:hidden">Suggest</span>
+            <span className="hidden sm:inline">Find a Trade +</span>
+            <span className="sm:hidden">Find +</span>
           </button>
         </div>
 
@@ -7620,27 +7741,17 @@ export default function App() {
             >
               <FindATradePanel
                 horizon={analysisHorizon}
+                knownByTicker={findATradeKnownByTicker}
+                email={user?.email}
+                onBeforeScan={() => assertAnalysisCredits()}
+                onUsage={(snap) => {
+                  if (snap) setUsage(snap);
+                  else void refreshUsage();
+                }}
+                onQuantumHint={() => setQuantumHintEpoch((n) => n + 1)}
                 onOpenTicker={(sym) => {
                   if (!assertAnalysisCredits()) return;
                   setShowFindATrade(false);
-                  runTickerSearch(sym);
-                }}
-              />
-            </motion.div>
-          )}
-          {showSuggestATrade && (
-            <motion.div
-              key="suggest-a-trade-dock"
-              initial={{ opacity: 0, y: -8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              className="mb-6"
-            >
-              <SuggestATradePanel
-                horizon={analysisHorizon}
-                onOpenTicker={(sym) => {
-                  if (!assertAnalysisCredits()) return;
-                  setShowSuggestATrade(false);
                   runTickerSearch(sym);
                 }}
               />
@@ -8713,9 +8824,7 @@ export default function App() {
                     onHorizonChange={setAnalysisHorizon}
                     horizonExplanation={`${horizonView.explanation} ${horizonView.validationStatus}`}
                     isLoading={predicting || (loading && !aiStockScore && !prediction)}
-                    currentAction={horizonView.currentAction.action}
-                    currentActionReason={horizonView.currentAction.reason}
-                    userHasPosition={userHasPosition}
+                    doNowActions={horizonView.doNowActions}
                   />
                   <AiInsightsStrip
                     keyRisks={keyRisks}
@@ -12963,45 +13072,24 @@ export default function App() {
                 <h2 className="text-xl font-sans font-bold text-white mb-2">Search a ticker to begin</h2>
                 <p className="text-sm text-gray-500 max-w-md mx-auto">
                   Press <span className="text-emerald-400 font-mono">Enter</span> in the search bar, or open{' '}
-                  <span className="text-emerald-400 font-semibold">Find a Trade</span> /{' '}
-                  <span className="text-sky-400 font-semibold">Suggest a Trade</span>.
+                  <span className="text-emerald-400 font-semibold">Find a Trade +</span> to scout a paste list
+                  or market/theme universe.
                 </p>
               </div>
               <div className="w-full max-w-xl space-y-3">
                 {!showFindATrade && (
                   <button
                     type="button"
-                    onClick={() => {
-                      setShowFindATrade(true);
-                      setShowSuggestATrade(false);
-                    }}
+                    onClick={() => setShowFindATrade(true)}
                     className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-emerald-500 text-black py-2.5 text-[12px] font-bold uppercase tracking-wider hover:bg-emerald-400 transition-colors cursor-pointer"
                   >
                     <Rocket className="w-4 h-4" />
-                    Open Find a Trade
+                    Open Find a Trade +
                   </button>
                 )}
                 {showFindATrade && (
                   <p className="text-[11px] text-emerald-300/80 font-mono text-center">
-                    Find a Trade panel is open above — paste tickers and scan.
-                  </p>
-                )}
-                {!showSuggestATrade && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowSuggestATrade(true);
-                      setShowFindATrade(false);
-                    }}
-                    className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-sky-500 text-black py-2.5 text-[12px] font-bold uppercase tracking-wider hover:bg-sky-400 transition-colors cursor-pointer"
-                  >
-                    <Sparkles className="w-4 h-4" />
-                    Open Suggest a Trade
-                  </button>
-                )}
-                {showSuggestATrade && (
-                  <p className="text-[11px] text-sky-300/80 font-mono text-center">
-                    Suggest a Trade panel is open above — pick a market and scan.
+                    Find a Trade + is open above — paste tickers or pick market/theme, then scan.
                   </p>
                 )}
               </div>

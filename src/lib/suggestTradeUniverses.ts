@@ -1,5 +1,5 @@
 /**
- * Curated popular-market universes for Suggest a Trade.
+ * Curated popular-market universes for Find a Trade +.
  * Kept modest (≤20 per scout) so Consensus scanning stays within API limits.
  */
 
@@ -133,7 +133,7 @@ const DEDUPED: UniverseName[] = (() => {
 })();
 
 /**
- * Build a scout list for Suggest a Trade.
+ * Build a scout list for Find a Trade + (market × theme).
  * Caps at `max` tickers; for ALL markets, round-robins across regions.
  */
 export function buildSuggestUniverse(
@@ -179,4 +179,26 @@ export function buildSuggestUniverse(
 
 export function universeTickers(market: SuggestMarket, theme: SuggestTheme, max = 20): string[] {
   return buildSuggestUniverse(market, theme, max).map((r) => r.ticker);
+}
+
+/** Infer listing region from ticker suffix (for Find-list ↔ market alignment). */
+export function inferTickerMarket(ticker: string): Exclude<SuggestMarket, 'ALL'> | null {
+  const t = String(ticker || '')
+    .trim()
+    .toUpperCase();
+  if (!t) return null;
+  if (t.endsWith('.HK')) return 'HK';
+  if (t.endsWith('.T')) return 'JP';
+  if (/\.(AS|DE|PA|SW|L|MC)$/.test(t)) return 'EU';
+  // Plain US symbols (incl. BRK-B) and rare .US
+  if (!t.includes('.') || t.endsWith('.US')) return 'US';
+  return null;
+}
+
+/** True when most tickers in the paste list belong to the selected market. */
+export function listMatchesMarket(tickers: string[], market: SuggestMarket): boolean {
+  if (market === 'ALL') return true;
+  if (!tickers.length) return false;
+  const matched = tickers.filter((t) => inferTickerMarket(t) === market).length;
+  return matched / tickers.length >= 0.6;
 }
