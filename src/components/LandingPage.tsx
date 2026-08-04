@@ -1,14 +1,66 @@
 import React, { useState } from 'react';
-import { Activity, Check, Gem, Rocket } from 'lucide-react';
+import { Activity, Check, Gem, Loader2, Rocket } from 'lucide-react';
 import { AuthModal } from './AuthModal';
 import { LegalLinks } from './LegalDocs';
 import { openLegalDoc } from '../lib/legal';
+import { SignInNotAllowedError, useAuth } from '../lib/auth';
 import { PUBLIC_OVERAGES, PUBLIC_PLANS } from '../lib/pricingPlans';
 import { cn } from '../lib/utils';
 
+function GoogleIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        fill="#EA4335"
+        d="M12 10.2v3.6h5.1c-.2 1.2-.9 2.2-1.9 2.9l3.1 2.4c1.8-1.7 2.9-4.1 2.9-7 0-.7-.1-1.3-.2-1.9H12z"
+      />
+      <path
+        fill="#34A853"
+        d="M6.6 14.3l-.5.4-2.7 2.1C5.1 19.5 8.3 21.6 12 21.6c2.4 0 4.4-.8 5.9-2.1l-3.1-2.4c-.8.6-1.9.9-2.8.9-2.2 0-4-1.5-4.7-3.5z"
+      />
+      <path
+        fill="#4A90E2"
+        d="M3.4 7.2C2.8 8.4 2.4 9.7 2.4 12s.4 3.6 1 4.8l3.2-2.5c-.2-.6-.3-1.2-.3-2.3s.1-1.7.3-2.3L3.4 7.2z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M12 5.4c1.3 0 2.5.5 3.4 1.3l2.6-2.6C16.4 2.6 14.4 1.8 12 1.8 8.3 1.8 5.1 3.9 3.4 7.2l3.2 2.5C7.9 6.9 9.8 5.4 12 5.4z"
+      />
+    </svg>
+  );
+}
+
 /** Public front page — shown only before login. Dashboard never mounts here. */
 export function LandingPage() {
-  const [showAuthModal, setShowAuthModal] = useState(true);
+  const { signInWithGoogle, clearAccessDenied } = useAuth();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleGoogleSignIn = async () => {
+    setError(null);
+    clearAccessDenied();
+    setBusy(true);
+    try {
+      await signInWithGoogle();
+    } catch (err: any) {
+      const code = err?.code || '';
+      if (err instanceof SignInNotAllowedError || code === 'auth/signin-not-allowed') {
+        setError(null);
+      } else if (code.includes('popup-closed-by-user') || code.includes('cancelled-popup-request')) {
+        setError('Sign-in was cancelled.');
+      } else if (code.includes('popup-blocked')) {
+        setError('Pop-up was blocked. Allow pop-ups for this site and try again.');
+      } else if (code.includes('operation-not-allowed')) {
+        setError('Google Sign-In is not enabled in Firebase Console yet.');
+      } else if (code.includes('unauthorized-domain')) {
+        setError('This domain is not authorized for Google Sign-In in Firebase.');
+      } else {
+        setError(err?.message || 'Google Sign-In failed.');
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[#050505] text-[#e0e0e0] relative overflow-hidden flex flex-col">
@@ -41,8 +93,9 @@ export function LandingPage() {
           </a>
           <button
             type="button"
-            onClick={() => setShowAuthModal(true)}
-            className="rounded-xl bg-emerald-500 px-4 py-2 text-[11px] font-sans font-bold uppercase tracking-wide text-black hover:bg-emerald-400 cursor-pointer"
+            disabled={busy}
+            onClick={handleGoogleSignIn}
+            className="rounded-xl bg-emerald-500 px-4 py-2 text-[11px] font-sans font-bold uppercase tracking-wide text-black hover:bg-emerald-400 cursor-pointer disabled:opacity-60"
           >
             Sign in
           </button>
@@ -72,12 +125,21 @@ export function LandingPage() {
                 Read risk warning
               </button>
             </p>
+
+            {error && (
+              <p className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300 max-w-sm mx-auto">
+                {error}
+              </p>
+            )}
+
             <button
               type="button"
-              onClick={() => setShowAuthModal(true)}
-              className="inline-flex w-full max-w-sm mx-auto items-center justify-center rounded-xl bg-emerald-500 px-5 py-3.5 text-sm font-bold text-black transition hover:bg-emerald-400 cursor-pointer"
+              disabled={busy}
+              onClick={handleGoogleSignIn}
+              className="inline-flex w-full max-w-sm mx-auto items-center justify-center gap-3 rounded-xl bg-white px-5 py-3.5 text-sm font-bold text-gray-900 transition hover:bg-gray-100 cursor-pointer disabled:opacity-60"
             >
-              Sign in with Google
+              {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <GoogleIcon className="h-5 w-5" />}
+              Continue with Google
             </button>
             <p className="mt-4 text-xs text-gray-600 font-sans">
               After sign-in, choose Basic or Pro to unlock the dashboard.
@@ -138,9 +200,10 @@ export function LandingPage() {
                 </ul>
                 <button
                   type="button"
-                  onClick={() => setShowAuthModal(true)}
+                  disabled={busy}
+                  onClick={handleGoogleSignIn}
                   className={cn(
-                    'flex w-full items-center justify-center rounded-xl py-2.5 text-sm font-bold transition cursor-pointer',
+                    'flex w-full items-center justify-center rounded-xl py-2.5 text-sm font-bold transition cursor-pointer disabled:opacity-60',
                     plan.highlight
                       ? 'bg-emerald-500 text-black hover:bg-emerald-400'
                       : 'border border-white/10 bg-white/5 text-white hover:bg-white/10'
@@ -178,7 +241,8 @@ export function LandingPage() {
         <LegalLinks />
       </footer>
 
-      <AuthModal open={showAuthModal} onClose={() => setShowAuthModal(false)} />
+      {/* Access-denied overlay only — no second login gate on load */}
+      <AuthModal open={false} onClose={() => undefined} />
     </div>
   );
 }
