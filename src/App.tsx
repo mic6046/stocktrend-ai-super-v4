@@ -24,6 +24,10 @@ import {
   type ChangeLogState,
 } from './lib/recommendationChangeLog';
 import { buildHorizonView } from './lib/horizonView';
+import {
+  loadPersistedQuantumHints,
+  persistQuantumHint,
+} from './lib/quantumScoreCache';
 import { TruncatedText } from './components/TruncatedText';
 import { AuthModal } from './components/AuthModal';
 import { UsageQuotaBar, QuotaExhaustedBanner } from './components/UsageQuotaBar';
@@ -7083,7 +7087,7 @@ export default function App() {
     userHasPosition,
   ]);
 
-  /** Seed Find a Trade with open card + predict-cache BUYs so scout matches Recommendation labels. */
+  /** Seed Find a Trade with open card + predict-cache + persisted Quantum scores. */
   const findATradeKnownByTicker = React.useMemo(() => {
     const map: Record<
       string,
@@ -7113,12 +7117,13 @@ export default function App() {
         .toUpperCase();
       if (!key) return;
       const prev = map[key] || {};
+      const nextScore =
+        hint.score != null && Number.isFinite(Number(hint.score))
+          ? Number(hint.score)
+          : prev.score;
       map[key] = {
         recommendation: hint.recommendation ?? prev.recommendation,
-        score:
-          hint.score != null && Number.isFinite(Number(hint.score))
-            ? Number(hint.score)
-            : prev.score,
+        score: nextScore,
         confidence:
           hint.confidence != null && Number.isFinite(Number(hint.confidence))
             ? Number(hint.confidence)
@@ -7134,6 +7139,11 @@ export default function App() {
         name: hint.name ?? prev.name,
       };
     };
+
+    // Persisted scores from prior full analyses (survives navigation)
+    for (const [ticker, hint] of Object.entries(loadPersistedQuantumHints())) {
+      upsert(ticker, hint);
+    }
 
     if (data?.ticker) {
       upsert(data.ticker, {
@@ -7182,6 +7192,36 @@ export default function App() {
     horizonView.currentPrice,
     aiStockScore,
     predictCache,
+  ]);
+
+  // Keep Find a Trade aligned with the Recommendation card after every analysis
+  React.useEffect(() => {
+    const ticker = data?.ticker;
+    if (!ticker) return;
+    const score = aiStockScore?.totalScore ?? horizonView.score;
+    const recommendation = aiStockScore?.rating || horizonView.ratingLabel;
+    if (score == null && !recommendation) return;
+    persistQuantumHint({
+      ticker,
+      recommendation,
+      score,
+      confidence: horizonView.confidence ?? confidence,
+      expectedReturn: horizonView.expectedReturn,
+      price: horizonView.currentPrice,
+      name: data.quote?.shortName || data.quote?.longName || ticker,
+    });
+  }, [
+    data?.ticker,
+    data?.quote?.shortName,
+    data?.quote?.longName,
+    aiStockScore?.totalScore,
+    aiStockScore?.rating,
+    horizonView.ratingLabel,
+    horizonView.score,
+    horizonView.confidence,
+    horizonView.expectedReturn,
+    horizonView.currentPrice,
+    confidence,
   ]);
 
   /**

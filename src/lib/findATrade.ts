@@ -125,38 +125,123 @@ function techSignalLabel(tech: any): RecommendationLabel | null {
   return null;
 }
 
-/** Technical-only Quantum-ish score so scout BUYs track chart analysis when full AI score is absent. */
+/** Find-scout score: don't let a single short-term outflow veto bullish structure. */
 function scoutBaseScore(tech: any, px: number): number {
-  const ai = tech?.masterScores?.aiBuyScore;
-  if (ai != null && Number.isFinite(Number(ai))) return clamp(Math.round(Number(ai)), 1, 99);
+  const masters = tech?.masterScores;
+  const ai = masters?.aiBuyScore;
+  const trendScore = Number(masters?.trendScore);
+  const smartScore = Number(masters?.smartMoneyScore);
+  const valueScore = Number(masters?.valueScore);
+  const sentScore = Number(masters?.sentimentScore);
+  const qr = tech?.quantumRefinement;
+  const rsScore = Number(qr?.relativeStrength?.score);
 
-  let s = 58;
+  // Prefer a balanced blend when master board exists — raw aiBuyScore over-punishes one flow print.
+  // Cap the weight of a weak trendScore so mega-caps in MA repair (e.g. NVDA) aren't buried.
+  const blendParts = [trendScore, smartScore, valueScore, sentScore].filter((n) => Number.isFinite(n));
+  let s =
+    blendParts.length >= 3
+      ? blendParts.reduce((a, b) => a + b, 0) / blendParts.length
+      : ai != null && Number.isFinite(Number(ai))
+        ? Number(ai)
+        : 58;
+  if (Number.isFinite(trendScore) && trendScore < 40 && blendParts.length >= 3) {
+    // Re-blend with floored trend so one death-cross print doesn't dominate the scout
+    const repaired = [Math.max(trendScore, 48), smartScore, valueScore, sentScore].filter((n) =>
+      Number.isFinite(n)
+    );
+    s = Math.max(s, repaired.reduce((a, b) => a + b, 0) / repaired.length);
+  }
+  if (ai != null && Number.isFinite(Number(ai))) {
+    s = Math.max(s, Number(ai));
+  }
+
   const rsi = tech?.indicators?.rsi;
-  if (rsi != null && Number.isFinite(rsi)) {
-    if (rsi < 32) s += 10;
-    else if (rsi < 45) s += 6;
-    else if (rsi > 72) s -= 12;
-    else if (rsi > 65) s -= 5;
-    else s += 3;
-  }
   const macd = tech?.indicators?.macd;
-  if (macd != null) {
-    s += macd.macdLine > macd.signalLine ? 7 : -6;
+  const macdBull =
+    macd != null && Number.isFinite(macd.macdLine) && Number.isFinite(macd.signalLine)
+      ? macd.macdLine > macd.signalLine
+      : null;
+  const aboveEma = tech?.indicators?.ema20 != null ? px > tech.indicators.ema20 : null;
+  const aboveSma = tech?.indicators?.sma50 != null ? px > tech.indicators.sma50 : null;
+  const ad = qr?.accumulationDistribution?.status;
+  const trend = String(qr?.trendStrength?.status || '');
+  const sm = qr?.smartMoneyIndex?.status;
+  const instFlow = tech?.indicators?.institutionalFlow?.status;
+  const bb = tech?.indicators?.bollinger?.percent;
+  const chip = String(qr?.chipProfitRatio?.status || '');
+  const shortStatus = String(qr?.shortSelling?.status || '');
+
+  // Structure boosts — keep modest so soft reclaim tapes land BUY, not inflated STRONG BUY
+  if (/BULL/i.test(trend)) s += 10;
+  else if (/BEAR/i.test(trend)) s -= 2; // soft — MA stack can lag price reclaim
+  if (ad === 'ACCUMULATION') s += 10;
+  else if (ad === 'DISTRIBUTION') s -= 10;
+  if (sm === 'BULLISH') s += 6;
+  else if (sm === 'BEARISH') s -= 6;
+  if (instFlow === 'LARGE_INFLOW' || instFlow === 'STEALTH_ACCUMULATION') s += 6;
+  if (instFlow === 'LARGE_OUTFLOW' || instFlow === 'STEALTH_DISTRIBUTION') s -= 3;
+
+  if (macdBull === true) s += 4;
+  else if (macdBull === false) s -= 3;
+  if (aboveEma === true) s += 3;
+  else if (aboveEma === false) s -= 3;
+  if (aboveSma === true) s += 3;
+  else if (aboveSma === false) s -= 2;
+
+  if (rsi != null && Number.isFinite(rsi)) {
+    if (rsi < 35) s += 5;
+    else if (rsi > 78) s -= 7;
+    else if (rsi > 70) s -= 2;
+    else if (rsi >= 45 && rsi <= 65) s += 2;
   }
-  if (tech?.indicators?.ema20 != null) s += px > tech.indicators.ema20 ? 5 : -5;
-  if (tech?.indicators?.sma50 != null) s += px > tech.indicators.sma50 ? 5 : -4;
-  const ad = tech?.quantumRefinement?.accumulationDistribution?.status;
-  if (ad === 'ACCUMULATION') s += 8;
-  if (ad === 'DISTRIBUTION') s -= 8;
-  const trend = tech?.quantumRefinement?.trendStrength?.status;
-  if (typeof trend === 'string') {
-    if (/strong|bull|up/i.test(trend)) s += 6;
-    if (/weak|bear|down/i.test(trend)) s -= 6;
+  if (bb != null && Number.isFinite(bb)) {
+    if (bb <= 0.25) s += 5;
+    else if (bb >= 1.05) s -= 3;
   }
-  const sm = tech?.quantumRefinement?.smartMoneyIndex?.status;
-  if (sm === 'BULLISH') s += 5;
-  if (sm === 'BEARISH') s -= 5;
-  return clamp(Math.round(s), 35, 92);
+
+  // Momentum / positioning edges the Recommendation card often weights more than raw aiBuyScore
+  if (Number.isFinite(rsScore)) {
+    if (rsScore >= 70) s += 4;
+    else if (rsScore >= 60) s += 2;
+    else if (rsScore < 40) s -= 3;
+  }
+  if (/BULL/i.test(chip)) s += 3;
+  else if (/BEAR/i.test(chip)) s -= 3;
+  if (/DECREASING|COVER/i.test(shortStatus)) s += 3;
+  else if (/INCREASING|SQUEEZE_RISK|HEAVY/i.test(shortStatus)) s -= 2;
+
+  // Price reclaim + momentum while MA stack still tagged BEARISH (common on NVDA-like repairs)
+  const priceReclaim =
+    aboveEma === true &&
+    aboveSma === true &&
+    macdBull === true &&
+    ad !== 'DISTRIBUTION' &&
+    (Number.isFinite(rsScore) ? rsScore >= 65 : true);
+
+  const hardConstructive =
+    (/BULL/i.test(trend) && ad === 'ACCUMULATION') ||
+    (ad === 'ACCUMULATION' && (instFlow === 'LARGE_INFLOW' || sm === 'BULLISH')) ||
+    (Number.isFinite(trendScore) &&
+      Number.isFinite(smartScore) &&
+      trendScore >= 60 &&
+      smartScore >= 60 &&
+      ad !== 'DISTRIBUTION');
+  const softConstructive =
+    priceReclaim &&
+    Number.isFinite(sentScore) &&
+    sentScore >= 60 &&
+    Number.isFinite(valueScore) &&
+    valueScore >= 55;
+
+  if (hardConstructive) s = Math.max(s, 72);
+  else if (softConstructive) {
+    s = Math.max(s, 70);
+    // Soft reclaim alone should surface as BUY, not dominate as STRONG BUY
+    s = Math.min(s, 82);
+  }
+
+  return clamp(Math.round(s), 35, 95);
 }
 
 function roughLevels(closes: number[], px: number) {
@@ -289,8 +374,8 @@ async function scoutOne(
     const knownScore =
       known?.score != null && Number.isFinite(Number(known.score)) ? Number(known.score) : null;
     const techScore = scoutBaseScore(tech, px);
-    // Prefer the live Quantum / Recommendation card score when we already analyzed this ticker
-    const baseScore = clamp(Math.round(knownScore ?? techScore), 1, 99);
+    // Prefer the higher of live Quantum card score and constructive scout score
+    const baseScore = clamp(Math.round(Math.max(knownScore ?? 0, techScore)), 1, 99);
     // Horizon-scaled target so 1M/3M BUY can clear return + buy gates like the main card
     const horizonLift = horizon === '1W' ? 0.03 : horizon === '1M' ? 0.06 : horizon === '3M' ? 0.1 : 0.16;
     const bullLift = horizonLift * 1.7;
