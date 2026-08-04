@@ -80,9 +80,10 @@ export function actionToneFromLabel(label: string): ActionTone {
   if (s.includes('exceptional') || s.includes('very strong buy') || s.includes('strong buy')) return 'strong-buy';
   if (s.includes('avoid') || s.includes('strong sell')) return 'strong-sell';
   if (s.includes('moderate buy')) return 'moderate-buy';
+  if (s.includes('accumulat')) return 'buy';
   if (s.includes('reduce')) return 'reduce';
   if (s.includes('sell')) return 'sell';
-  if (s.includes('hold') || s.includes('neutral')) return 'hold';
+  if (s.includes('hold') || s.includes('neutral') || s.includes('wait')) return 'hold';
   if (s.includes('buy')) return 'buy';
   return 'hold';
 }
