@@ -8713,9 +8713,7 @@ export default function App() {
                     onHorizonChange={setAnalysisHorizon}
                     horizonExplanation={`${horizonView.explanation} ${horizonView.validationStatus}`}
                     isLoading={predicting || (loading && !aiStockScore && !prediction)}
-                    currentAction={horizonView.currentAction.action}
-                    currentActionReason={horizonView.currentAction.reason}
-                    userHasPosition={userHasPosition}
+                    doNowActions={horizonView.doNowActions}
                   />
                   <AiInsightsStrip
                     keyRisks={keyRisks}

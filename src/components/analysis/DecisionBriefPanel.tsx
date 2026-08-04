@@ -5,6 +5,7 @@ import { cn } from '../../lib/utils';
 import { GlassCard, SectionLabel } from './GlassCard';
 import { formatPct, formatMoney } from './analysisTheme';
 import type { QuantumEngineOutput } from '../../lib/quantumRecommendationEngine';
+import { doNowToneClass } from '../../lib/doNowActions';
 
 type DecisionBriefPanelProps = {
   decision: QuantumEngineOutput;
@@ -40,25 +41,37 @@ export function DecisionBriefPanel({ decision }: DecisionBriefPanelProps) {
           tone={decision.expectedReturn >= 0 ? 'bull' : 'bear'}
         />
         <Metric label="Risk Level" value={decision.riskLevel} />
-        <Metric label="Do Now (Current Action)" value={decision.currentAction.action} tone={decision.chartStance} />
+        <Metric
+          label="Do Now"
+          value={`📈 ${decision.doNowActions.holding} | 🚫 ${decision.doNowActions.noPosition}`}
+          tone={decision.chartStance}
+        />
         <Metric label="Suggested Action" value={decision.suggestedAction} tone={decision.chartStance} />
       </div>
 
       <p className="text-[10px] text-gray-500 font-mono leading-relaxed">
-        Recommendation = horizon thesis · Current Action = what to do at this live price given{' '}
-        {decision.userHasPosition ? 'you own the stock' : 'you do not own the stock'}. BUY ZONE and ADD
-        POSITION never appear together.
+        Recommendation = horizon thesis · DO NOW shows Holding vs No Position actions from that same
+        recommendation. Live price zones below stay separate for entry timing.
       </p>
 
       <div className="rounded-xl border border-cyan-500/25 bg-cyan-500/5 px-3 py-2.5">
-        <p className="text-[8px] uppercase tracking-wider text-cyan-300/80">
-          Live Price Engine · {decision.userHasPosition ? 'Position held' : 'No position'}
+        <p className="text-[8px] uppercase tracking-wider text-cyan-300/80">DO NOW</p>
+        <p className="mt-1 text-[12px] font-semibold tracking-wide leading-snug flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+          <span className="text-gray-400">📈 Holding:</span>
+          <span className={cn('font-bold uppercase', doNowToneClass(decision.doNowActions.holding))}>
+            {decision.doNowActions.holding}
+          </span>
+          <span className="text-gray-600">|</span>
+          <span className="text-gray-400">🚫 No Position:</span>
+          <span className={cn('font-bold uppercase', doNowToneClass(decision.doNowActions.noPosition))}>
+            {decision.doNowActions.noPosition}
+          </span>
         </p>
-        <p className="mt-1 text-[13px] font-bold text-white">{decision.currentAction.action}</p>
+        <p className="mt-1.5 text-[10px] font-mono text-gray-500">
+          Live zone action ({decision.userHasPosition ? 'position held' : 'no position'}):{' '}
+          {decision.currentAction.action} · {decision.currentAction.confidence}%
+        </p>
         <p className="mt-1 text-[11px] text-gray-300 leading-relaxed">{decision.currentAction.reason}</p>
-        <p className="mt-1 text-[10px] font-mono text-gray-500">
-          Confidence {decision.currentAction.confidence}% · answers: what now / why / when it changes
-        </p>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
