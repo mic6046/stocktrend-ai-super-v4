@@ -8715,6 +8715,10 @@ export default function App() {
                     isLoading={predicting || (loading && !aiStockScore && !prediction)}
                     currentAction={horizonView.currentAction.action}
                     currentActionReason={horizonView.currentAction.reason}
+                    doNowByPosition={{
+                      holding: horizonView.doNowByPosition.holding.action,
+                      noPosition: horizonView.doNowByPosition.noPosition.action,
+                    }}
                     userHasPosition={userHasPosition}
                   />
                   <AiInsightsStrip
