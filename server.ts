@@ -554,6 +554,38 @@ app.get('/api/usage', async (req, res) => {
   }
 });
 
+/** Deduct one AI analysis credit (Find a Trade / Suggest a Trade scout runs). */
+app.post('/api/usage/consume', async (req, res) => {
+  try {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const kindRaw = String(req.body?.kind || 'analysis').trim().toLowerCase();
+    const kind = kindRaw === 'news' ? 'news' : 'analysis';
+    const reason = String(req.body?.reason || 'manual').slice(0, 80);
+    if (!email) {
+      return res.status(400).json({ error: 'email required', code: 'email_required' });
+    }
+    const billed = await consumeUsageCredit(email, kind);
+    if (!billed.ok) {
+      return res.status(billed.status).json({
+        error: billed.error,
+        code: billed.code,
+        usage: billed.usage,
+      });
+    }
+    console.log(`[usage/consume] ${kind} · ${reason} · ${email} · from ${billed.chargedFrom}`);
+    return res.json({
+      ok: true,
+      kind,
+      reason,
+      chargedFrom: billed.chargedFrom,
+      usage: billed.usage,
+    });
+  } catch (err: any) {
+    console.error('[usage/consume] failed:', err?.message || err);
+    res.status(500).json({ error: err?.message || 'Failed to consume credit' });
+  }
+});
+
 // Health check for Cloud Run / load balancers
 app.get('/api/health', (_req, res) => {
   const stripeKey = process.env.STRIPE_SECRET_KEY?.trim() || '';
