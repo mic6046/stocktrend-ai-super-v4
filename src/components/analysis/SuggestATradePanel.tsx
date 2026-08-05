@@ -18,6 +18,8 @@ import {
   type SuggestMarket,
   type SuggestTheme,
 } from '../../lib/suggestTradeUniverses';
+import { consumeAnalysisCredit } from '../../lib/usageApi';
+import { AiAnalysisCreditNotice } from './AiAnalysisCreditNotice';
 
 const MARKET_KEY = 'qn-suggest-market';
 const THEME_KEY = 'qn-suggest-theme';
@@ -45,12 +47,20 @@ function loadTheme(): SuggestTheme {
 type SuggestATradePanelProps = {
   horizon?: HorizonKey;
   onOpenTicker: (ticker: string) => void;
+  /** Signed-in email — required to charge 1 AI analysis credit per scan. */
+  email?: string | null;
+  /** Return false to abort (e.g. out of credits). */
+  onBeforeScan?: () => boolean;
+  onUsage?: (usage: any) => void;
   className?: string;
 };
 
 export function SuggestATradePanel({
   horizon = '1M',
   onOpenTicker,
+  email,
+  onBeforeScan,
+  onUsage,
   className,
 }: SuggestATradePanelProps) {
   const [market, setMarket] = useState<SuggestMarket>(loadMarket);
@@ -79,8 +89,16 @@ export function SuggestATradePanel({
 
   const runSuggest = async () => {
     if (scanning) return;
+    if (onBeforeScan && !onBeforeScan()) {
+      setError('Sign in and keep AI analysis credits available to run Suggest a Trade.');
+      return;
+    }
     if (!universe.length) {
       setError('No names in this market/theme combo. Try All themes.');
+      return;
+    }
+    if (!email) {
+      setError('Sign in required — Suggest a Trade uses 1 AI analysis credit.');
       return;
     }
     setError(null);
@@ -88,6 +106,8 @@ export function SuggestATradePanel({
     setProgress({ done: 0, total: universe.length });
     setResult(null);
     try {
+      const billed = await consumeAnalysisCredit(email, 'suggest-a-trade');
+      if (billed.usage) onUsage?.(billed.usage);
       const out = await findATrade({
         tickers: universe.map((u) => u.ticker),
         horizon,
@@ -96,7 +116,12 @@ export function SuggestATradePanel({
       });
       setResult(out);
     } catch (e: any) {
-      setError(e?.message || 'Suggest a Trade failed');
+      if (e?.usage) onUsage?.(e.usage);
+      setError(
+        e?.code === 'analysis_quota_exceeded' || e?.status === 402
+          ? e?.message || 'Daily AI analysis credits are out. Reload credits to continue.'
+          : e?.message || 'Suggest a Trade failed'
+      );
     } finally {
       setScanning(false);
     }
@@ -107,6 +132,8 @@ export function SuggestATradePanel({
       <SectionLabel icon={<Compass className="w-3.5 h-3.5 text-sky-400" />}>
         Suggest a Trade · {horizonLabel}
       </SectionLabel>
+
+      <AiAnalysisCreditNotice feature="Suggest a Trade" />
 
       <p className="text-[11px] text-gray-400 leading-relaxed">
         Pick a popular market universe. Consensus AI scouts liquid names and suggests a{' '}
@@ -174,7 +201,7 @@ export function SuggestATradePanel({
           )}
         >
           {scanning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-          Suggest a Trade
+          Suggest a Trade (−1 credit)
         </button>
       </div>
 

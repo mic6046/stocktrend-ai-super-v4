@@ -7444,7 +7444,7 @@ export default function App() {
                 ? 'bg-emerald-500 text-black border-emerald-400 shadow-[0_0_16px_rgba(16,185,129,0.35)]'
                 : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/25'
             )}
-            title="Paste a ticker list and let Consensus AI find a BUY"
+            title="AI analysis · uses 1 credit per Find a Trade scan"
           >
             <Rocket className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Find a Trade</span>
@@ -7463,7 +7463,7 @@ export default function App() {
                 ? 'bg-sky-500 text-black border-sky-400 shadow-[0_0_16px_rgba(56,189,248,0.35)]'
                 : 'bg-sky-500/15 text-sky-300 border-sky-500/40 hover:bg-sky-500/25'
             )}
-            title="Suggest a BUY from popular US / HK / Japan / Europe markets"
+            title="AI analysis · uses 1 credit per Suggest a Trade scan"
           >
             <Sparkles className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Suggest a Trade</span>
@@ -7620,6 +7620,12 @@ export default function App() {
             >
               <FindATradePanel
                 horizon={analysisHorizon}
+                email={user?.email}
+                onBeforeScan={() => assertAnalysisCredits()}
+                onUsage={(snap) => {
+                  if (snap) setUsage(snap);
+                  else void refreshUsage();
+                }}
                 onOpenTicker={(sym) => {
                   if (!assertAnalysisCredits()) return;
                   setShowFindATrade(false);
@@ -7638,6 +7644,12 @@ export default function App() {
             >
               <SuggestATradePanel
                 horizon={analysisHorizon}
+                email={user?.email}
+                onBeforeScan={() => assertAnalysisCredits()}
+                onUsage={(snap) => {
+                  if (snap) setUsage(snap);
+                  else void refreshUsage();
+                }}
                 onOpenTicker={(sym) => {
                   if (!assertAnalysisCredits()) return;
                   setShowSuggestATrade(false);
@@ -12964,7 +12976,8 @@ export default function App() {
                 <p className="text-sm text-gray-500 max-w-md mx-auto">
                   Press <span className="text-emerald-400 font-mono">Enter</span> in the search bar, or open{' '}
                   <span className="text-emerald-400 font-semibold">Find a Trade</span> /{' '}
-                  <span className="text-sky-400 font-semibold">Suggest a Trade</span>.
+                  <span className="text-sky-400 font-semibold">Suggest a Trade</span>
+                  <span className="text-gray-500"> (each scan uses 1 AI analysis credit)</span>.
                 </p>
               </div>
               <div className="w-full max-w-xl space-y-3">
