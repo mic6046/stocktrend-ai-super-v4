@@ -5944,6 +5944,31 @@ export default function App() {
 
       if (isInitial) {
         setError(null);
+        // If /api/stock returned synthetic fallback, try a dedicated live quote before painting
+        if (stockData.synthetic) {
+          try {
+            const qRes = await loggedFetch(
+              apiUrl(`/api/quote?ticker=${encodeURIComponent(stockData.ticker || cleanSymbol)}&bypassCache=true`),
+              {
+                __qnMeta: {
+                  reason: 'repair-synthetic-quote',
+                  userAction: runPredict ? 'Search stock' : 'Load stock',
+                },
+              } as any
+            );
+            if (qRes.ok) {
+              const qBody = await qRes.json();
+              const livePx = Number(qBody?.quote?.regularMarketPrice);
+              if (Number.isFinite(livePx) && livePx > 0) {
+                stockData.quote = { ...(stockData.quote || {}), ...qBody.quote };
+                stockData.quoteAsOf = qBody.asOf || Date.now();
+                stockData.synthetic = false;
+              }
+            }
+          } catch {
+            /* keep synthetic chart if quote also fails */
+          }
+        }
         setData(stockData);
         setChartHistory(sanitizedHistory);
         // Predict + news only on explicit Search / Refresh (runPredict)
@@ -5959,11 +5984,30 @@ export default function App() {
       } else {
         if (requestId !== stockRequestSeq.current) return null;
         setChartHistory(sanitizedHistory);
-        setData(prev => prev ? {
-          ...prev,
-          quote: stockData.quote || prev.quote,
-          history: sanitizedHistory || prev.history,
-        } : stockData);
+        setData(prev => {
+          if (!prev) return stockData;
+          const incomingPx = Number(stockData.quote?.regularMarketPrice);
+          const prevPx = Number(prev.quote?.regularMarketPrice);
+          const incomingOk = Number.isFinite(incomingPx) && incomingPx > 0;
+          const prevOk = Number.isFinite(prevPx) && prevPx > 0;
+          // Never let synthetic / empty stock payloads wipe a good live quote after Refresh
+          const preferPrevQuote =
+            !!stockData.synthetic ||
+            !incomingOk ||
+            (prevOk &&
+              incomingOk &&
+              Math.abs(incomingPx - prevPx) / Math.max(prevPx, 1e-9) > 0.25);
+          return {
+            ...prev,
+            ...stockData,
+            history: sanitizedHistory || prev.history,
+            quote: preferPrevQuote ? prev.quote : stockData.quote || prev.quote,
+            quoteAsOf: preferPrevQuote
+              ? (prev as any).quoteAsOf
+              : stockData.quoteAsOf || Date.now(),
+            synthetic: preferPrevQuote ? false : !!stockData.synthetic,
+          };
+        });
         if (runPredict) {
           await handlePredict(stockData, bypassCache, newsItems, predictHistoryOverride);
         }
@@ -6674,9 +6718,12 @@ export default function App() {
   };
 
   const refreshLiveQuoteOnce = async (activeTicker: string, reason: string, userAction: string) => {
-    const res = await loggedFetch(apiUrl(`/api/quote?ticker=${encodeURIComponent(activeTicker)}`), {
-      __qnMeta: { reason, userAction },
-    } as any);
+    const res = await loggedFetch(
+      apiUrl(`/api/quote?ticker=${encodeURIComponent(activeTicker)}&bypassCache=true`),
+      {
+        __qnMeta: { reason, userAction },
+      } as any
+    );
     if (!res.ok) throw new Error(`Quote HTTP ${res.status}`);
     const body = await res.json();
     applyLiveQuote(activeTicker, body);
@@ -8715,6 +8762,10 @@ export default function App() {
                     isLoading={predicting || (loading && !aiStockScore && !prediction)}
                     currentAction={horizonView.currentAction.action}
                     currentActionReason={horizonView.currentAction.reason}
+                    doNowByPosition={{
+                      holding: horizonView.doNowByPosition.holding.action,
+                      noPosition: horizonView.doNowByPosition.noPosition.action,
+                    }}
                     userHasPosition={userHasPosition}
                   />
                   <AiInsightsStrip
