@@ -357,14 +357,22 @@ export function SuggestATradePanel({
             exit={{ opacity: 0 }}
             className="space-y-3"
           >
+            <div className="rounded-xl border border-white/10 bg-black/30 px-3 py-2">
+              <p className="text-[11px] text-gray-300 leading-relaxed">{result.message}</p>
+              <p className="mt-1 text-[10px] font-mono text-gray-500">
+                BUY suggestions only when Consensus gates clear — HOLD / REDUCE never become the top
+                pick.
+              </p>
+            </div>
+
             {result.topPick ? (
               <TopPickCard pick={result.topPick} onOpen={onOpenTicker} marketLabel={marketLabel} />
             ) : (
               <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 px-3 py-3">
-                <p className="text-[12px] text-amber-100 font-semibold">No trade suggested</p>
-                <p className="mt-1 text-[11px] text-gray-400 leading-relaxed">{result.message}</p>
-                <p className="mt-1 text-[10px] text-gray-500">
-                  Add more names to the list, change market/theme, or press Suggest again.
+                <p className="text-[12px] text-amber-100 font-semibold">No BUY trade cleared</p>
+                <p className="mt-1 text-[11px] text-gray-400 leading-relaxed">
+                  None of the {result.scannedCount} names passed BUY gates on this search. Check the
+                  watchlist below or press New search.
                 </p>
               </div>
             )}
@@ -372,7 +380,7 @@ export function SuggestATradePanel({
             {result.buyCandidates.length > 1 && (
               <div>
                 <p className="text-[10px] font-mono uppercase tracking-wider text-gray-500 mb-2">
-                  Other BUY candidates
+                  Other BUY candidates ({result.buyCandidates.length - 1})
                 </p>
                 <div className="space-y-1.5">
                   {result.buyCandidates.slice(1, 5).map((c) => (
@@ -382,14 +390,37 @@ export function SuggestATradePanel({
               </div>
             )}
 
+            {result.watchlistCandidates.length > 0 && (
+              <div>
+                <p className="text-[10px] font-mono uppercase tracking-wider text-amber-200/80 mb-1">
+                  Near-miss watchlist (did not clear BUY)
+                </p>
+                <p className="text-[10px] text-gray-500 mb-2 leading-relaxed">
+                  Closest names from this scout that stayed HOLD / REDUCE — not trade suggestions.
+                </p>
+                <div className="space-y-1.5">
+                  {result.watchlistCandidates.map((c) => (
+                    <CandidateRow key={`${searchId}-w-${c.ticker}`} c={c} onOpen={onOpenTicker} />
+                  ))}
+                </div>
+              </div>
+            )}
+
             <details className="rounded-xl border border-white/8 bg-black/25 px-3 py-2">
               <summary className="text-[10px] font-mono uppercase tracking-wider text-gray-500 cursor-pointer">
-                Scout log ({result.scanned.length})
+                Scout log ({result.scanned.length}) · {result.buyCleared} BUY cleared
               </summary>
               <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
                 {result.scanned.map((c) => (
-                  <p key={`slog-${searchId}-${c.ticker}`} className="text-[10px] font-mono text-gray-500">
+                  <p
+                    key={`slog-${searchId}-${c.ticker}`}
+                    className={cn(
+                      'text-[10px] font-mono',
+                      c.isBuyCandidate ? 'text-emerald-300/90' : 'text-gray-500'
+                    )}
+                  >
                     {c.ticker}: {c.error ? `ERR ${c.error}` : `${c.recommendation} · ${c.currentAction}`}
+                    {c.isBuyCandidate ? ' · BUY gate ✓' : ''}
                   </p>
                 ))}
               </div>

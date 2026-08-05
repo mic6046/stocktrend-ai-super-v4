@@ -102,6 +102,24 @@ function rankScore(c: FindATradeCandidate): number {
   return c.score * 0.35 + c.confidence * 0.3 + Math.max(0, c.expectedReturn) * 2.2 + actionBoost + recBoost;
 }
 
+/** Soft rank for near-miss / watchlist (not forced BUY). */
+function watchScore(c: FindATradeCandidate): number {
+  if (c.error || c.price <= 0) return -1e9;
+  const recBoost =
+    c.recommendation === 'STRONG BUY'
+      ? 20
+      : c.recommendation === 'BUY'
+        ? 16
+        : c.recommendation === 'HOLD'
+          ? 8
+          : c.recommendation === 'REDUCE'
+            ? -4
+            : -12;
+  const actionBoost =
+    c.currentAction === 'BUY' ? 10 : c.currentAction === 'WAIT' || c.currentAction === 'HOLD' ? 3 : -6;
+  return c.score * 0.4 + c.confidence * 0.25 + Math.max(-5, c.expectedReturn) * 1.5 + recBoost + actionBoost;
+}
+
 async function scoutOne(
   ticker: string,
   horizon: HorizonKey,
@@ -244,8 +262,13 @@ async function scoutOne(
 export type FindATradeResult = {
   scanned: FindATradeCandidate[];
   buyCandidates: FindATradeCandidate[];
+  /** Best non-BUY names when few/no BUY cleared — watchlist only, not forced trades. */
+  watchlistCandidates: FindATradeCandidate[];
   topPick: FindATradeCandidate | null;
   message: string;
+  /** How many of the scout list cleared BUY gates. */
+  buyCleared: number;
+  scannedCount: number;
 };
 
 export async function findATrade(opts: {
@@ -278,8 +301,11 @@ export async function findATrade(opts: {
     return {
       scanned: [],
       buyCandidates: [],
+      watchlistCandidates: [],
       topPick: null,
       message: 'Enter at least one ticker to scout.',
+      buyCleared: 0,
+      scannedCount: 0,
     };
   }
 
@@ -300,12 +326,27 @@ export async function findATrade(opts: {
   const actionable = buyCandidates.filter((c) => c.currentAction === 'BUY');
   const topPick = (actionable[0] || buyCandidates[0]) ?? null;
 
+  const buySet = new Set(buyCandidates.map((c) => c.ticker));
+  const watchlistCandidates = scanned
+    .filter((c) => !buySet.has(c.ticker) && !c.error && c.price > 0)
+    .map((c) => ({ ...c, tradeScore: watchScore(c) }))
+    .sort((a, b) => b.tradeScore - a.tradeScore)
+    .slice(0, 5);
+
+  const buyCleared = buyCandidates.length;
+  const scannedCount = scanned.length;
+
   return {
     scanned,
     buyCandidates,
+    watchlistCandidates,
     topPick,
+    buyCleared,
+    scannedCount,
     message: topPick
-      ? `Top trade: ${topPick.ticker} · ${topPick.recommendation} · Do now: ${topPick.currentAction}`
-      : 'No BUY trade cleared Consensus gates in this list. Wait or refresh the universe.',
+      ? buyCleared === 1
+        ? `Only 1 of ${scannedCount} cleared BUY gates: ${topPick.ticker} · Do now: ${topPick.currentAction}`
+        : `${buyCleared} of ${scannedCount} cleared BUY · top: ${topPick.ticker} · Do now: ${topPick.currentAction}`
+      : `0 of ${scannedCount} cleared BUY gates. See watchlist near-misses or refresh the list.`,
   };
 }
