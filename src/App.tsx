@@ -16,7 +16,7 @@ import {
   DecisionBriefPanel,
   RecommendationChangeLogPanel,
   FindATradePanel,
-  SuggestATradePanel,
+  TradeSuggestionsPanel,
   MarketDataRefreshBar,
   type HorizonKey,
 } from './components/analysis';
@@ -1219,7 +1219,7 @@ export default function App() {
   const [analysisHorizon, setAnalysisHorizon] = useState<HorizonKey>('1M');
   const [userHasPosition, setUserHasPosition] = useState(false);
   const [showFindATrade, setShowFindATrade] = useState(false);
-  const [showSuggestATrade, setShowSuggestATrade] = useState(false);
+  const [showTradeSuggestions, setShowTradeSuggestions] = useState(false);
   const [refreshMode, setRefreshMode] = useState<RefreshMode>(() => loadRefreshMode());
   const [autoRefreshIntervalSec, setAutoRefreshIntervalSec] = useState<AutoRefreshIntervalSec>(
     () => loadAutoRefreshIntervalSec()
@@ -7436,7 +7436,7 @@ export default function App() {
             onClick={() => {
               setActivePage('DASHBOARD');
               setShowFindATrade((v) => !v);
-              if (!showFindATrade) setShowSuggestATrade(false);
+              if (!showFindATrade) setShowTradeSuggestions(false);
             }}
             className={cn(
               'shrink-0 inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
@@ -7454,19 +7454,19 @@ export default function App() {
             type="button"
             onClick={() => {
               setActivePage('DASHBOARD');
-              setShowSuggestATrade((v) => !v);
-              if (!showSuggestATrade) setShowFindATrade(false);
+              setShowTradeSuggestions((v) => !v);
+              if (!showTradeSuggestions) setShowFindATrade(false);
             }}
             className={cn(
               'shrink-0 inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
-              showSuggestATrade
-                ? 'bg-sky-500 text-black border-sky-400 shadow-[0_0_16px_rgba(56,189,248,0.35)]'
+              showTradeSuggestions
+                ? 'bg-sky-500 text-black border-sky-400 shadow-[0_0_18px_rgba(56,189,248,0.35)]'
                 : 'bg-sky-500/15 text-sky-300 border-sky-500/40 hover:bg-sky-500/25'
             )}
-            title="Suggest a BUY from popular US / HK / Japan / Europe markets"
+            title="Flow engine: sentiment, institutional, whale, smart money — with stretch warnings"
           >
             <Sparkles className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Suggest a Trade</span>
+            <span className="hidden sm:inline">Trade Suggestions</span>
             <span className="sm:hidden">Suggest</span>
           </button>
         </div>
@@ -7628,19 +7628,19 @@ export default function App() {
               />
             </motion.div>
           )}
-          {showSuggestATrade && (
+          {showTradeSuggestions && (
             <motion.div
-              key="suggest-a-trade-dock"
+              key="trade-suggestions-dock"
               initial={{ opacity: 0, y: -8 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -6 }}
               className="mb-6"
             >
-              <SuggestATradePanel
+              <TradeSuggestionsPanel
                 horizon={analysisHorizon}
                 onOpenTicker={(sym) => {
                   if (!assertAnalysisCredits()) return;
-                  setShowSuggestATrade(false);
+                  setShowTradeSuggestions(false);
                   runTickerSearch(sym);
                 }}
               />
@@ -12964,7 +12964,7 @@ export default function App() {
                 <p className="text-sm text-gray-500 max-w-md mx-auto">
                   Press <span className="text-emerald-400 font-mono">Enter</span> in the search bar, or open{' '}
                   <span className="text-emerald-400 font-semibold">Find a Trade</span> /{' '}
-                  <span className="text-sky-400 font-semibold">Suggest a Trade</span>.
+                  <span className="text-sky-400 font-semibold">Trade Suggestions</span>.
                 </p>
               </div>
               <div className="w-full max-w-xl space-y-3">
@@ -12973,7 +12973,7 @@ export default function App() {
                     type="button"
                     onClick={() => {
                       setShowFindATrade(true);
-                      setShowSuggestATrade(false);
+                      setShowTradeSuggestions(false);
                     }}
                     className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-emerald-500 text-black py-2.5 text-[12px] font-bold uppercase tracking-wider hover:bg-emerald-400 transition-colors cursor-pointer"
                   >
@@ -12986,22 +12986,22 @@ export default function App() {
                     Find a Trade panel is open above — paste tickers and scan.
                   </p>
                 )}
-                {!showSuggestATrade && (
+                {!showTradeSuggestions && (
                   <button
                     type="button"
                     onClick={() => {
-                      setShowSuggestATrade(true);
+                      setShowTradeSuggestions(true);
                       setShowFindATrade(false);
                     }}
                     className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-sky-500 text-black py-2.5 text-[12px] font-bold uppercase tracking-wider hover:bg-sky-400 transition-colors cursor-pointer"
                   >
                     <Sparkles className="w-4 h-4" />
-                    Open Suggest a Trade
+                    Open Trade Suggestions
                   </button>
                 )}
-                {showSuggestATrade && (
+                {showTradeSuggestions && (
                   <p className="text-[11px] text-sky-300/80 font-mono text-center">
-                    Suggest a Trade panel is open above — pick a market and scan.
+                    Trade Suggestions panel is open above — pick a market and scan.
                   </p>
                 )}
               </div>
