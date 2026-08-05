@@ -11,7 +11,7 @@ import { cn } from '../lib/utils';
  * Dashboard never mounts here. Google sign-in is inline (no auto-open modal).
  */
 export function LandingPage() {
-  const { signInWithGoogle, clearAccessDenied, accessDenied } = useAuth();
+  const { signInWithGoogle, clearAccessDenied } = useAuth();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
