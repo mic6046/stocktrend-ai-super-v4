@@ -403,7 +403,7 @@ export function TradeZonesPanel({
             transition={{ duration: 0.28, delay: 0.22 }}
             className={cn(
               'rounded-xl border border-rose-500/35 bg-rose-500/10 px-3 py-2.5 min-w-0',
-              currentAction?.zoneKey === 'stop' && 'ring-1 ring-cyan-400/40'
+              (currentAction?.zoneKey === 'stop' || activeZoneKey === 'stop') && 'ring-1 ring-cyan-400/40'
             )}
           >
             <div className="flex items-start justify-between gap-3 min-w-0">
@@ -413,6 +413,11 @@ export function TradeZonesPanel({
                     🔴
                   </span>
                   Stop Loss Below
+                  {(currentAction?.zoneKey === 'stop' || activeZoneKey === 'stop') && (
+                    <span className="ml-1.5 text-[8px] font-mono text-cyan-300 normal-case tracking-normal">
+                      · live
+                    </span>
+                  )}
                 </p>
                 <p className="mt-1 text-[11px] text-gray-300 leading-snug">
                   {userHasPosition
