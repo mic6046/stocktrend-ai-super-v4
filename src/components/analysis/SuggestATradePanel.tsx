@@ -106,8 +106,17 @@ export function SuggestATradePanel({
     setProgress({ done: 0, total: universe.length });
     setResult(null);
     try {
-      const billed = await consumeAnalysisCredit(email, 'suggest-a-trade');
-      if (billed.usage) onUsage?.(billed.usage);
+      try {
+        const billed = await consumeAnalysisCredit(email, 'suggest-a-trade');
+        if (billed.usage) onUsage?.(billed.usage);
+      } catch (creditErr: any) {
+        if (creditErr?.status === 404) {
+          console.warn('[suggest-a-trade] /api/usage/consume not deployed yet — reminder shown, scan continues');
+        } else {
+          if (creditErr?.usage) onUsage?.(creditErr.usage);
+          throw creditErr;
+        }
+      }
       const out = await findATrade({
         tickers: universe.map((u) => u.ticker),
         horizon,

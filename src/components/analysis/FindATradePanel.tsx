@@ -86,8 +86,18 @@ export function FindATradePanel({
     setProgress({ done: 0, total: tickers.length });
     setResult(null);
     try {
-      const billed = await consumeAnalysisCredit(email, 'find-a-trade');
-      if (billed.usage) onUsage?.(billed.usage);
+      try {
+        const billed = await consumeAnalysisCredit(email, 'find-a-trade');
+        if (billed.usage) onUsage?.(billed.usage);
+      } catch (creditErr: any) {
+        // Soft-fail only if consume route is not deployed yet (404)
+        if (creditErr?.status === 404) {
+          console.warn('[find-a-trade] /api/usage/consume not deployed yet — reminder shown, scan continues');
+        } else {
+          if (creditErr?.usage) onUsage?.(creditErr.usage);
+          throw creditErr;
+        }
+      }
       const out = await findATrade({
         tickers,
         horizon,
