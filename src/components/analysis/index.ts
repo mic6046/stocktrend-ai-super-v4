@@ -10,5 +10,6 @@ export { DecisionBriefPanel } from './DecisionBriefPanel';
 export { RecommendationChangeLogPanel } from './RecommendationChangeLogPanel';
 export { FindATradePanel } from './FindATradePanel';
 export { SuggestATradePanel } from './SuggestATradePanel';
+export { TradeSuggestionsPanel } from './TradeSuggestionsPanel';
 export { MarketDataRefreshBar } from './MarketDataRefreshBar';
 export * from './analysisTheme';
