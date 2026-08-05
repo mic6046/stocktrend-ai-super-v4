@@ -1220,6 +1220,8 @@ export default function App() {
   const [userHasPosition, setUserHasPosition] = useState(false);
   const [showFindATrade, setShowFindATrade] = useState(false);
   const [showSuggestATrade, setShowSuggestATrade] = useState(false);
+  /** Bumped on every Suggest header/empty-state press → panel starts a new search. */
+  const [suggestRunToken, setSuggestRunToken] = useState(0);
   const [refreshMode, setRefreshMode] = useState<RefreshMode>(() => loadRefreshMode());
   const [autoRefreshIntervalSec, setAutoRefreshIntervalSec] = useState<AutoRefreshIntervalSec>(
     () => loadAutoRefreshIntervalSec()
@@ -7501,8 +7503,10 @@ export default function App() {
             type="button"
             onClick={() => {
               setActivePage('DASHBOARD');
-              setShowSuggestATrade((v) => !v);
-              if (!showSuggestATrade) setShowFindATrade(false);
+              setShowFindATrade(false);
+              setShowSuggestATrade(true);
+              // Every header press is a new Suggest search
+              setSuggestRunToken((n) => n + 1);
             }}
             className={cn(
               'shrink-0 inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
@@ -7510,7 +7514,7 @@ export default function App() {
                 ? 'bg-sky-500 text-black border-sky-400 shadow-[0_0_16px_rgba(56,189,248,0.35)]'
                 : 'bg-sky-500/15 text-sky-300 border-sky-500/40 hover:bg-sky-500/25'
             )}
-            title="Suggest a BUY from popular US / HK / Japan / Europe markets"
+            title="New Suggest a Trade search from popular US / HK / Japan / Europe markets"
           >
             <Sparkles className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Suggest a Trade</span>
@@ -7685,6 +7689,7 @@ export default function App() {
             >
               <SuggestATradePanel
                 horizon={analysisHorizon}
+                runToken={suggestRunToken}
                 onOpenTicker={(sym) => {
                   if (!assertAnalysisCredits()) return;
                   setShowSuggestATrade(false);
@@ -13043,6 +13048,7 @@ export default function App() {
                     onClick={() => {
                       setShowSuggestATrade(true);
                       setShowFindATrade(false);
+                      setSuggestRunToken((n) => n + 1);
                     }}
                     className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-sky-500 text-black py-2.5 text-[12px] font-bold uppercase tracking-wider hover:bg-sky-400 transition-colors cursor-pointer"
                   >
@@ -13052,7 +13058,7 @@ export default function App() {
                 )}
                 {showSuggestATrade && (
                   <p className="text-[11px] text-sky-300/80 font-mono text-center">
-                    Suggest a Trade panel is open above — pick a market and scan.
+                    Suggest a Trade is searching above — press Suggest again for a new search.
                   </p>
                 )}
               </div>

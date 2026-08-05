@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Compass, Loader2, Search, Sparkles } from 'lucide-react';
 import { cn } from '../../lib/utils';
@@ -17,6 +17,7 @@ import {
   buildSuggestUniverse,
   type SuggestMarket,
   type SuggestTheme,
+  type UniverseName,
 } from '../../lib/suggestTradeUniverses';
 
 const MARKET_KEY = 'qn-suggest-market';
@@ -46,19 +47,31 @@ type SuggestATradePanelProps = {
   horizon?: HorizonKey;
   onOpenTicker: (ticker: string) => void;
   className?: string;
+  /**
+   * Increment from the header Suggest button so each press starts a new search
+   * even when the panel is already open.
+   */
+  runToken?: number;
 };
 
 export function SuggestATradePanel({
   horizon = '1M',
   onOpenTicker,
   className,
+  runToken = 0,
 }: SuggestATradePanelProps) {
   const [market, setMarket] = useState<SuggestMarket>(loadMarket);
   const [theme, setTheme] = useState<SuggestTheme>(loadTheme);
+  const [universe, setUniverse] = useState<UniverseName[]>(() =>
+    buildSuggestUniverse(loadMarket(), loadTheme(), FIND_A_TRADE_MAX, { shuffle: true })
+  );
   const [scanning, setScanning] = useState(false);
   const [progress, setProgress] = useState<FindATradeProgress | null>(null);
   const [result, setResult] = useState<FindATradeResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [searchId, setSearchId] = useState(0);
+  const scanningRef = useRef(false);
+  const lastRunTokenRef = useRef(0);
 
   useEffect(() => {
     try {
@@ -67,40 +80,53 @@ export function SuggestATradePanel({
     } catch {
       /* ignore */
     }
+    // Preview the next scout list (shuffled) when filters change — run still reshuffles again
+    setUniverse(buildSuggestUniverse(market, theme, FIND_A_TRADE_MAX, { shuffle: true }));
   }, [market, theme]);
 
-  const universe = useMemo(
-    () => buildSuggestUniverse(market, theme, FIND_A_TRADE_MAX),
-    [market, theme]
-  );
   const horizonLabel = HORIZON_OPTIONS.find((o) => o.key === horizon)?.label ?? horizon;
   const marketLabel = SUGGEST_MARKETS.find((m) => m.key === market)?.label ?? market;
   const themeLabel = SUGGEST_THEMES.find((t) => t.key === theme)?.label ?? theme;
 
   const runSuggest = async () => {
-    if (scanning) return;
-    if (!universe.length) {
+    if (scanningRef.current) return;
+    // Fresh sample every press — new shuffle + bypass stock cache
+    const scoutList = buildSuggestUniverse(market, theme, FIND_A_TRADE_MAX, { shuffle: true });
+    setUniverse(scoutList);
+    if (!scoutList.length) {
       setError('No names in this market/theme combo. Try All themes.');
       return;
     }
     setError(null);
+    scanningRef.current = true;
     setScanning(true);
-    setProgress({ done: 0, total: universe.length });
+    setProgress({ done: 0, total: scoutList.length });
     setResult(null);
+    setSearchId((n) => n + 1);
     try {
       const out = await findATrade({
-        tickers: universe.map((u) => u.ticker),
+        tickers: scoutList.map((u) => u.ticker),
         horizon,
         concurrency: 3,
+        bypassCache: true,
         onProgress: setProgress,
       });
       setResult(out);
     } catch (e: any) {
       setError(e?.message || 'Suggest a Trade failed');
     } finally {
+      scanningRef.current = false;
       setScanning(false);
     }
   };
+
+  // Header Suggest presses bump runToken → always start a new search
+  useEffect(() => {
+    if (!runToken || runToken === lastRunTokenRef.current) return;
+    lastRunTokenRef.current = runToken;
+    void runSuggest();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: only when runToken changes
+  }, [runToken]);
 
   return (
     <GlassCard className={cn('space-y-3', className)}>
@@ -109,7 +135,8 @@ export function SuggestATradePanel({
       </SectionLabel>
 
       <p className="text-[11px] text-gray-400 leading-relaxed">
-        Pick a popular market universe. Consensus AI scouts liquid names and suggests a{' '}
+        Each press starts a <span className="text-sky-300 font-semibold">new search</span> — fresh
+        prices, reshuffled scout list. Consensus AI suggests a{' '}
         <span className="text-emerald-300 font-semibold">BUY</span> only if gates clear — never forced.
       </p>
 
@@ -119,7 +146,8 @@ export function SuggestATradePanel({
           <select
             value={market}
             onChange={(e) => setMarket(e.target.value as SuggestMarket)}
-            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-[12px] text-gray-100 focus:outline-none focus:border-sky-500/40"
+            disabled={scanning}
+            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-[12px] text-gray-100 focus:outline-none focus:border-sky-500/40 disabled:opacity-60"
           >
             {SUGGEST_MARKETS.map((m) => (
               <option key={m.key} value={m.key}>
@@ -133,7 +161,8 @@ export function SuggestATradePanel({
           <select
             value={theme}
             onChange={(e) => setTheme(e.target.value as SuggestTheme)}
-            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-[12px] text-gray-100 focus:outline-none focus:border-sky-500/40"
+            disabled={scanning}
+            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-[12px] text-gray-100 focus:outline-none focus:border-sky-500/40 disabled:opacity-60"
           >
             {SUGGEST_THEMES.map((t) => (
               <option key={t.key} value={t.key}>
@@ -147,6 +176,7 @@ export function SuggestATradePanel({
       <div className="rounded-xl border border-white/8 bg-black/25 px-3 py-2">
         <p className="text-[9px] font-mono uppercase tracking-wider text-gray-500 mb-1.5">
           Scout universe · {universe.length} names
+          {searchId > 0 ? ` · search #${searchId}` : ''}
         </p>
         <p className="text-[10px] font-mono text-gray-400 leading-relaxed break-words">
           {universe.length
@@ -160,7 +190,9 @@ export function SuggestATradePanel({
           {marketLabel} · {themeLabel}
           {scanning && progress
             ? ` · scanning ${progress.done}/${progress.total}${progress.current ? ` (${progress.current})` : ''}`
-            : ''}
+            : result
+              ? ' · press again for a new search'
+              : ''}
         </p>
         <button
           type="button"
@@ -174,7 +206,7 @@ export function SuggestATradePanel({
           )}
         >
           {scanning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-          Suggest a Trade
+          {scanning ? 'Searching…' : result ? 'New search' : 'Suggest a Trade'}
         </button>
       </div>
 
@@ -187,7 +219,7 @@ export function SuggestATradePanel({
       <AnimatePresence mode="wait">
         {result && (
           <motion.div
-            key={result.message}
+            key={`suggest-${searchId}-${result.message}`}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
@@ -200,7 +232,7 @@ export function SuggestATradePanel({
                 <p className="text-[12px] text-amber-100 font-semibold">No trade suggested</p>
                 <p className="mt-1 text-[11px] text-gray-400 leading-relaxed">{result.message}</p>
                 <p className="mt-1 text-[10px] text-gray-500">
-                  Try another market/theme, or wait for better setups.
+                  Press Suggest again for a new search, or try another market/theme.
                 </p>
               </div>
             )}
@@ -212,7 +244,7 @@ export function SuggestATradePanel({
                 </p>
                 <div className="space-y-1.5">
                   {result.buyCandidates.slice(1, 5).map((c) => (
-                    <CandidateRow key={c.ticker} c={c} onOpen={onOpenTicker} />
+                    <CandidateRow key={`${searchId}-${c.ticker}`} c={c} onOpen={onOpenTicker} />
                   ))}
                 </div>
               </div>
@@ -224,7 +256,7 @@ export function SuggestATradePanel({
               </summary>
               <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
                 {result.scanned.map((c) => (
-                  <p key={`slog-${c.ticker}`} className="text-[10px] font-mono text-gray-500">
+                  <p key={`slog-${searchId}-${c.ticker}`} className="text-[10px] font-mono text-gray-500">
                     {c.ticker}: {c.error ? `ERR ${c.error}` : `${c.recommendation} · ${c.currentAction}`}
                   </p>
                 ))}
