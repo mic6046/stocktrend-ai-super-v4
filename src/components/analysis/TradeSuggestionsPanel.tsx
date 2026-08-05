@@ -439,10 +439,13 @@ function TopSuggestionCard({
               ? 'defensive'
               : 'mixed / neutral'}
         </p>
-        <div className="flex items-center gap-1" title="Legend: Green ≥58 · Yellow 40–57 · Red &lt;40">
-          <span className={cn('w-2 h-2 rounded-full', sentimentDot('Green'))} />
-          <span className={cn('w-2 h-2 rounded-full', sentimentDot('Yellow'))} />
-          <span className={cn('w-2 h-2 rounded-full', sentimentDot('Red'))} />
+        <div
+          className="flex items-center gap-1"
+          title={`Market sentiment ${pick.marketSentiment}${
+            pick.sentimentScore != null ? ` (${Math.round(pick.sentimentScore)}/100)` : ''
+          } · Green ≥58 · Yellow 40–57 · Red <40`}
+        >
+          <span className={cn('w-2.5 h-2.5 rounded-full', sentimentDot(pick.marketSentiment))} />
         </div>
       </div>
 
