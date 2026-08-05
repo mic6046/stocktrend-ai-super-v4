@@ -1,12 +1,13 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Compass, Loader2, Search, Sparkles } from 'lucide-react';
+import { Compass, ListPlus, Loader2, Plus, Search, Sparkles } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { GlassCard, SectionLabel } from './GlassCard';
 import { formatMoney, formatPct, type HorizonKey, HORIZON_OPTIONS } from './analysisTheme';
 import {
   FIND_A_TRADE_MAX,
   findATrade,
+  parseTickerList,
   type FindATradeCandidate,
   type FindATradeProgress,
   type FindATradeResult,
@@ -15,12 +16,14 @@ import {
   SUGGEST_MARKETS,
   SUGGEST_THEMES,
   buildSuggestUniverse,
+  universeTickers,
   type SuggestMarket,
   type SuggestTheme,
 } from '../../lib/suggestTradeUniverses';
 
 const MARKET_KEY = 'qn-suggest-market';
 const THEME_KEY = 'qn-suggest-theme';
+const LIST_KEY = 'qn-suggest-trade-list';
 
 function loadMarket(): SuggestMarket {
   try {
@@ -42,23 +45,55 @@ function loadTheme(): SuggestTheme {
   return 'ALL';
 }
 
+function loadInitialList(market: SuggestMarket, theme: SuggestTheme): string {
+  const curated = universeTickers(market, theme, FIND_A_TRADE_MAX);
+  try {
+    const raw = localStorage.getItem(LIST_KEY);
+    if (raw != null && raw.trim()) {
+      const parsed = parseTickerList(raw, FIND_A_TRADE_MAX);
+      if (parsed.length) return parsed.join(', ');
+    }
+  } catch {
+    /* ignore */
+  }
+  return curated.join(', ');
+}
+
+function normalizeAddTicker(raw: string): string | null {
+  const t = raw.trim().toUpperCase().replace(/^\$/, '');
+  if (!/^[A-Z0-9.-]{1,16}$/.test(t)) return null;
+  return t;
+}
+
 type SuggestATradePanelProps = {
   horizon?: HorizonKey;
   onOpenTicker: (ticker: string) => void;
   className?: string;
+  /**
+   * Increment from the header Suggest button so each press starts a new search
+   * even when the panel is already open.
+   */
+  runToken?: number;
 };
 
 export function SuggestATradePanel({
   horizon = '1M',
   onOpenTicker,
   className,
+  runToken = 0,
 }: SuggestATradePanelProps) {
   const [market, setMarket] = useState<SuggestMarket>(loadMarket);
   const [theme, setTheme] = useState<SuggestTheme>(loadTheme);
+  const [listText, setListText] = useState(() => loadInitialList(loadMarket(), loadTheme()));
+  const [addDraft, setAddDraft] = useState('');
   const [scanning, setScanning] = useState(false);
   const [progress, setProgress] = useState<FindATradeProgress | null>(null);
   const [result, setResult] = useState<FindATradeResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [searchId, setSearchId] = useState(0);
+  const scanningRef = useRef(false);
+  const lastRunTokenRef = useRef(0);
+  const skipMarketSync = useRef(true);
 
   useEffect(() => {
     try {
@@ -69,7 +104,27 @@ export function SuggestATradePanel({
     }
   }, [market, theme]);
 
-  const universe = useMemo(
+  useEffect(() => {
+    try {
+      localStorage.setItem(LIST_KEY, listText);
+    } catch {
+      /* ignore */
+    }
+  }, [listText]);
+
+  // Market/theme change reloads curated popular names (user can still edit afterward)
+  useEffect(() => {
+    if (skipMarketSync.current) {
+      skipMarketSync.current = false;
+      return;
+    }
+    const curated = universeTickers(market, theme, FIND_A_TRADE_MAX);
+    setListText(curated.join(', '));
+    setResult(null);
+  }, [market, theme]);
+
+  const parsed = useMemo(() => parseTickerList(listText, FIND_A_TRADE_MAX), [listText]);
+  const popularUniverse = useMemo(
     () => buildSuggestUniverse(market, theme, FIND_A_TRADE_MAX),
     [market, theme]
   );
@@ -77,30 +132,77 @@ export function SuggestATradePanel({
   const marketLabel = SUGGEST_MARKETS.find((m) => m.key === market)?.label ?? market;
   const themeLabel = SUGGEST_THEMES.find((t) => t.key === theme)?.label ?? theme;
 
+  const fillFromMarketTheme = () => {
+    const tickers = universeTickers(market, theme, FIND_A_TRADE_MAX);
+    setListText(tickers.join(', '));
+    setResult(null);
+    setError(null);
+  };
+
+  const addTickerToList = (raw?: string) => {
+    const ticker = normalizeAddTicker(raw ?? addDraft);
+    if (!ticker) {
+      setError('Enter a valid ticker (e.g. AAPL, 0700.HK, 7203.T).');
+      return;
+    }
+    const existing = parseTickerList(listText, FIND_A_TRADE_MAX);
+    if (existing.includes(ticker)) {
+      setError(`${ticker} is already in the search list.`);
+      return;
+    }
+    if (existing.length >= FIND_A_TRADE_MAX) {
+      setError(`Search list is full (max ${FIND_A_TRADE_MAX}). Remove one to add ${ticker}.`);
+      return;
+    }
+    setListText([...existing, ticker].join(', '));
+    setAddDraft('');
+    setError(null);
+    setResult(null);
+  };
+
   const runSuggest = async () => {
-    if (scanning) return;
-    if (!universe.length) {
-      setError('No names in this market/theme combo. Try All themes.');
+    if (scanningRef.current) return;
+    let tickers = parseTickerList(listText, FIND_A_TRADE_MAX);
+    if (!tickers.length) {
+      tickers = universeTickers(market, theme, FIND_A_TRADE_MAX);
+      if (tickers.length) setListText(tickers.join(', '));
+    }
+    if (!tickers.length) {
+      setError('Add tickers to the search list, or load popular names from market/theme.');
       return;
     }
     setError(null);
+    scanningRef.current = true;
     setScanning(true);
-    setProgress({ done: 0, total: universe.length });
+    setProgress({ done: 0, total: tickers.length });
     setResult(null);
+    setSearchId((n) => n + 1);
     try {
       const out = await findATrade({
-        tickers: universe.map((u) => u.ticker),
+        tickers,
         horizon,
         concurrency: 3,
+        bypassCache: true,
         onProgress: setProgress,
       });
       setResult(out);
     } catch (e: any) {
       setError(e?.message || 'Suggest a Trade failed');
     } finally {
+      scanningRef.current = false;
       setScanning(false);
     }
   };
+
+  // Header Suggest presses bump runToken → always start a new search
+  useEffect(() => {
+    if (!runToken || runToken === lastRunTokenRef.current) return;
+    lastRunTokenRef.current = runToken;
+    void runSuggest();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: only when runToken changes
+  }, [runToken]);
+
+  const canScan = !scanning && (parsed.length > 0 || popularUniverse.length > 0);
 
   return (
     <GlassCard className={cn('space-y-3', className)}>
@@ -109,8 +211,10 @@ export function SuggestATradePanel({
       </SectionLabel>
 
       <p className="text-[11px] text-gray-400 leading-relaxed">
-        Pick a popular market universe. Consensus AI scouts liquid names and suggests a{' '}
-        <span className="text-emerald-300 font-semibold">BUY</span> only if gates clear — never forced.
+        Load popular names, then <span className="text-sky-300 font-semibold">add your own tickers</span>{' '}
+        to the search list. Each press is a{' '}
+        <span className="text-sky-300 font-semibold">new search</span> with fresh prices. Consensus AI
+        suggests a <span className="text-emerald-300 font-semibold">BUY</span> only if gates clear.
       </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -119,7 +223,8 @@ export function SuggestATradePanel({
           <select
             value={market}
             onChange={(e) => setMarket(e.target.value as SuggestMarket)}
-            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-[12px] text-gray-100 focus:outline-none focus:border-sky-500/40"
+            disabled={scanning}
+            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-[12px] text-gray-100 focus:outline-none focus:border-sky-500/40 disabled:opacity-60"
           >
             {SUGGEST_MARKETS.map((m) => (
               <option key={m.key} value={m.key}>
@@ -133,7 +238,8 @@ export function SuggestATradePanel({
           <select
             value={theme}
             onChange={(e) => setTheme(e.target.value as SuggestTheme)}
-            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-[12px] text-gray-100 focus:outline-none focus:border-sky-500/40"
+            disabled={scanning}
+            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-[12px] text-gray-100 focus:outline-none focus:border-sky-500/40 disabled:opacity-60"
           >
             {SUGGEST_THEMES.map((t) => (
               <option key={t.key} value={t.key}>
@@ -144,37 +250,95 @@ export function SuggestATradePanel({
         </label>
       </div>
 
-      <div className="rounded-xl border border-white/8 bg-black/25 px-3 py-2">
-        <p className="text-[9px] font-mono uppercase tracking-wider text-gray-500 mb-1.5">
-          Scout universe · {universe.length} names
-        </p>
-        <p className="text-[10px] font-mono text-gray-400 leading-relaxed break-words">
-          {universe.length
-            ? universe.map((u) => u.ticker).join(' · ')
-            : 'No tickers for this filter'}
-        </p>
-      </div>
-
       <div className="flex flex-wrap items-center gap-2 justify-between">
         <p className="text-[10px] font-mono text-gray-500">
-          {marketLabel} · {themeLabel}
-          {scanning && progress
-            ? ` · scanning ${progress.done}/${progress.total}${progress.current ? ` (${progress.current})` : ''}`
-            : ''}
+          {marketLabel} · {themeLabel} · up to {FIND_A_TRADE_MAX} tickers
+          {searchId > 0 ? ` · search #${searchId}` : ''}
         </p>
         <button
           type="button"
-          disabled={scanning || universe.length === 0}
+          onClick={fillFromMarketTheme}
+          disabled={scanning || popularUniverse.length === 0}
+          className={cn(
+            'inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider border transition-all cursor-pointer',
+            scanning || popularUniverse.length === 0
+              ? 'bg-white/5 text-gray-500 border-white/10'
+              : 'bg-white/5 text-sky-300 border-sky-500/30 hover:bg-sky-500/10'
+          )}
+        >
+          <ListPlus className="w-3.5 h-3.5" />
+          Load {Math.min(popularUniverse.length, FIND_A_TRADE_MAX)} popular
+        </button>
+      </div>
+
+      <textarea
+        value={listText}
+        onChange={(e) => {
+          setListText(e.target.value);
+          setResult(null);
+        }}
+        rows={3}
+        disabled={scanning}
+        placeholder="AAPL, MSFT, NVDA, 0700.HK — edit or paste tickers"
+        className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-[12px] font-mono text-gray-200 placeholder:text-gray-600 focus:outline-none focus:border-sky-500/40 resize-y min-h-[72px] disabled:opacity-60"
+      />
+
+      <div className="flex flex-col sm:flex-row gap-2">
+        <input
+          type="text"
+          value={addDraft}
+          onChange={(e) => setAddDraft(e.target.value.toUpperCase())}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              addTickerToList();
+            }
+          }}
+          disabled={scanning}
+          placeholder="Add ticker (e.g. 2318.HK)"
+          className="flex-1 rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-[12px] font-mono text-gray-200 placeholder:text-gray-600 focus:outline-none focus:border-sky-500/40 disabled:opacity-60"
+        />
+        <button
+          type="button"
+          onClick={() => addTickerToList()}
+          disabled={scanning || !addDraft.trim()}
+          className={cn(
+            'inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer shrink-0',
+            scanning || !addDraft.trim()
+              ? 'bg-white/5 text-gray-500 border-white/10'
+              : 'bg-sky-500/15 text-sky-300 border-sky-500/40 hover:bg-sky-500/25'
+          )}
+        >
+          <Plus className="w-3.5 h-3.5" />
+          Add to list
+        </button>
+      </div>
+
+      <p className="text-[10px] font-mono text-gray-500">
+        {parsed.length}/{FIND_A_TRADE_MAX} in search list · saved in this browser · edit to add your own
+      </p>
+
+      <div className="flex flex-wrap items-center gap-2 justify-between">
+        <p className="text-[10px] font-mono text-gray-500">
+          {scanning && progress
+            ? `scanning ${progress.done}/${progress.total}${progress.current ? ` (${progress.current})` : ''}`
+            : result
+              ? 'press again for a new search'
+              : 'fresh prices each search'}
+        </p>
+        <button
+          type="button"
+          disabled={!canScan}
           onClick={() => void runSuggest()}
           className={cn(
             'inline-flex items-center gap-2 rounded-full px-4 py-2 text-[11px] font-bold uppercase tracking-wider transition-all cursor-pointer',
-            scanning || universe.length === 0
+            !canScan
               ? 'bg-white/5 text-gray-500 border border-white/10'
               : 'bg-sky-500 text-black border border-sky-400 shadow-[0_0_18px_rgba(56,189,248,0.35)] hover:bg-sky-400'
           )}
         >
           {scanning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-          Suggest a Trade
+          {scanning ? 'Searching…' : result ? 'New search' : 'Suggest a Trade'}
         </button>
       </div>
 
@@ -187,20 +351,28 @@ export function SuggestATradePanel({
       <AnimatePresence mode="wait">
         {result && (
           <motion.div
-            key={result.message}
+            key={`suggest-${searchId}-${result.message}`}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
             className="space-y-3"
           >
+            <div className="rounded-xl border border-white/10 bg-black/30 px-3 py-2">
+              <p className="text-[11px] text-gray-300 leading-relaxed">{result.message}</p>
+              <p className="mt-1 text-[10px] font-mono text-gray-500">
+                BUY suggestions only when Consensus gates clear — HOLD / REDUCE never become the top
+                pick.
+              </p>
+            </div>
+
             {result.topPick ? (
               <TopPickCard pick={result.topPick} onOpen={onOpenTicker} marketLabel={marketLabel} />
             ) : (
               <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 px-3 py-3">
-                <p className="text-[12px] text-amber-100 font-semibold">No trade suggested</p>
-                <p className="mt-1 text-[11px] text-gray-400 leading-relaxed">{result.message}</p>
-                <p className="mt-1 text-[10px] text-gray-500">
-                  Try another market/theme, or wait for better setups.
+                <p className="text-[12px] text-amber-100 font-semibold">No BUY trade cleared</p>
+                <p className="mt-1 text-[11px] text-gray-400 leading-relaxed">
+                  None of the {result.scannedCount} names passed BUY gates on this search. Check the
+                  watchlist below or press New search.
                 </p>
               </div>
             )}
@@ -208,11 +380,27 @@ export function SuggestATradePanel({
             {result.buyCandidates.length > 1 && (
               <div>
                 <p className="text-[10px] font-mono uppercase tracking-wider text-gray-500 mb-2">
-                  Other BUY candidates
+                  Other BUY candidates ({result.buyCandidates.length - 1})
                 </p>
                 <div className="space-y-1.5">
                   {result.buyCandidates.slice(1, 5).map((c) => (
-                    <CandidateRow key={c.ticker} c={c} onOpen={onOpenTicker} />
+                    <CandidateRow key={`${searchId}-${c.ticker}`} c={c} onOpen={onOpenTicker} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {result.watchlistCandidates.length > 0 && (
+              <div>
+                <p className="text-[10px] font-mono uppercase tracking-wider text-amber-200/80 mb-1">
+                  Near-miss watchlist (did not clear BUY)
+                </p>
+                <p className="text-[10px] text-gray-500 mb-2 leading-relaxed">
+                  Closest names from this scout that stayed HOLD / REDUCE — not trade suggestions.
+                </p>
+                <div className="space-y-1.5">
+                  {result.watchlistCandidates.map((c) => (
+                    <CandidateRow key={`${searchId}-w-${c.ticker}`} c={c} onOpen={onOpenTicker} />
                   ))}
                 </div>
               </div>
@@ -220,12 +408,19 @@ export function SuggestATradePanel({
 
             <details className="rounded-xl border border-white/8 bg-black/25 px-3 py-2">
               <summary className="text-[10px] font-mono uppercase tracking-wider text-gray-500 cursor-pointer">
-                Scout log ({result.scanned.length})
+                Scout log ({result.scanned.length}) · {result.buyCleared} BUY cleared
               </summary>
               <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
                 {result.scanned.map((c) => (
-                  <p key={`slog-${c.ticker}`} className="text-[10px] font-mono text-gray-500">
+                  <p
+                    key={`slog-${searchId}-${c.ticker}`}
+                    className={cn(
+                      'text-[10px] font-mono',
+                      c.isBuyCandidate ? 'text-emerald-300/90' : 'text-gray-500'
+                    )}
+                  >
                     {c.ticker}: {c.error ? `ERR ${c.error}` : `${c.recommendation} · ${c.currentAction}`}
+                    {c.isBuyCandidate ? ' · BUY gate ✓' : ''}
                   </p>
                 ))}
               </div>
