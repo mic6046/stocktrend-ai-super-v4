@@ -276,8 +276,8 @@ export function PricingPage({
                 </div>
               </div>
               <p className="mt-3 text-[11px] leading-relaxed text-gray-500">
-                Cached re-open of the same ticker does not use another analysis credit. Daily quotas
-                reset at midnight MYT. Unused credits do not roll over to the next month.
+                Cached re-open of the same ticker does not use another analysis credit. Daily included
+                credits expire at midnight MYT. Reloads expire at month end — no rollover.
               </p>
             </div>
           ))}
@@ -287,9 +287,9 @@ export function PricingPage({
         <div className="mt-6 rounded-2xl border border-white/10 bg-[#0c0c0e] p-6">
           <h3 className="text-sm font-bold text-white mb-1">Need more before reset?</h3>
           <p className="text-xs text-gray-500 mb-4">
-            Same overage rates for Basic and Pro. Daily quotas reset at{' '}
-            <span className="text-gray-300">midnight (Malaysia Time, MYT)</span>. Purchased and
-            unused credits do not roll over to the next calendar month.
+            Same overage rates for Basic and Pro. Paid reloads are same-month only and do not roll
+            over. Daily included credits reset at{' '}
+            <span className="text-gray-300">midnight (Malaysia Time, MYT)</span>.
           </p>
           <div className="grid gap-3 sm:grid-cols-3">
             {OVERAGES.map((row) => (
