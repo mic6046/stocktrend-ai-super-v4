@@ -8,6 +8,7 @@ import {
   TRADE_SUGGESTIONS_MAX,
   parseSuggestionTickers,
   scanTradeSuggestions,
+  type MarketSentimentLight,
   type TradeSuggestionCandidate,
   type TradeSuggestionsProgress,
   type TradeSuggestionsResult,
@@ -69,6 +70,45 @@ function warnTone(level: WarningLevel): string {
   if (level === 2) return 'text-amber-200 border-amber-500/40 bg-amber-500/10';
   if (level === 1) return 'text-yellow-200 border-yellow-500/35 bg-yellow-500/10';
   return 'text-gray-500 border-white/10 bg-black/20';
+}
+
+function sentimentTone(light: MarketSentimentLight): string {
+  if (light === 'Green') return 'text-emerald-300 border-emerald-500/40 bg-emerald-500/15';
+  if (light === 'Red') return 'text-rose-300 border-rose-500/40 bg-rose-500/15';
+  return 'text-amber-200 border-amber-500/40 bg-amber-500/15';
+}
+
+function sentimentDot(light: MarketSentimentLight): string {
+  if (light === 'Green') return 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.7)]';
+  if (light === 'Red') return 'bg-rose-400 shadow-[0_0_8px_rgba(251,113,133,0.7)]';
+  return 'bg-amber-300 shadow-[0_0_8px_rgba(252,211,77,0.7)]';
+}
+
+function SentimentLight({
+  light,
+  score,
+  size = 'md',
+}: {
+  light: MarketSentimentLight;
+  score?: number | null;
+  size?: 'sm' | 'md';
+}) {
+  return (
+    <div
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-full border font-mono',
+        sentimentTone(light),
+        size === 'sm' ? 'px-1.5 py-0.5 text-[9px]' : 'px-2 py-1 text-[10px]'
+      )}
+      title={`Market sentiment ${light}${score != null ? ` (${Math.round(score)}/100)` : ''}`}
+    >
+      <span className={cn('rounded-full', sentimentDot(light), size === 'sm' ? 'w-1.5 h-1.5' : 'w-2 h-2')} />
+      <span className="font-bold uppercase tracking-wider">{light}</span>
+      {score != null && Number.isFinite(score) && (
+        <span className="opacity-80">{Math.round(score)}</span>
+      )}
+    </div>
+  );
 }
 
 type TradeSuggestionsPanelProps = {
@@ -176,9 +216,12 @@ export function TradeSuggestionsPanel({
 
       <p className="text-[11px] text-gray-400 leading-relaxed">
         Flow engine (not Quantum AI Score): filters on{' '}
-        <span className="text-sky-300 font-semibold">sentiment</span>, institutional, whale, smart
-        money, constructive fundamentals, and fund/capital inflow. Warns on RSI overbought,
-        Bollinger upper stretch, and nearby resistance (levels 1–3).
+        <span className="text-sky-300 font-semibold">sentiment</span> (
+        <span className="text-emerald-400 font-semibold">Green</span> /{' '}
+        <span className="text-amber-300 font-semibold">Yellow</span> /{' '}
+        <span className="text-rose-400 font-semibold">Red</span>), institutional, whale, smart money,
+        constructive fundamentals, and fund/capital inflow. Warns on RSI overbought, Bollinger upper
+        stretch, and nearby resistance (levels 1–3).
       </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -312,8 +355,8 @@ export function TradeSuggestionsPanel({
                     {c.ticker}:{' '}
                     {c.error
                       ? `ERR ${c.error}`
-                      : `${c.isCandidate ? 'IN' : 'out'} · flow ${c.score} · warn L${c.warning.overall} · ${c.signals.slice(0, 2).join(', ') || '—'}`}
-                  </p>
+                      : `${c.isCandidate ? 'IN' : 'out'} · ${c.marketSentiment} · flow ${c.score} · warn L${c.warning.overall} · ${c.signals.slice(0, 2).join(', ') || '—'}`}
+                    </p>
                 ))}
               </div>
             </details>
@@ -366,9 +409,40 @@ function TopSuggestionCard({
           <p className="text-lg font-black text-white tracking-wide">{pick.ticker}</p>
           <p className="text-[11px] text-gray-400 truncate max-w-[220px]">{pick.name}</p>
         </div>
-        <div className="text-right shrink-0">
+        <div className="text-right shrink-0 space-y-1.5">
+          <SentimentLight light={pick.marketSentiment} score={pick.sentimentScore} />
           <p className="text-[12px] font-bold text-sky-300">Flow {pick.score}</p>
-          <p className="text-[11px] font-mono text-white mt-1">{formatMoney(pick.price)}</p>
+          <p className="text-[11px] font-mono text-white">{formatMoney(pick.price)}</p>
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-white/8 bg-black/25 px-2.5 py-2 flex flex-wrap items-center gap-2 justify-between">
+        <p className="text-[10px] text-gray-400">
+          Market sentiment:{' '}
+          <span
+            className={cn(
+              'font-semibold',
+              pick.marketSentiment === 'Green'
+                ? 'text-emerald-300'
+                : pick.marketSentiment === 'Red'
+                  ? 'text-rose-300'
+                  : 'text-amber-200'
+            )}
+          >
+            {pick.marketSentiment}
+          </span>
+          {pick.sentimentScore != null ? ` · ${Math.round(pick.sentimentScore)}/100` : ''}
+          {' · '}
+          {pick.marketSentiment === 'Green'
+            ? 'constructive'
+            : pick.marketSentiment === 'Red'
+              ? 'defensive'
+              : 'mixed / neutral'}
+        </p>
+        <div className="flex items-center gap-1" title="Legend: Green ≥58 · Yellow 40–57 · Red &lt;40">
+          <span className={cn('w-2 h-2 rounded-full', sentimentDot('Green'))} />
+          <span className={cn('w-2 h-2 rounded-full', sentimentDot('Yellow'))} />
+          <span className={cn('w-2 h-2 rounded-full', sentimentDot('Red'))} />
         </div>
       </div>
 
@@ -432,8 +506,11 @@ function CandidateRow({
       onClick={() => onOpen(c.ticker)}
       className="w-full flex items-center justify-between gap-2 rounded-xl border border-white/8 bg-black/30 px-3 py-2 text-left hover:border-sky-500/30 transition-colors cursor-pointer"
     >
-      <div className="min-w-0">
-        <p className="text-[12px] font-bold text-white">{c.ticker}</p>
+      <div className="min-w-0 space-y-1">
+        <div className="flex items-center gap-2">
+          <p className="text-[12px] font-bold text-white">{c.ticker}</p>
+          <SentimentLight light={c.marketSentiment} score={c.sentimentScore} size="sm" />
+        </div>
         <p className="text-[10px] text-gray-500 truncate">
           Flow {c.score} · {c.signals[0] || 'constructive'}
         </p>

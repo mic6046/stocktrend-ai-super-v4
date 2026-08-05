@@ -11,6 +11,9 @@ export const TRADE_SUGGESTIONS_MAX = 30;
 
 export type WarningLevel = 0 | 1 | 2 | 3;
 
+/** Traffic-light market sentiment for Trade Suggestions. */
+export type MarketSentimentLight = 'Green' | 'Yellow' | 'Red';
+
 export type TradeSuggestionWarning = {
   rsi: WarningLevel;
   bollinger: WarningLevel;
@@ -27,6 +30,8 @@ export type TradeSuggestionCandidate = {
   /** 0–100 flow/sentiment constructive score */
   score: number;
   signals: string[];
+  /** Red / Yellow / Green market sentiment indicator */
+  marketSentiment: MarketSentimentLight;
   sentimentScore: number | null;
   smartMoneyScore: number | null;
   whaleScore: number | null;
@@ -79,6 +84,25 @@ export function parseSuggestionTickers(input: string, max = TRADE_SUGGESTIONS_MA
 
 function clamp(n: number, lo: number, hi: number) {
   return Math.min(hi, Math.max(lo, n));
+}
+
+/**
+ * Market sentiment traffic light from composite sentiment score (0–100).
+ * Green ≥ 58 constructive · Yellow 40–57 mixed · Red < 40 defensive.
+ */
+export function marketSentimentLight(
+  sentimentScore: number | null | undefined,
+  newsSentiment?: string | null
+): MarketSentimentLight {
+  if (sentimentScore != null && Number.isFinite(sentimentScore)) {
+    if (sentimentScore >= 58) return 'Green';
+    if (sentimentScore >= 40) return 'Yellow';
+    return 'Red';
+  }
+  const news = String(newsSentiment || '').toLowerCase();
+  if (/positive|bull/i.test(news)) return 'Green';
+  if (/negative|bear/i.test(news)) return 'Red';
+  return 'Yellow';
 }
 
 async function mapPool<T, R>(
@@ -200,6 +224,8 @@ export function scoreFlowConstructive(tech: any, px: number): {
   score: number;
   signals: string[];
   sentimentScore: number | null;
+  newsSentiment: string | null;
+  marketSentiment: MarketSentimentLight;
   smartMoneyScore: number | null;
   whaleScore: number | null;
   fundamentalScore: number | null;
@@ -226,6 +252,13 @@ export function scoreFlowConstructive(tech: any, px: number): {
         : Number.isFinite(Number(instDecision?.sentimentScore))
           ? Number(instDecision.sentimentScore)
           : null;
+
+  const newsSentiment =
+    (typeof adv?.newsSentimentAi?.sentiment === 'string' && adv.newsSentimentAi.sentiment) ||
+    (typeof adv?.socialSentimentAi?.sentiment === 'string' && adv.socialSentimentAi.sentiment) ||
+    null;
+
+  const marketSentiment = marketSentimentLight(sentimentScore, newsSentiment);
 
   const smartMoneyScore = Number.isFinite(Number(masters?.smartMoneyScore))
     ? Number(masters.smartMoneyScore)
@@ -275,16 +308,14 @@ export function scoreFlowConstructive(tech: any, px: number): {
   }
 
   // —— Market sentiment ——
-  if (sentimentScore != null && sentimentScore >= 58) {
+  if (marketSentiment === 'Green') {
     score += 10;
-    signals.push('Market sentiment constructive');
-  } else if (sentimentScore != null && sentimentScore < 40) {
+    signals.push('Market sentiment Green');
+  } else if (marketSentiment === 'Red') {
     score -= 6;
   }
-  const newsSent = String(adv?.newsSentimentAi?.sentiment || '');
-  if (/Positive/i.test(newsSent) && !signals.some((s) => /sentiment/i.test(s))) {
+  if (/Positive/i.test(String(newsSentiment || '')) && marketSentiment !== 'Green') {
     score += 4;
-    signals.push('News sentiment positive');
   }
 
   // —— Composite fundamentals constructive ——
@@ -328,6 +359,8 @@ export function scoreFlowConstructive(tech: any, px: number): {
     score: clamp(Math.round(score), 5, 98),
     signals: [...new Set(signals)],
     sentimentScore,
+    newsSentiment,
+    marketSentiment,
     smartMoneyScore,
     whaleScore,
     fundamentalScore,
@@ -338,9 +371,40 @@ export function scoreFlowConstructive(tech: any, px: number): {
 
 function rankCandidate(c: TradeSuggestionCandidate): number {
   if (!c.isCandidate) return -1e9;
-  // Prefer strong flow with lower stretch risk
+  // Prefer strong flow with lower stretch risk; Green sentiment boosts rank
   const warnPenalty = c.warning.overall * 6;
-  return c.score * 0.7 + c.signals.length * 4 - warnPenalty;
+  const sentimentBoost =
+    c.marketSentiment === 'Green' ? 8 : c.marketSentiment === 'Yellow' ? 2 : -4;
+  return c.score * 0.7 + c.signals.length * 4 - warnPenalty + sentimentBoost;
+}
+
+function emptyCandidate(
+  ticker: string,
+  why: string,
+  error?: string
+): TradeSuggestionCandidate {
+  return {
+    ticker,
+    name: ticker,
+    price: 0,
+    score: 0,
+    signals: [],
+    marketSentiment: 'Yellow',
+    sentimentScore: null,
+    smartMoneyScore: null,
+    whaleScore: null,
+    fundamentalScore: null,
+    institutionalStatus: null,
+    capitalInflow: null,
+    rsi: null,
+    bollingerPercent: null,
+    nearestResistance: null,
+    warning: { rsi: 0, bollinger: 0, resistance: 0, overall: 0, reasons: [] },
+    isCandidate: false,
+    rankScore: -1e9,
+    why,
+    error,
+  };
 }
 
 async function scoutOne(
@@ -355,27 +419,7 @@ async function scoutOne(
       (h: any) => h?.close != null && Number.isFinite(Number(h.close))
     );
     if (!history.length) {
-      return {
-        ticker,
-        name: ticker,
-        price: 0,
-        score: 0,
-        signals: [],
-        sentimentScore: null,
-        smartMoneyScore: null,
-        whaleScore: null,
-        fundamentalScore: null,
-        institutionalStatus: null,
-        capitalInflow: null,
-        rsi: null,
-        bollingerPercent: null,
-        nearestResistance: null,
-        warning: { rsi: 0, bollinger: 0, resistance: 0, overall: 0, reasons: [] },
-        isCandidate: false,
-        rankScore: -1e9,
-        why: 'No price history returned.',
-        error: 'No history',
-      };
+      return emptyCandidate(ticker, 'No price history returned.', 'No history');
     }
 
     const px =
@@ -391,10 +435,20 @@ async function scoutOne(
     // Qualify when enough constructive pillars fire (different engine from Quantum BUY)
     const isCandidate = flow.signals.length >= 2 && flow.score >= 58;
 
+    const sentimentLabel =
+      flow.marketSentiment === 'Green'
+        ? 'Market sentiment Green (constructive)'
+        : flow.marketSentiment === 'Red'
+          ? 'Market sentiment Red (defensive)'
+          : 'Market sentiment Yellow (mixed)';
+
     const whyParts = [
       isCandidate
         ? `Flow engine constructive (${flow.score}/100).`
         : `Below suggestion bar (${flow.score}/100 · ${flow.signals.length} signals).`,
+      sentimentLabel +
+        (flow.sentimentScore != null ? ` · score ${Math.round(flow.sentimentScore)}` : '') +
+        '.',
       flow.signals.length ? flow.signals.join(' · ') : 'No constructive flow pillars.',
       warning.reasons.length ? `Warnings: ${warning.reasons.join('; ')}` : 'No stretch warnings.',
     ];
@@ -405,6 +459,7 @@ async function scoutOne(
       price: px,
       score: flow.score,
       signals: flow.signals,
+      marketSentiment: flow.marketSentiment,
       sentimentScore: flow.sentimentScore,
       smartMoneyScore: flow.smartMoneyScore,
       whaleScore: flow.whaleScore,
@@ -422,27 +477,7 @@ async function scoutOne(
     candidate.rankScore = rankCandidate(candidate);
     return candidate;
   } catch (err: any) {
-    return {
-      ticker,
-      name: ticker,
-      price: 0,
-      score: 0,
-      signals: [],
-      sentimentScore: null,
-      smartMoneyScore: null,
-      whaleScore: null,
-      fundamentalScore: null,
-      institutionalStatus: null,
-      capitalInflow: null,
-      rsi: null,
-      bollingerPercent: null,
-      nearestResistance: null,
-      warning: { rsi: 0, bollinger: 0, resistance: 0, overall: 0, reasons: [] },
-      isCandidate: false,
-      rankScore: -1e9,
-      why: err?.message || 'Scout failed',
-      error: err?.message || 'Scout failed',
-    };
+    return emptyCandidate(ticker, err?.message || 'Scout failed', err?.message || 'Scout failed');
   }
 }
 
@@ -499,7 +534,7 @@ export async function scanTradeSuggestions(opts: {
     candidates,
     topPick,
     message: topPick
-      ? `Top suggestion: ${topPick.ticker} · flow ${topPick.score}${
+      ? `Top suggestion: ${topPick.ticker} · sentiment ${topPick.marketSentiment} · flow ${topPick.score}${
           topPick.warning.overall > 0 ? ` · stretch warn L${topPick.warning.overall}` : ''
         }`
       : 'No constructive flow setups in this list. Try another market/theme or add tickers.',
