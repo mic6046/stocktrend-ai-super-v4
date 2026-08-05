@@ -234,7 +234,7 @@ export function AnalysisHeroCard({
           </motion.div>
         </div>
 
-        {/* Do Now primary + demoted outlook */}
+        {/* Do Now primary + demoted horizon trend */}
         <div className="flex flex-col sm:flex-row items-center sm:items-start gap-5 flex-1 min-w-0">
           <ConfidenceRadial value={conf} accent={actionTone.hex} resetKey={horizon} />
 
@@ -311,7 +311,7 @@ export function AnalysisHeroCard({
 
             <p className="mt-3 text-[11px] text-gray-400">
               <span className="text-[9px] uppercase tracking-wider text-gray-500 mr-1.5">
-                Outlook · {horizonLabel}
+                {horizonLabel} Trend
               </span>
               <span className={cn('font-semibold uppercase', outlookTone.text)}>{outlookLabel}</span>
               <span className="text-gray-600"> · thesis for the selected horizon, not the live entry cue</span>

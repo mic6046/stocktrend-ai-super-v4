@@ -38,7 +38,7 @@ export function DecisionBriefPanel({ decision }: DecisionBriefPanelProps) {
           tone={decision.chartStance}
         />
         <Metric label="Suggested Action" value={decision.suggestedAction} tone={decision.chartStance} />
-        <Metric label="Outlook (horizon)" value={decision.finalVerdict} tone={decision.chartStance} />
+        <Metric label={`${decision.horizonLabel} Trend`} value={decision.finalVerdict} tone={decision.chartStance} />
         <Metric label="Confidence" value={`${decision.confidence}%`} />
         <Metric
           label="Expected Return"
@@ -50,8 +50,8 @@ export function DecisionBriefPanel({ decision }: DecisionBriefPanelProps) {
 
       <p className="text-[10px] text-gray-500 font-mono leading-relaxed">
         Do now = live price action for your ownership (
-        {decision.userHasPosition ? 'Holding' : 'No position'}). Outlook = {decision.horizonLabel}{' '}
-        thesis — not the entry cue. Suggested Action matches Do now (Wait ≠ Hold).
+        {decision.userHasPosition ? 'Holding' : 'No position'}). {decision.horizonLabel} Trend ={' '}
+        thesis for that horizon — not the entry cue. Suggested Action matches Do now (Wait ≠ Hold).
       </p>
 
       <div className="rounded-xl border border-cyan-500/25 bg-cyan-500/5 px-3 py-2.5">

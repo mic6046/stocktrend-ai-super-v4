@@ -1663,7 +1663,7 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
     const note = consensusNote(evidence.committee, rec);
     const explainedSignals = positionAwareSignals(evidence.explainedSignals, userHasPosition);
     const positionLabel = userHasPosition ? 'Holding' : 'No position';
-    const summaryLead = `Do now (${positionLabel}): ${currentAction.action}. Outlook · ${horizonLabel}: ${rec} (${confidence}% confidence). Holding → ${doNowByPosition.holding.action} · No position → ${doNowByPosition.noPosition.action}. Expected return ${expectedReturn >= 0 ? '+' : ''}${expectedReturn.toFixed(1)}%. ${whyWins}`;
+    const summaryLead = `Do now (${positionLabel}): ${currentAction.action}. ${horizonLabel} Trend: ${rec} (${confidence}% confidence). Holding → ${doNowByPosition.holding.action} · No position → ${doNowByPosition.noPosition.action}. Expected return ${expectedReturn >= 0 ? '+' : ''}${expectedReturn.toFixed(1)}%. ${whyWins}`;
 
     const drawdown = round2(-Math.max(2, Math.abs(expectedReturn) * 0.55 + (vol ?? 20) * 0.12));
     const sharpe =
