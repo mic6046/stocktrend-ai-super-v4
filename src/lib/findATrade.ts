@@ -105,11 +105,13 @@ function rankScore(c: FindATradeCandidate): number {
 async function scoutOne(
   ticker: string,
   horizon: HorizonKey,
-  fetchJson: (url: string) => Promise<any>
+  fetchJson: (url: string) => Promise<any>,
+  bypassCache = false
 ): Promise<FindATradeCandidate> {
   try {
+    const cacheQs = bypassCache ? '&bypassCache=true' : '';
     const data = await fetchJson(
-      `/api/stock?ticker=${encodeURIComponent(ticker)}&range=3mo&interval=1d`
+      `/api/stock?ticker=${encodeURIComponent(ticker)}&range=3mo&interval=1d${cacheQs}`
     );
     const history = (data?.history || []).filter(
       (h: any) => h?.close != null && Number.isFinite(Number(h.close))
@@ -250,12 +252,15 @@ export async function findATrade(opts: {
   tickers: string[];
   horizon?: HorizonKey;
   concurrency?: number;
+  /** Fresh market data for this scout (no 10-min stock cache). */
+  bypassCache?: boolean;
   fetchJson?: (url: string) => Promise<any>;
   onProgress?: (p: FindATradeProgress) => void;
 }): Promise<FindATradeResult> {
   const tickers = opts.tickers.slice(0, FIND_A_TRADE_MAX);
   const horizon = opts.horizon ?? '1M';
   const concurrency = opts.concurrency ?? 3;
+  const bypassCache = opts.bypassCache !== false;
   const fetchJson =
     opts.fetchJson ??
     (async (url: string) => {
@@ -283,7 +288,7 @@ export async function findATrade(opts: {
   const scanned = await mapPool(
     tickers,
     concurrency,
-    (ticker) => scoutOne(ticker, horizon, fetchJson),
+    (ticker) => scoutOne(ticker, horizon, fetchJson, bypassCache),
     (done, ticker) => opts.onProgress?.({ done, total: tickers.length, current: String(ticker) })
   );
 
