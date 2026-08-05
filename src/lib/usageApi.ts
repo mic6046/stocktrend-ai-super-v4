@@ -34,6 +34,31 @@ export async function fetchUsage(email: string): Promise<UsageSnapshot> {
   return data as UsageSnapshot;
 }
 
+/** Charge 1 AI analysis credit (Find a Trade / Suggest a Trade). */
+export async function consumeAnalysisCredit(
+  email: string,
+  reason: 'find-a-trade' | 'suggest-a-trade' | string
+): Promise<{ usage: UsageSnapshot; chargedFrom?: string }> {
+  const res = await loggedFetch(apiUrl('/api/usage/consume'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, kind: 'analysis', reason }),
+    __qnMeta: {
+      reason: 'usage-consume-analysis',
+      userAction: reason === 'suggest-a-trade' ? 'Click Suggest a Trade' : 'Click Find a Trade',
+    },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err: any = new Error(data?.error || 'Failed to use analysis credit');
+    err.status = res.status;
+    err.code = data?.code;
+    err.usage = data?.usage;
+    throw err;
+  }
+  return { usage: data.usage as UsageSnapshot, chargedFrom: data.chargedFrom };
+}
+
 export async function startOverageCheckout(
   product: OverageProduct,
   email: string

@@ -12,6 +12,8 @@ import {
   type FindATradeProgress,
   type FindATradeResult,
 } from '../../lib/findATrade';
+import { consumeAnalysisCredit } from '../../lib/usageApi';
+import { AiAnalysisCreditNotice } from './AiAnalysisCreditNotice';
 
 const LIST_STORAGE_KEY = 'qn-find-a-trade-list';
 const DEFAULT_LIST = 'AAPL, NVDA, MSFT, TSLA, 0700.HK';
@@ -29,6 +31,11 @@ function loadSavedList(): string {
 type FindATradePanelProps = {
   horizon?: HorizonKey;
   onOpenTicker: (ticker: string) => void;
+  /** Signed-in email — required to charge 1 AI analysis credit per scan. */
+  email?: string | null;
+  /** Return false to abort (e.g. out of credits). */
+  onBeforeScan?: () => boolean;
+  onUsage?: (usage: any) => void;
   className?: string;
   compact?: boolean;
 };
@@ -36,6 +43,9 @@ type FindATradePanelProps = {
 export function FindATradePanel({
   horizon = '1M',
   onOpenTicker,
+  email,
+  onBeforeScan,
+  onUsage,
   className,
   compact = false,
 }: FindATradePanelProps) {
@@ -58,9 +68,17 @@ export function FindATradePanel({
 
   const runScout = async () => {
     if (scanning) return;
+    if (onBeforeScan && !onBeforeScan()) {
+      setError('Sign in and keep AI analysis credits available to run Find a Trade.');
+      return;
+    }
     const tickers = parseTickerList(listText);
     if (!tickers.length) {
       setError('Enter tickers separated by commas or spaces.');
+      return;
+    }
+    if (!email) {
+      setError('Sign in required — Find a Trade uses 1 AI analysis credit.');
       return;
     }
     setError(null);
@@ -68,6 +86,18 @@ export function FindATradePanel({
     setProgress({ done: 0, total: tickers.length });
     setResult(null);
     try {
+      try {
+        const billed = await consumeAnalysisCredit(email, 'find-a-trade');
+        if (billed.usage) onUsage?.(billed.usage);
+      } catch (creditErr: any) {
+        // Soft-fail only if consume route is not deployed yet (404)
+        if (creditErr?.status === 404) {
+          console.warn('[find-a-trade] /api/usage/consume not deployed yet — reminder shown, scan continues');
+        } else {
+          if (creditErr?.usage) onUsage?.(creditErr.usage);
+          throw creditErr;
+        }
+      }
       const out = await findATrade({
         tickers,
         horizon,
@@ -76,7 +106,12 @@ export function FindATradePanel({
       });
       setResult(out);
     } catch (e: any) {
-      setError(e?.message || 'Find a Trade failed');
+      if (e?.usage) onUsage?.(e.usage);
+      setError(
+        e?.code === 'analysis_quota_exceeded' || e?.status === 402
+          ? e?.message || 'Daily AI analysis credits are out. Reload credits to continue.'
+          : e?.message || 'Find a Trade failed'
+      );
     } finally {
       setScanning(false);
     }
@@ -87,6 +122,8 @@ export function FindATradePanel({
       <SectionLabel icon={<Rocket className="w-3.5 h-3.5 text-emerald-400" />}>
         Find a Trade · {horizonLabel}
       </SectionLabel>
+
+      <AiAnalysisCreditNotice feature="Find a Trade" />
 
       <p className="text-[11px] text-gray-400 leading-relaxed">
         Paste up to {FIND_A_TRADE_MAX} tickers — your list is saved automatically in this browser.
@@ -122,7 +159,7 @@ export function FindATradePanel({
           )}
         >
           {scanning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Crosshair className="w-3.5 h-3.5" />}
-          Find a Trade
+          Find a Trade (−1 credit)
         </button>
       </div>
 

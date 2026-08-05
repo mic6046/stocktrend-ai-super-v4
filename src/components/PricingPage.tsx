@@ -22,11 +22,12 @@ const PLANS: Array<{
     name: 'Basic',
     price: 'RM 199',
     period: '/month',
-    blurb: 'Focused watchlist use with fair daily AI limits.',
+    blurb: 'Paid daily AI runway for focused watchlists — use credits or lose them.',
     icon: 'rocket',
     features: [
       '10 AI stock analyses per day',
       '10 AI news summaries per day',
+      'Unused credits do not roll over',
       'Full charts, alerts, score & advisory',
       'Cloud sync across devices',
       'Cancel anytime',
@@ -37,13 +38,14 @@ const PLANS: Array<{
     name: 'Pro',
     price: 'RM 349',
     period: '/month',
-    blurb: 'For active traders who need a wider daily AI runway.',
+    blurb: 'Higher daily AI limits for active traders — reload when you need more.',
     highlight: true,
     badge: 'Most popular',
     icon: 'gem',
     features: [
       '30 AI stock analyses per day',
       '30 AI news summaries per day',
+      'Unused credits do not roll over',
       'Everything in Basic',
       'Same overage rates & AI pack',
       'Cancel anytime',
@@ -65,9 +67,9 @@ const QUOTA_COMPARE = [
 ];
 
 const OVERAGES = [
-  { label: 'AI analysis mini reload', price: 'RM 5', note: '+5 analyses · Stripe MYR minimum' },
-  { label: 'AI news mini reload', price: 'RM 5', note: '+10 news summaries · Stripe MYR minimum' },
-  { label: 'AI analysis pack', price: 'RM 10', note: '+12 analyses (2 bonus) · same for all plans' },
+  { label: 'AI analysis mini reload', price: 'RM 5', note: '+5 analyses · same month only' },
+  { label: 'AI news mini reload', price: 'RM 5', note: '+10 news · same month only' },
+  { label: 'AI analysis pack', price: 'RM 10', note: '+12 analyses · same month only' },
 ];
 
 interface PricingPageProps {
@@ -77,7 +79,7 @@ interface PricingPageProps {
 
 export function PricingPage({
   title = 'Quantum Node pricing',
-  subtitle = 'Basic or Pro — clear daily AI limits, fair overages when you need more.',
+  subtitle = 'Basic or Pro — paid daily AI limits. Unused credits do not roll over; reload when you need more.',
 }: PricingPageProps) {
   const { user, signOut } = useAuth();
   const [busyPlan, setBusyPlan] = useState<SubscriptionPlan | null>(null);
@@ -274,7 +276,8 @@ export function PricingPage({
                 </div>
               </div>
               <p className="mt-3 text-[11px] leading-relaxed text-gray-500">
-                Cached re-open of the same ticker does not use another analysis credit. Quotas reset at midnight MYT.
+                Cached re-open of the same ticker does not use another analysis credit. Daily included
+                credits expire at midnight MYT. Reloads expire at month end — no rollover.
               </p>
             </div>
           ))}
@@ -284,7 +287,8 @@ export function PricingPage({
         <div className="mt-6 rounded-2xl border border-white/10 bg-[#0c0c0e] p-6">
           <h3 className="text-sm font-bold text-white mb-1">Need more before reset?</h3>
           <p className="text-xs text-gray-500 mb-4">
-            Same overage rates for Basic and Pro. Daily quotas reset at{' '}
+            Same overage rates for Basic and Pro. Paid reloads are same-month only and do not roll
+            over. Daily included credits reset at{' '}
             <span className="text-gray-300">midnight (Malaysia Time, MYT)</span>.
           </p>
           <div className="grid gap-3 sm:grid-cols-3">
