@@ -7019,13 +7019,28 @@ export default function App() {
   const technicalLevels = computeTechnicalLevels(visibleBaseHistory);
   const activeLevels: any = (srSource === 'AI' && levels) ? levels : technicalLevels;
 
+  /** Single live price for AI score card + Trade Management Zones (must stay in sync). */
+  const liveAnalysisPrice = React.useMemo(() => {
+    const candidates = [
+      Number(data?.quote?.regularMarketPrice),
+      Number(data?.quote?.price),
+      Number(projectionMeta.lastClose),
+      Number(cockpitData?.entryPrice),
+    ];
+    for (const n of candidates) {
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+    return 0;
+  }, [
+    data?.quote?.regularMarketPrice,
+    data?.quote?.price,
+    projectionMeta.lastClose,
+    cockpitData?.entryPrice,
+  ]);
+
   /** Investment Horizon is the single source of truth — QuantumNode Master Engine. */
   const horizonView = React.useMemo(() => {
-    const lastClose =
-      Number(data?.quote?.regularMarketPrice) ||
-      projectionMeta.lastClose ||
-      Number(cockpitData?.entryPrice) ||
-      0;
+    const lastClose = liveAnalysisPrice;
     const whaleScore =
       whaleAccumulation?.metrics?.whaleAccumulationIndex ??
       (aiStockScore?.components?.whaleAccumulation
@@ -7121,7 +7136,7 @@ export default function App() {
     });
   }, [
     analysisHorizon,
-    data?.quote?.regularMarketPrice,
+    liveAnalysisPrice,
     data?.ticker,
     projectionMeta,
     cockpitData,
@@ -8748,12 +8763,11 @@ export default function App() {
                     ticker={data.ticker}
                     stockName={data.quote?.shortName || data.quote?.longName || ''}
                     currentPrice={
-                      Number(
-                        data.quote?.regularMarketPrice ??
-                          data.quote?.price ??
-                          projectionMeta.lastClose ??
-                          0
-                      ) || null
+                      horizonView.currentPrice > 0
+                        ? horizonView.currentPrice
+                        : liveAnalysisPrice > 0
+                          ? liveAnalysisPrice
+                          : null
                     }
                     score={horizonView.score}
                     ratingLabel={horizonView.ratingLabel}
@@ -8818,9 +8832,7 @@ export default function App() {
                   <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                     <TradeZonesPanel
                       lastClose={
-                        Number(data.quote?.regularMarketPrice) ||
-                        projectionMeta.lastClose ||
-                        0
+                        horizonView.currentPrice > 0 ? horizonView.currentPrice : liveAnalysisPrice
                       }
                       levels={activeLevels}
                       bullCase={horizonView.bullCase}

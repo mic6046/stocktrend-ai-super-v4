@@ -1123,21 +1123,9 @@ function resolveLiveAction(
     };
   }
 
-  // Entry structure (buy + add ladder bands): ownership decides BUY vs ADD — never both
-  const inEntry =
-    inBand(px, zones.buyZone) ||
-    inBand(px, zones.addZone) ||
-    (px > zones.stopLoss && px < zones.addZone.hi);
-
-  if (inEntry) {
-    if (userHasPosition) {
-      return {
-        action: 'ADD POSITION',
-        reason: 'Price is in the entry/scale-in structure — BUY is replaced by ADD POSITION because you already own the stock.',
-        confidence: conf,
-        zoneKey: 'add',
-      };
-    }
+  // Entry structure: only claim BUY/ADD when price is inside that visible band
+  // (never the loose stop→add.hi gap, which desynced Do Now from Management Zones).
+  if (!userHasPosition && inBand(px, zones.buyZone)) {
     if (rec === 'AVOID NEW POSITION' || rec === 'SELL') {
       return {
         action: 'AVOID NEW POSITION',
@@ -1151,6 +1139,15 @@ function resolveLiveAction(
       reason: 'Price is in the BUY zone — best entry for a new position. ADD POSITION is hidden because you do not own the stock.',
       confidence: conf,
       zoneKey: 'buy',
+    };
+  }
+
+  if (userHasPosition && inBand(px, zones.addZone)) {
+    return {
+      action: 'ADD POSITION',
+      reason: 'Price is in the ADD POSITION zone — scale in because you already own the stock (BUY zone is hidden).',
+      confidence: conf,
+      zoneKey: 'add',
     };
   }
 
