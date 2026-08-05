@@ -22,12 +22,12 @@ const PLANS: Array<{
     name: 'Basic',
     price: 'RM 199',
     period: '/month',
-    blurb: 'Focused watchlist use with fair daily AI limits.',
+    blurb: 'Paid daily AI runway for focused watchlists — use credits or lose them.',
     icon: 'rocket',
     features: [
       '10 AI stock analyses per day',
       '10 AI news summaries per day',
-      'Credits do not roll over to next month',
+      'Unused credits do not roll over',
       'Full charts, alerts, score & advisory',
       'Cloud sync across devices',
       'Cancel anytime',
@@ -38,14 +38,14 @@ const PLANS: Array<{
     name: 'Pro',
     price: 'RM 349',
     period: '/month',
-    blurb: 'For active traders who need a wider daily AI runway.',
+    blurb: 'Higher daily AI limits for active traders — reload when you need more.',
     highlight: true,
     badge: 'Most popular',
     icon: 'gem',
     features: [
       '30 AI stock analyses per day',
       '30 AI news summaries per day',
-      'Credits do not roll over to next month',
+      'Unused credits do not roll over',
       'Everything in Basic',
       'Same overage rates & AI pack',
       'Cancel anytime',
@@ -67,9 +67,9 @@ const QUOTA_COMPARE = [
 ];
 
 const OVERAGES = [
-  { label: 'AI analysis mini reload', price: 'RM 5', note: '+5 analyses · Stripe MYR minimum' },
-  { label: 'AI news mini reload', price: 'RM 5', note: '+10 news summaries · Stripe MYR minimum' },
-  { label: 'AI analysis pack', price: 'RM 10', note: '+12 analyses (2 bonus) · same for all plans' },
+  { label: 'AI analysis mini reload', price: 'RM 5', note: '+5 analyses · same month only' },
+  { label: 'AI news mini reload', price: 'RM 5', note: '+10 news · same month only' },
+  { label: 'AI analysis pack', price: 'RM 10', note: '+12 analyses · same month only' },
 ];
 
 interface PricingPageProps {
@@ -79,7 +79,7 @@ interface PricingPageProps {
 
 export function PricingPage({
   title = 'Quantum Node pricing',
-  subtitle = 'Basic or Pro — clear daily AI limits, fair overages when you need more.',
+  subtitle = 'Basic or Pro — paid daily AI limits. Unused credits do not roll over; reload when you need more.',
 }: PricingPageProps) {
   const { user, signOut } = useAuth();
   const [busyPlan, setBusyPlan] = useState<SubscriptionPlan | null>(null);

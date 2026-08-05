@@ -4,9 +4,9 @@
  * Pro:   30 analyses + 30 news / day
  * Overage: Pack +12 analyses, Mini +5 analyses / +10 news
  *
- * Unused daily included credits expire at MYT midnight (no day-to-day
- * rollover). Purchased / bonus credits do not roll over to the next
- * calendar month (MYT) — the bonus pool is cleared on month change.
+ * Paid SaaS model: unused included daily credits expire at MYT midnight.
+ * Purchased reloads sit in the bonus pool and do not roll over to the next
+ * calendar month (MYT). Included daily is never converted into free bonus.
  * After daily included is exhausted, the meter shows the latest purchase
  * (e.g. Pack → 0/12 → 12/12).
  */
@@ -215,13 +215,11 @@ function buildDayState(
 }
 
 /**
- * If bonus credits exist, fold unused daily into the bonus pool and mark daily
- * exhausted so the UI shows the credit meter (total units).
+ * Normalize purchased bonus meter sizes only.
+ * Does not convert unused included daily into free bonus credits.
  */
-function foldDailyIntoActivePack(state: DayState, limits: { analyses: number; news: number }): DayState {
+function normalizeBonusMeters(state: DayState): DayState {
   let rolled = state.rolled;
-  let analysesUsed = state.analysesUsed;
-  let newsUsed = state.newsUsed;
   let bonusAnalyses = state.bonusAnalyses;
   let bonusNews = state.bonusNews;
   let bonusAnalysesUsed = state.bonusAnalysesUsed;
@@ -229,23 +227,7 @@ function foldDailyIntoActivePack(state: DayState, limits: { analyses: number; ne
   let bonusAnalysesPackSize = state.bonusAnalysesPackSize;
   let bonusNewsPackSize = state.bonusNewsPackSize;
 
-  const hasAnalysisCredits = bonusAnalyses > 0 || bonusAnalysesPackSize > 0;
-  const hasNewsCredits = bonusNews > 0 || bonusNewsPackSize > 0;
-
-  if (hasAnalysisCredits && analysesUsed < limits.analyses) {
-    const unused = limits.analyses - analysesUsed;
-    if (unused > 0) bonusAnalyses += unused;
-    analysesUsed = limits.analyses;
-    rolled = true;
-  }
-  if (hasNewsCredits && newsUsed < limits.news) {
-    const unused = limits.news - newsUsed;
-    if (unused > 0) bonusNews += unused;
-    newsUsed = limits.news;
-    rolled = true;
-  }
-
-  // Meter denominator = total credit units in the pool (used + remaining).
+  // Meter denominator = total credit units in the purchased pool (used + remaining).
   if (bonusAnalyses > 0) {
     const total = bonusAnalysesUsed + bonusAnalyses;
     if (bonusAnalysesPackSize !== total) {
@@ -272,8 +254,6 @@ function foldDailyIntoActivePack(state: DayState, limits: { analyses: number; ne
 
   return {
     ...state,
-    analysesUsed,
-    newsUsed,
     bonusAnalyses,
     bonusNews,
     bonusAnalysesUsed,
@@ -318,9 +298,9 @@ export async function getUsageSnapshot(email: string): Promise<UsageSnapshot> {
   const dateKey = mytDateKey();
   const plan = data.subscriptionPlan || 'monthly';
   const limits = dailyLimitsForPlan(plan);
-  const state = foldDailyIntoActivePack(buildDayState(data, dateKey, limits), limits);
+  const state = normalizeBonusMeters(buildDayState(data, dateKey, limits));
 
-  // Persist day/month transitions (and meter folds) so unused daily is not
+  // Persist day/month transitions (and meter sync) so unused daily is not
   // re-processed and expired month bonus is cleared in Firestore.
   if (state.rolled) {
     await ref.set(
@@ -358,8 +338,10 @@ export async function getUsageSnapshot(email: string): Promise<UsageSnapshot> {
     ? 9999
     : Math.max(0, limits.news - state.newsUsed) + state.bonusNews;
 
-  const analysesOnBonus = !unlimited && (state.analysesUsed >= limits.analyses || state.bonusAnalyses > 0);
-  const newsOnBonus = !unlimited && (state.newsUsed >= limits.news || state.bonusNews > 0);
+  // Pack meter only after included daily is exhausted (paid pool is separate).
+  const analysesOnBonus =
+    !unlimited && state.analysesUsed >= limits.analyses && state.bonusAnalyses > 0;
+  const newsOnBonus = !unlimited && state.newsUsed >= limits.news && state.bonusNews > 0;
 
   return {
     email: normalized,
@@ -406,7 +388,7 @@ export async function addBonusCredits(
 
     const plan = data.subscriptionPlan || 'monthly';
     const limits = dailyLimitsForPlan(plan);
-    const state = foldDailyIntoActivePack(buildDayState(data, dateKey, limits), limits);
+    const state = normalizeBonusMeters(buildDayState(data, dateKey, limits));
 
     let {
       bonusAnalyses,
@@ -421,22 +403,12 @@ export async function addBonusCredits(
 
     if (kind === 'analysis_pack' || kind === 'analysis') {
       const add = amount ?? (kind === 'analysis_pack' ? 12 : 5);
-      // Roll unused daily into bonus, then meter = 0 / total credit units
-      const unusedDaily = Math.max(0, limits.analyses - analysesUsed);
-      if (unusedDaily > 0) {
-        bonusAnalyses += unusedDaily;
-      }
-      analysesUsed = limits.analyses;
+      // Paid reload only — do not gift remaining included daily into the pack.
       bonusAnalyses = bonusAnalyses + add;
       bonusAnalysesUsed = 0;
       bonusAnalysesPackSize = bonusAnalyses; // total units after purchase
     } else {
       const add = amount ?? 10;
-      const unusedDaily = Math.max(0, limits.news - newsUsed);
-      if (unusedDaily > 0) {
-        bonusNews += unusedDaily;
-      }
-      newsUsed = limits.news;
       bonusNews = bonusNews + add;
       bonusNewsUsed = 0;
       bonusNewsPackSize = bonusNews; // total units after purchase
@@ -525,7 +497,7 @@ export async function consumeUsageCredit(
 
       const plan = data.subscriptionPlan || 'monthly';
       const limits = dailyLimitsForPlan(plan);
-      const state = foldDailyIntoActivePack(buildDayState(data, dateKey, limits), limits);
+      const state = normalizeBonusMeters(buildDayState(data, dateKey, limits));
 
       let analysesUsed = state.analysesUsed;
       let newsUsed = state.newsUsed;

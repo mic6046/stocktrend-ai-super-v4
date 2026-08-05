@@ -215,7 +215,7 @@ export function LandingPage({ subscribeMode = false }: LandingPageProps) {
             <p className="mt-2 text-sm text-gray-400 max-w-lg mx-auto">
               {awaitingPlan
                 ? 'Accept the legal terms, then subscribe with Stripe.'
-                : 'Basic RM 199 · Pro RM 349. Sign in first, then subscribe on this page.'}
+                : 'Paid plans · Basic RM 199 · Pro RM 349. Credits expire — no rollover to next month.'}
             </p>
           </div>
 
@@ -344,8 +344,8 @@ export function LandingPage({ subscribeMode = false }: LandingPageProps) {
           </div>
 
           <p className="mt-5 text-center text-[11px] text-gray-600">
-            Billing via Stripe · Cancel anytime before renewal · Daily quotas reset at midnight MYT ·
-            Credits do not roll over to the next month
+            Stripe billing · Cancel anytime before renewal · Daily included credits reset at midnight
+            MYT · Reloads expire end of month · No credit rollover
           </p>
         </section>
       </main>
