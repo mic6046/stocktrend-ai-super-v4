@@ -32,7 +32,13 @@ export function DecisionBriefPanel({ decision }: DecisionBriefPanelProps) {
 
       {/* STEP 11 — Final output header */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-        <Metric label="Horizon Recommendation" value={decision.finalVerdict} tone={decision.chartStance} />
+        <Metric
+          label="Do Now"
+          value={decision.currentAction.action}
+          tone={decision.chartStance}
+        />
+        <Metric label="Suggested Action" value={decision.suggestedAction} tone={decision.chartStance} />
+        <Metric label="Outlook (horizon)" value={decision.finalVerdict} tone={decision.chartStance} />
         <Metric label="Confidence" value={`${decision.confidence}%`} />
         <Metric
           label="Expected Return"
@@ -40,24 +46,56 @@ export function DecisionBriefPanel({ decision }: DecisionBriefPanelProps) {
           tone={decision.expectedReturn >= 0 ? 'bull' : 'bear'}
         />
         <Metric label="Risk Level" value={decision.riskLevel} />
-        <Metric label="Do Now (Current Action)" value={decision.currentAction.action} tone={decision.chartStance} />
-        <Metric label="Suggested Action" value={decision.suggestedAction} tone={decision.chartStance} />
       </div>
 
       <p className="text-[10px] text-gray-500 font-mono leading-relaxed">
-        Recommendation = horizon thesis · Current Action = what to do at this live price given{' '}
-        {decision.userHasPosition ? 'you own the stock' : 'you do not own the stock'}. BUY ZONE and ADD
-        POSITION never appear together.
+        Do now = live price action for your ownership (
+        {decision.userHasPosition ? 'Holding' : 'No position'}). Outlook = {decision.horizonLabel}{' '}
+        thesis — not the entry cue. Suggested Action matches Do now (Wait ≠ Hold).
       </p>
 
       <div className="rounded-xl border border-cyan-500/25 bg-cyan-500/5 px-3 py-2.5">
         <p className="text-[8px] uppercase tracking-wider text-cyan-300/80">
-          Live Price Engine · {decision.userHasPosition ? 'Position held' : 'No position'}
+          Do now by ownership · live price
         </p>
-        <p className="mt-1 text-[13px] font-bold text-white">{decision.currentAction.action}</p>
-        <p className="mt-1 text-[11px] text-gray-300 leading-relaxed">{decision.currentAction.reason}</p>
-        <p className="mt-1 text-[10px] font-mono text-gray-500">
-          Confidence {decision.currentAction.confidence}% · answers: what now / why / when it changes
+        <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div
+            className={cn(
+              'rounded-lg border px-3 py-2',
+              decision.userHasPosition
+                ? 'border-cyan-400/40 bg-cyan-500/10'
+                : 'border-white/10 bg-black/30'
+            )}
+          >
+            <p className="text-[8px] uppercase tracking-wider text-gray-500">Holding</p>
+            <p className="mt-0.5 text-[13px] font-bold text-white uppercase">
+              {decision.doNowByPosition?.holding.action ?? (decision.userHasPosition ? decision.currentAction.action : 'HOLD')}
+            </p>
+            <p className="mt-1 text-[10px] text-gray-400 leading-snug">
+              {decision.doNowByPosition?.holding.reason ?? decision.currentAction.reason}
+            </p>
+          </div>
+          <div
+            className={cn(
+              'rounded-lg border px-3 py-2',
+              !decision.userHasPosition
+                ? 'border-cyan-400/40 bg-cyan-500/10'
+                : 'border-white/10 bg-black/30'
+            )}
+          >
+            <p className="text-[8px] uppercase tracking-wider text-gray-500">No position</p>
+            <p className="mt-0.5 text-[13px] font-bold text-white uppercase">
+              {decision.doNowByPosition?.noPosition.action ?? (!decision.userHasPosition ? decision.currentAction.action : 'WAIT')}
+            </p>
+            <p className="mt-1 text-[10px] text-gray-400 leading-snug">
+              {decision.doNowByPosition?.noPosition.reason ?? decision.currentAction.reason}
+            </p>
+          </div>
+        </div>
+        <p className="mt-2 text-[10px] font-mono text-gray-500">
+          Your path ({decision.userHasPosition ? 'Holding' : 'No position'}):{' '}
+          {decision.currentAction.action} · {decision.currentAction.confidence}% · Suggested:{' '}
+          {decision.suggestedAction}
         </p>
       </div>
 
