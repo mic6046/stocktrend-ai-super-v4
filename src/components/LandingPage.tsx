@@ -344,7 +344,8 @@ export function LandingPage({ subscribeMode = false }: LandingPageProps) {
           </div>
 
           <p className="mt-5 text-center text-[11px] text-gray-600">
-            Billing via Stripe · Cancel anytime before renewal · Quotas reset at midnight MYT
+            Billing via Stripe · Cancel anytime before renewal · Daily quotas reset at midnight MYT ·
+            Credits do not roll over to the next month
           </p>
         </section>
       </main>

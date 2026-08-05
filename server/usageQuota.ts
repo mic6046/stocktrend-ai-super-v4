@@ -4,7 +4,9 @@
  * Pro:   30 analyses + 30 news / day
  * Overage: Pack +12 analyses, Mini +5 analyses / +10 news
  *
- * Unused daily credits roll over into the bonus pool at MYT midnight.
+ * Unused daily included credits expire at MYT midnight (no day-to-day
+ * rollover). Purchased / bonus credits do not roll over to the next
+ * calendar month (MYT) — the bonus pool is cleared on month change.
  * After daily included is exhausted, the meter shows the latest purchase
  * (e.g. Pack → 0/12 → 12/12).
  */
@@ -29,6 +31,11 @@ export function mytDateKey(d = new Date()): string {
     month: '2-digit',
     day: '2-digit',
   }).format(d);
+}
+
+/** Calendar month key in MYT (YYYY-MM). */
+export function mytMonthKey(d = new Date()): string {
+  return mytDateKey(d).slice(0, 7);
 }
 
 export function dailyLimitsForPlan(plan: SubscriptionPlanId): {
@@ -98,6 +105,8 @@ type UserDoc = {
   bonusNews?: number;
   bonusAnalysesPackSize?: number;
   bonusNewsPackSize?: number;
+  /** MYT YYYY-MM the current bonus pool belongs to (expires on month change). */
+  bonusMonthKey?: string;
   appliedOverageSessions?: Record<string, boolean>;
   usage?: {
     dateKey?: string;
@@ -111,6 +120,7 @@ type UserDoc = {
 
 type DayState = {
   dateKey: string;
+  monthKey: string;
   analysesUsed: number;
   newsUsed: number;
   bonusAnalysesUsed: number;
@@ -119,31 +129,62 @@ type DayState = {
   bonusNews: number;
   bonusAnalysesPackSize: number;
   bonusNewsPackSize: number;
-  /** True when unused daily was rolled into bonus (must persist). */
+  /** True when state must be persisted (day/month transition or meter fold). */
   rolled: boolean;
 };
 
 /**
- * Build today's usage state. If the calendar day changed (MYT), unused daily
- * credits roll into the bonus pool and daily counters reset.
+ * Build today's usage state.
+ * - New MYT day: unused included daily expires (no rollover); daily counters reset.
+ * - New MYT month: bonus / purchased credits expire (no month-to-month rollover).
  */
 function buildDayState(
   data: UserDoc,
   dateKey: string,
-  limits: { analyses: number; news: number }
+  _limits: { analyses: number; news: number }
 ): DayState {
   const usage = data.usage || {};
   const prevKey = usage.dateKey ? String(usage.dateKey) : '';
+  const monthKey = dateKey.slice(0, 7);
+  const storedMonth =
+    (data.bonusMonthKey ? String(data.bonusMonthKey) : '') ||
+    (prevKey ? prevKey.slice(0, 7) : '');
+
   let bonusAnalyses = Math.max(0, Number(data.bonusAnalyses) || 0);
   let bonusNews = Math.max(0, Number(data.bonusNews) || 0);
   let bonusAnalysesPackSize = Math.max(0, Number(data.bonusAnalysesPackSize) || 0);
   let bonusNewsPackSize = Math.max(0, Number(data.bonusNewsPackSize) || 0);
   let bonusAnalysesUsed = Math.max(0, Number(usage.bonusAnalysesUsed) || 0);
   let bonusNewsUsed = Math.max(0, Number(usage.bonusNewsUsed) || 0);
+  let rolled = false;
+
+  // Credits cannot roll over to the next month — clear bonus pool on MYT month change.
+  if (storedMonth && storedMonth !== monthKey) {
+    if (
+      bonusAnalyses > 0 ||
+      bonusNews > 0 ||
+      bonusAnalysesPackSize > 0 ||
+      bonusNewsPackSize > 0 ||
+      bonusAnalysesUsed > 0 ||
+      bonusNewsUsed > 0
+    ) {
+      rolled = true;
+    }
+    bonusAnalyses = 0;
+    bonusNews = 0;
+    bonusAnalysesPackSize = 0;
+    bonusNewsPackSize = 0;
+    bonusAnalysesUsed = 0;
+    bonusNewsUsed = 0;
+  } else if (!data.bonusMonthKey && (bonusAnalyses > 0 || bonusNews > 0)) {
+    // Backfill month key for existing bonus so a later month change can expire it.
+    rolled = true;
+  }
 
   if (prevKey === dateKey) {
     return {
       dateKey,
+      monthKey,
       analysesUsed: Math.max(0, Number(usage.analysesUsed) || 0),
       newsUsed: Math.max(0, Number(usage.newsUsed) || 0),
       bonusAnalysesUsed,
@@ -152,38 +193,12 @@ function buildDayState(
       bonusNews,
       bonusAnalysesPackSize,
       bonusNewsPackSize,
-      rolled: false,
+      rolled,
     };
   }
 
-  // New MYT day (or first write): roll unused daily into bonus, then reset daily.
-  let rolled = false;
-  if (prevKey) {
-    const prevAnalysesUsed = Math.max(0, Number(usage.analysesUsed) || 0);
-    const prevNewsUsed = Math.max(0, Number(usage.newsUsed) || 0);
-    const unusedAnalyses = Math.max(0, limits.analyses - prevAnalysesUsed);
-    const unusedNews = Math.max(0, limits.news - prevNewsUsed);
-
-    if (unusedAnalyses > 0) {
-      bonusAnalyses += unusedAnalyses;
-      // Rolled daily becomes spendable leftover; keep current purchase meter if any.
-      if (bonusAnalysesPackSize <= 0) {
-        bonusAnalysesPackSize = unusedAnalyses;
-        bonusAnalysesUsed = 0;
-      }
-      rolled = true;
-    }
-    if (unusedNews > 0) {
-      bonusNews += unusedNews;
-      if (bonusNewsPackSize <= 0) {
-        bonusNewsPackSize = unusedNews;
-        bonusNewsUsed = 0;
-      }
-      rolled = true;
-    }
-  }
-
-  // Pack "used" counters are purchase-scoped and survive the day change.
+  // New MYT day: unused included daily expires — do not add to bonus.
+  // Purchased bonus (same calendar month) survives the day change.
   return {
     dateKey,
     analysesUsed: 0,
@@ -194,7 +209,8 @@ function buildDayState(
     bonusNews,
     bonusAnalysesPackSize,
     bonusNewsPackSize,
-    rolled,
+    monthKey,
+    rolled: true,
   };
 }
 
@@ -304,7 +320,8 @@ export async function getUsageSnapshot(email: string): Promise<UsageSnapshot> {
   const limits = dailyLimitsForPlan(plan);
   const state = foldDailyIntoActivePack(buildDayState(data, dateKey, limits), limits);
 
-  // Persist rollover so unused daily is not lost on the next read.
+  // Persist day/month transitions (and meter folds) so unused daily is not
+  // re-processed and expired month bonus is cleared in Firestore.
   if (state.rolled) {
     await ref.set(
       {
@@ -313,6 +330,7 @@ export async function getUsageSnapshot(email: string): Promise<UsageSnapshot> {
         bonusNews: state.bonusNews,
         bonusAnalysesPackSize: state.bonusAnalysesPackSize,
         bonusNewsPackSize: state.bonusNewsPackSize,
+        bonusMonthKey: state.monthKey,
         usage: {
           dateKey: state.dateKey,
           analysesUsed: state.analysesUsed,
@@ -437,6 +455,7 @@ export async function addBonusCredits(
         bonusNews,
         bonusAnalysesPackSize,
         bonusNewsPackSize,
+        bonusMonthKey: state.monthKey,
         ...(sessionId ? { appliedOverageSessions: applied } : {}),
         usage: {
           dateKey: state.dateKey,
@@ -574,6 +593,7 @@ export async function consumeUsageCredit(
           bonusNews,
           bonusAnalysesPackSize,
           bonusNewsPackSize,
+          bonusMonthKey: state.monthKey,
           usage: {
             dateKey,
             analysesUsed,

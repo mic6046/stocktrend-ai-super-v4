@@ -24,6 +24,7 @@ export const PUBLIC_PLANS: PublicPlanCard[] = [
     features: [
       '10 AI stock analyses per day',
       '10 AI news summaries per day',
+      'Credits do not roll over to next month',
       'Full charts, alerts, score & advisory',
       'Cloud sync across devices',
       'Cancel anytime',
@@ -41,6 +42,7 @@ export const PUBLIC_PLANS: PublicPlanCard[] = [
     features: [
       '30 AI stock analyses per day',
       '30 AI news summaries per day',
+      'Credits do not roll over to next month',
       'Everything in Basic',
       'Same overage rates & AI pack',
       'Cancel anytime',
