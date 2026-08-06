@@ -1,5 +1,5 @@
 /**
- * Find / Suggest a Trade — batch scout over ticker lists.
+ * Find / Suggest Trades — batch scout over ticker lists.
  *
  * - Find (`mode: 'find'`, default): Consensus AI BUY gates
  * - Suggest (`mode: 'suggest'`): priority factor engine

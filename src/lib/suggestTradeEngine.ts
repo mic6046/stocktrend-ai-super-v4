@@ -1,5 +1,5 @@
 /**
- * Suggest a Trade — factor search engine.
+ * Suggest Trades — factor search engine.
  *
  * Priority order (weights):
  * 1. Whale accumulation
@@ -350,7 +350,7 @@ function weightedComposite(factors: SuggestFactorRating[]): number {
 }
 
 /**
- * Score one ticker for Suggest a Trade using the priority factor engine.
+ * Score one ticker for Suggest Trades using the priority factor engine.
  */
 export function scoreSuggestTrade(opts: {
   technical: TechnicalBreakdown;

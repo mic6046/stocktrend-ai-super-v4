@@ -193,7 +193,7 @@ export function SuggestATradePanel({
       });
       setResult(out);
     } catch (e: any) {
-      setError(e?.message || 'Suggest a Trade failed');
+      setError(e?.message || 'Suggest Trades failed');
     } finally {
       scanningRef.current = false;
       setScanning(false);
@@ -213,7 +213,7 @@ export function SuggestATradePanel({
   return (
     <GlassCard className={cn('space-y-3', className)}>
       <SectionLabel icon={<Compass className="w-3.5 h-3.5 text-sky-400" />}>
-        Suggest a Trade · {horizonLabel}
+        Suggest Trades · {horizonLabel}
       </SectionLabel>
 
       <p className="text-[11px] text-gray-400 leading-relaxed">
@@ -343,7 +343,7 @@ export function SuggestATradePanel({
           )}
         >
           {scanning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-          {scanning ? 'Searching…' : result ? 'New search' : 'Suggest a Trade'}
+          {scanning ? 'Searching…' : result ? 'New search' : 'Suggest Trades'}
         </button>
       </div>
 

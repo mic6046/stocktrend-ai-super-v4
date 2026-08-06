@@ -1,5 +1,5 @@
 /**
- * Curated popular-market universes for Suggest a Trade.
+ * Curated popular-market universes for Suggest Trades.
  * Kept modest (≤20 per scout) so Consensus scanning stays within API limits.
  */
 
@@ -133,7 +133,7 @@ const DEDUPED: UniverseName[] = (() => {
 })();
 
 /**
- * Build a scout list for Suggest a Trade.
+ * Build a scout list for Suggest Trades.
  * Caps at `max` tickers; for ALL markets, round-robins across regions.
  * When `shuffle` is true, randomize order (and which names are kept when pool > max)
  * so each Suggest press is a new search sample.
