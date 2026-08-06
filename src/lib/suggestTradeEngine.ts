@@ -444,3 +444,190 @@ export function formatFactorStrip(factors: SuggestFactorRating[]): string {
     .filter(Boolean)
     .join(' ');
 }
+
+export type SuggestEntryPlan = {
+  buyZone: { lo: number; hi: number };
+  stopLoss: number;
+  takeProfit: number;
+  /** Human-readable anchor used for the zone. */
+  anchorLabel: string;
+  /** Approximate ATR used for sizing. */
+  atr: number;
+  /** Zone width as % of price. */
+  widthPct: number;
+  /** No-position live action vs this buy zone. */
+  liveAction: 'BUY' | 'WAIT';
+  liveReason: string;
+};
+
+function roundPx(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  if (n >= 1000) return Math.round(n * 100) / 100;
+  if (n >= 100) return Math.round(n * 100) / 100;
+  if (n >= 10) return Math.round(n * 100) / 100;
+  return Math.round(n * 1000) / 1000;
+}
+
+function estimateAtr(tech: TechnicalBreakdown, price: number): number {
+  const atr = tech.indicators?.atr;
+  if (atr != null && Number.isFinite(atr) && atr > 0) return atr;
+  const vol = tech.indicators?.volatility;
+  // volatility here is avg abs daily return (decimal-ish); fallback ~1.2% of price
+  if (vol != null && Number.isFinite(vol) && vol > 0) {
+    return Math.max(price * 0.004, price * Math.min(0.04, vol) * 1.2);
+  }
+  return price * 0.012;
+}
+
+/**
+ * Realistic Suggest entry plan:
+ * - Buy zone anchored to nearest support / EMA pullback (not stop→price ladder)
+ * - Width ≈ 0.8–1.4 ATR, capped ~1.2%–3.5% of price
+ * - Stop under zone by ~1 ATR / next support
+ * - Take-profit toward resistance with ~1.6–2.2R reward
+ */
+export function buildRealisticSuggestEntry(opts: {
+  technical: TechnicalBreakdown;
+  price: number;
+  targetHint?: number | null;
+}): SuggestEntryPlan {
+  const price = opts.price;
+  const tech = opts.technical;
+  const atr = estimateAtr(tech, price);
+
+  const supports = (tech.quantumRefinement?.supportResistance?.supports || [])
+    .filter((s) => Number.isFinite(s) && s > 0 && s < price * 1.002)
+    .sort((a, b) => b - a);
+  const resistances = (tech.quantumRefinement?.supportResistance?.resistances || [])
+    .filter((r) => Number.isFinite(r) && r > price)
+    .sort((a, b) => a - b);
+
+  const ema20 = tech.indicators?.ema20;
+  const sma50 = tech.indicators?.sma50;
+  const bbMid = tech.indicators?.bollinger?.middle;
+  const bbLower = tech.indicators?.bollinger?.lower;
+  const ma20 = tech.quantumRefinement?.trendStrength?.ma20;
+
+  const candidates: { level: number; label: string }[] = [];
+  if (supports[0] != null) candidates.push({ level: supports[0], label: 'nearest volume support' });
+  if (supports[1] != null) candidates.push({ level: supports[1], label: 'secondary support' });
+  if (ema20 != null && ema20 < price) candidates.push({ level: ema20, label: 'EMA20 pullback' });
+  if (sma50 != null && sma50 < price) candidates.push({ level: sma50, label: 'SMA50 pullback' });
+  if (ma20 != null && ma20 < price) candidates.push({ level: ma20, label: 'MA20 pullback' });
+  if (bbMid != null && bbMid < price) candidates.push({ level: bbMid, label: 'Bollinger mid' });
+  if (bbLower != null && bbLower < price) candidates.push({ level: bbLower, label: 'Bollinger lower' });
+  // Mild structural fallbacks — still below price
+  candidates.push({ level: price * 0.985, label: '≈1.5% pullback' });
+  candidates.push({ level: price * 0.97, label: '≈3% pullback' });
+
+  // Prefer the highest support that is still a meaningful pullback (≥ 0.35 ATR or ≥ 0.4%)
+  const minPull = Math.max(atr * 0.35, price * 0.004);
+  const deepEnough = candidates
+    .filter((c) => price - c.level >= minPull * 0.5 && c.level > price * 0.88)
+    .sort((a, b) => b.level - a.level);
+
+  // If price is already hugging support (< 0.4 ATR above), allow buying near spot
+  const nearSupport = deepEnough[0] && price - deepEnough[0].level <= atr * 0.45;
+  const anchor = deepEnough[0] || { level: price * 0.98, label: 'structural pullback' };
+
+  // Zone width: ~1 ATR, but keep realistic for liquid names
+  const widthRaw = atr * 1.05;
+  const width = Math.min(
+    Math.max(widthRaw, price * 0.012), // at least ~1.2%
+    price * 0.035, // at most ~3.5%
+    atr * 1.6
+  );
+
+  let buyHi: number;
+  let buyLo: number;
+  if (nearSupport) {
+    // Price is at support — zone around current with slight room above/below
+    buyHi = Math.min(price * 1.004, anchor.level + width * 0.55);
+    buyLo = Math.max(anchor.level - width * 0.45, buyHi - width);
+  } else {
+    // Extended — wait for pullback into support band
+    buyHi = Math.min(anchor.level + width * 0.35, price * 0.997);
+    buyLo = buyHi - width;
+    // Keep zone centered near anchor
+    const mid = (buyLo + buyHi) / 2;
+    const shift = anchor.level - mid;
+    buyLo += shift * 0.65;
+    buyHi += shift * 0.65;
+    buyHi = Math.min(buyHi, price * 0.997);
+    buyLo = Math.min(buyLo, buyHi - width * 0.75);
+  }
+
+  // Safety clamps
+  buyHi = Math.min(buyHi, price * (nearSupport ? 1.006 : 0.998));
+  buyLo = Math.max(buyLo, price * 0.9);
+  if (buyHi - buyLo < price * 0.01) {
+    buyLo = buyHi - price * 0.012;
+  }
+  if (buyHi <= buyLo) {
+    buyHi = buyLo + price * 0.012;
+  }
+
+  // Stop: under buy zone by ~1 ATR, or under next support if closer
+  const nextSupport = supports.find((s) => s < buyLo - atr * 0.15) ?? buyLo - atr;
+  let stopLoss = Math.min(buyLo - Math.max(atr * 0.95, price * 0.01), nextSupport * 0.995);
+  if (buyLo - stopLoss > price * 0.055) {
+    // Cap stop distance ~5.5% so R:R stays usable
+    stopLoss = buyLo - price * 0.045;
+  }
+  if (!(stopLoss < buyLo)) stopLoss = buyLo - Math.max(atr * 0.8, price * 0.01);
+
+  const risk = buyHi - stopLoss; // use zone top for conservative risk
+  const riskFromMid = (buyLo + buyHi) / 2 - stopLoss;
+  const rewardMultiple = 1.85;
+  const r1 = resistances[0];
+  const targetHint =
+    opts.targetHint != null && Number.isFinite(opts.targetHint) && opts.targetHint > price
+      ? opts.targetHint
+      : null;
+
+  let takeProfit = (buyLo + buyHi) / 2 + Math.max(riskFromMid, risk * 0.85) * rewardMultiple;
+  if (r1 != null) {
+    // Prefer first resistance if it offers at least ~1.4R
+    if (r1 > (buyLo + buyHi) / 2 + riskFromMid * 1.4) {
+      takeProfit = Math.min(r1 * 0.995, takeProfit * 1.08);
+    } else {
+      takeProfit = Math.max(takeProfit, r1);
+    }
+  }
+  if (targetHint != null) {
+    takeProfit = takeProfit * 0.65 + targetHint * 0.35;
+  }
+  if (takeProfit <= buyHi * 1.01) {
+    takeProfit = buyHi + Math.max(riskFromMid * 1.6, price * 0.02);
+  }
+
+  buyLo = roundPx(buyLo);
+  buyHi = roundPx(buyHi);
+  stopLoss = roundPx(stopLoss);
+  takeProfit = roundPx(takeProfit);
+
+  if (!(buyLo < buyHi)) buyHi = roundPx(buyLo + price * 0.012);
+  if (!(stopLoss < buyLo)) stopLoss = roundPx(buyLo - Math.max(atr * 0.8, price * 0.01));
+  if (!(takeProfit > buyHi)) takeProfit = roundPx(buyHi + price * 0.025);
+
+  const inZone = price >= buyLo && price <= buyHi;
+  const widthPct = ((buyHi - buyLo) / price) * 100;
+  const liveAction: 'BUY' | 'WAIT' = inZone ? 'BUY' : 'WAIT';
+  const liveReason = inZone
+    ? `Live price is inside the support buy zone (${anchor.label}).`
+    : price > buyHi
+      ? `Wait for pullback into ${anchor.label} buy zone ${buyLo.toFixed(2)}–${buyHi.toFixed(2)}.`
+      : `Price under buy zone — confirm support hold above stop ${stopLoss.toFixed(2)}.`;
+
+  return {
+    buyZone: { lo: buyLo, hi: buyHi },
+    stopLoss,
+    takeProfit,
+    anchorLabel: anchor.label,
+    atr: roundPx(atr),
+    widthPct: Math.round(widthPct * 10) / 10,
+    liveAction,
+    liveReason,
+  };
+}
+

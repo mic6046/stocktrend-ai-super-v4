@@ -461,7 +461,11 @@ function SuggestedBuyZoneCard({ pick }: { pick: FindATradeCandidate }) {
   if (!range || !pick.buyZone) return null;
   const inZone = priceInBuyZone(pick.price, pick.buyZone.lo, pick.buyZone.hi);
   const above = pick.price > pick.buyZone.hi;
-  const stance = inZone ? 'Live price is inside the BUY zone' : above ? 'Live price is above BUY zone — wait for pullback' : 'Live price is below BUY zone — watch support / stop';
+  const stance = inZone
+    ? `Live price is inside the BUY zone${pick.buyZoneAnchor ? ` (${pick.buyZoneAnchor})` : ''}`
+    : above
+      ? `Live price is above BUY zone — wait for pullback${pick.buyZoneAnchor ? ` to ${pick.buyZoneAnchor}` : ''}`
+      : `Live price is below BUY zone — watch support / stop`;
 
   return (
     <div className="rounded-lg border border-emerald-500/35 bg-emerald-500/10 px-2.5 py-2 space-y-1.5">
@@ -469,8 +473,12 @@ function SuggestedBuyZoneCard({ pick }: { pick: FindATradeCandidate }) {
         <div>
           <p className="text-[9px] font-mono uppercase tracking-wider text-emerald-300/90">
             Suggested buy zone
+            {pick.buyZoneWidthPct != null ? ` · ~${pick.buyZoneWidthPct}% wide` : ''}
           </p>
           <p className="text-[15px] font-black text-emerald-200 tracking-wide mt-0.5">{range}</p>
+          {pick.buyZoneAnchor && (
+            <p className="text-[10px] text-emerald-100/70 mt-0.5">Anchored to {pick.buyZoneAnchor}</p>
+          )}
         </div>
         <div className="text-right shrink-0 font-mono text-[10px]">
           <p className="text-gray-500 uppercase text-[8px]">Live</p>

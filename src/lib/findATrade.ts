@@ -15,6 +15,7 @@ import {
   type ZoneAction,
 } from './quantumRecommendationEngine';
 import {
+  buildRealisticSuggestEntry,
   formatFactorStrip,
   scoreSuggestTrade,
   type SuggestFactorRating,
@@ -46,6 +47,10 @@ export type FindATradeCandidate = {
   buyZone?: SuggestBuyZone;
   stopLoss?: number;
   takeProfit?: number;
+  /** How the Suggest buy zone was anchored (support / EMA / etc). */
+  buyZoneAnchor?: string;
+  /** Buy zone width as % of live price. */
+  buyZoneWidthPct?: number;
   /** Suggest factor ratings (1–5) when mode=suggest. */
   factorRatings?: SuggestFactorRating[];
   /** Suggest weighted composite 0–100. */
@@ -274,6 +279,11 @@ async function scoutOne(
         price: px,
         quote: data?.quote ?? null,
       });
+      const entry = buildRealisticSuggestEntry({
+        technical: tech,
+        price: px,
+        targetHint: engine.targetPrice,
+      });
 
       const isBuyCandidate = suggest.isSuggestCandidate && engine.expectedReturn > -2;
 
@@ -282,18 +292,20 @@ async function scoutOne(
         name: data?.quote?.shortName || data?.quote?.longName || ticker,
         price: engine.currentPrice,
         recommendation: engine.finalVerdict,
-        currentAction: engine.currentAction.action,
+        currentAction: entry.liveAction,
         confidence: Math.round(
           Math.min(95, Math.max(40, suggest.compositeScore * 0.55 + suggest.priorityAvg * 8))
         ),
         score: suggest.compositeScore,
         expectedReturn: engine.expectedReturn,
-        why: suggest.summary,
+        why: `${suggest.summary} Buy zone via ${entry.anchorLabel} (~${entry.widthPct}% wide).`,
         tradeScore: 0,
         isBuyCandidate,
-        buyZone: { lo: engine.buyZone.lo, hi: engine.buyZone.hi },
-        stopLoss: engine.stopLoss,
-        takeProfit: engine.takeProfit,
+        buyZone: entry.buyZone,
+        stopLoss: entry.stopLoss,
+        takeProfit: entry.takeProfit,
+        buyZoneAnchor: entry.anchorLabel,
+        buyZoneWidthPct: entry.widthPct,
         factorRatings: suggest.factors,
         suggestComposite: suggest.compositeScore,
         factorStrip: formatFactorStrip(suggest.factors),
