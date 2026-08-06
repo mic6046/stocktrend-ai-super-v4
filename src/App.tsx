@@ -8804,6 +8804,7 @@ export default function App() {
                     onUserHasPositionChange={handleUserHasPositionChange}
                     currentAction={horizonView.currentAction}
                     visibleZoneKeys={horizonView.visibleZoneKeys}
+                    technical={technicalBreakdown}
                     engineZones={{
                       buyZone: horizonView.buyZone,
                       addZone: horizonView.addZone,

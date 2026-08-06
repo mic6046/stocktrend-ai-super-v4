@@ -5,6 +5,8 @@ import { cn } from '../../lib/utils';
 import { GlassCard, SectionLabel } from './GlassCard';
 import { formatMoney, type HorizonKey } from './analysisTheme';
 import type { LiveActionBrief, QuantumEngineOutput } from '../../lib/quantumRecommendationEngine';
+import { buildRealisticSuggestEntry, type SuggestBuyBand } from '../../lib/suggestTradeEngine';
+import type { TechnicalBreakdown } from '../../lib/technical';
 
 type Levels = {
   s1?: number;
@@ -30,6 +32,8 @@ type TradeZonesPanelProps = {
   onUserHasPositionChange?: (owns: boolean) => void;
   currentAction?: LiveActionBrief | null;
   visibleZoneKeys?: QuantumEngineOutput['visibleZoneKeys'];
+  /** Used to build realistic Buy Zone 1/2/3 scale-in bands. */
+  technical?: TechnicalBreakdown | null;
   engineZones?: {
     buyZone: ZoneBand;
     addZone: ZoneBand;
@@ -75,6 +79,38 @@ function inBand(px: number, band: ZoneBand): boolean {
   return px >= lo - 1e-9 && px <= hi + 1e-9;
 }
 
+/** Fallback: split a single buy envelope into 3 descending tranches. */
+function splitBuyEnvelope(buy: ZoneBand, px: number): SuggestBuyBand[] {
+  const lo = Math.min(buy.lo, buy.hi);
+  const hi = Math.max(buy.lo, buy.hi);
+  const span = Math.max(hi - lo, px * 0.024);
+  const top = hi;
+  const bot = Math.min(lo, hi - span);
+  const t1Hi = top;
+  const t1Lo = top - span / 3;
+  const t2Hi = t1Lo - px * 0.0015;
+  const t2Lo = t2Hi - span / 3;
+  const t3Hi = t2Lo - px * 0.0015;
+  const t3Lo = bot;
+  return [
+    { level: 1, label: 'Buy Zone 1', sizePct: 30, anchor: 'upper entry', lo: t1Lo, hi: t1Hi },
+    { level: 2, label: 'Buy Zone 2', sizePct: 40, anchor: 'core entry', lo: t2Lo, hi: t2Hi },
+    { level: 3, label: 'Buy Zone 3', sizePct: 30, anchor: 'deep entry', lo: t3Lo, hi: t3Hi },
+  ];
+}
+
+type JourneyCard = {
+  key: string;
+  emoji: string;
+  title: string;
+  subtitle: string;
+  detail: string | null;
+  price: string;
+  className: string;
+  titleClass: string;
+  matchKeys: string[];
+};
+
 export function TradeZonesPanel({
   lastClose,
   levels,
@@ -87,6 +123,7 @@ export function TradeZonesPanel({
   horizon = '1M',
   horizonLabel = '1 Month',
   engineZones = null,
+  technical = null,
   userHasPosition = false,
   onUserHasPositionChange,
   currentAction = null,
@@ -144,32 +181,57 @@ export function TradeZonesPanel({
       exit = { lo: reduce.hi + eps, hi: reduce.hi + eps + px * 0.012 };
     }
 
+    const entry =
+      technical && px > 0
+        ? buildRealisticSuggestEntry({
+            technical,
+            price: px,
+            targetHint: takeProfit.hi,
+          })
+        : null;
+    const buyZones: SuggestBuyBand[] = entry?.buyZones?.length
+      ? entry.buyZones
+      : splitBuyEnvelope(buy, px);
+
+    // Prefer realistic stop under BZ3 when available
+    if (entry?.stopLoss != null && entry.stopLoss < buyZones[2].lo) {
+      sl = entry.stopLoss;
+    } else if (!(sl < buyZones[2].lo)) {
+      sl = buyZones[2].lo * 0.985;
+    }
+
     const warnings: string[] = [];
-    const ordered = [
-      { key: 'BUY', band: buy },
+    for (const z of buyZones) {
+      if (!(z.lo < z.hi)) warnings.push(`${z.label} has an inverted price range.`);
+    }
+    for (let i = 1; i < buyZones.length; i++) {
+      if (!(buyZones[i].hi < buyZones[i - 1].lo)) {
+        warnings.push(`${buyZones[i].label} should sit below ${buyZones[i - 1].label}.`);
+      }
+    }
+    const ladder = [
       { key: 'ADD', band: add },
       { key: 'HOLD', band: hold },
       { key: 'TAKE PROFIT', band: takeProfit },
       { key: 'REDUCE', band: reduce },
       { key: 'EXIT', band: exit },
     ] as const;
-
-    for (const z of ordered) {
+    for (const z of ladder) {
       if (!(z.band.lo < z.band.hi)) warnings.push(`${z.key} zone has an inverted price range.`);
     }
-    for (let i = 0; i < ordered.length; i++) {
-      for (let j = i + 1; j < ordered.length; j++) {
-        if (overlaps(ordered[i].band, ordered[j].band)) {
-          warnings.push(`${ordered[i].key} and ${ordered[j].key} ranges overlap.`);
+    for (let i = 0; i < ladder.length; i++) {
+      for (let j = i + 1; j < ladder.length; j++) {
+        if (overlaps(ladder[i].band, ladder[j].band)) {
+          warnings.push(`${ladder[i].key} and ${ladder[j].key} ranges overlap.`);
         }
       }
-      if (i > 0 && !(ordered[i - 1].band.hi < ordered[i].band.lo)) {
-        warnings.push(`Zone order broken: ${ordered[i - 1].key}.max must be < ${ordered[i].key}.min`);
+      if (i > 0 && !(ladder[i - 1].band.hi < ladder[i].band.lo)) {
+        warnings.push(`Zone order broken: ${ladder[i - 1].key}.max must be < ${ladder[i].key}.min`);
       }
     }
-    if (!(sl < buy.lo)) warnings.push('Stop Loss must sit strictly under the BUY zone.');
+    if (!(sl < buyZones[2].lo)) warnings.push('Stop Loss must sit strictly under Buy Zone 3.');
 
-    // Which band contains live price — used to sync highlight with AI score Do Now
+    const activeBuy = buyZones.find((z) => inBand(px, z));
     let priceZoneKey: string | null = null;
     if (px <= sl) priceZoneKey = 'stop';
     else if (inBand(px, exit) || px > exit.hi) priceZoneKey = 'exit';
@@ -177,23 +239,46 @@ export function TradeZonesPanel({
     else if (inBand(px, takeProfit)) priceZoneKey = 'takeProfit';
     else if (inBand(px, hold)) priceZoneKey = 'hold';
     else if (userHasPosition && inBand(px, add)) priceZoneKey = 'add';
-    else if (!userHasPosition && inBand(px, buy)) priceZoneKey = 'buy';
+    else if (!userHasPosition && activeBuy) priceZoneKey = `buy${activeBuy.level}`;
     else if (userHasPosition) priceZoneKey = 'hold';
     else priceZoneKey = 'hold';
 
-    const allCards = [
+    const buyTone = [
       {
-        key: 'buy' as const,
         emoji: '🟢',
-        title: 'BUY ZONE',
-        subtitle: 'Best entry for a new position',
-        detail: null as string | null,
-        price: formatRange(buy.lo, buy.hi, currency),
         className: 'border-emerald-500/35 bg-emerald-500/10',
         titleClass: 'text-emerald-300',
+        subtitle: 'First entry chance · nearest pullback',
       },
       {
-        key: 'add' as const,
+        emoji: '🟢',
+        className: 'border-sky-500/35 bg-sky-500/10',
+        titleClass: 'text-sky-300',
+        subtitle: 'Core entry · primary scale-in',
+      },
+      {
+        emoji: '🟢',
+        className: 'border-violet-500/35 bg-violet-500/10',
+        titleClass: 'text-violet-300',
+        subtitle: 'Deep value entry · best average if filled',
+      },
+    ] as const;
+
+    const buyCards: JourneyCard[] = buyZones.map((z, i) => ({
+      key: `buy${z.level}`,
+      emoji: buyTone[i].emoji,
+      title: `BUY ZONE ${z.level}`,
+      subtitle: `${buyTone[i].subtitle} · ~${z.sizePct}% size`,
+      detail: `via ${z.anchor}`,
+      price: formatRange(z.lo, z.hi, currency),
+      className: buyTone[i].className,
+      titleClass: buyTone[i].titleClass,
+      matchKeys: [`buy${z.level}`, 'buy'],
+    }));
+
+    const otherCards: JourneyCard[] = [
+      {
+        key: 'add',
         emoji: '🔵',
         title: 'ADD POSITION',
         subtitle: 'Scale in if already holding and thesis intact',
@@ -201,19 +286,23 @@ export function TradeZonesPanel({
         price: formatRange(add.lo, add.hi, currency),
         className: 'border-sky-500/35 bg-sky-500/10',
         titleClass: 'text-sky-300',
+        matchKeys: ['add'],
       },
       {
-        key: 'hold' as const,
+        key: 'hold',
         emoji: '🟡',
         title: userHasPosition ? 'HOLD' : 'WAIT',
         subtitle: userHasPosition ? 'No action required.' : 'Wait for a better entry — do not chase.',
-        detail: userHasPosition ? 'Continue holding existing position.' : 'Prefer BUY zone before opening.',
+        detail: userHasPosition
+          ? 'Continue holding existing position.'
+          : 'Prefer Buy Zone 1–3 before opening.',
         price: formatRange(hold.lo, hold.hi, currency),
         className: 'border-amber-500/35 bg-amber-500/10',
         titleClass: 'text-amber-300',
+        matchKeys: ['hold'],
       },
       {
-        key: 'takeProfit' as const,
+        key: 'takeProfit',
         emoji: '🟣',
         title: 'TAKE PROFIT',
         subtitle: 'Consider taking partial profits.',
@@ -221,9 +310,10 @@ export function TradeZonesPanel({
         price: formatRange(takeProfit.lo, takeProfit.hi, currency),
         className: 'border-violet-500/35 bg-violet-500/10',
         titleClass: 'text-violet-300',
+        matchKeys: ['takeProfit'],
       },
       {
-        key: 'reduce' as const,
+        key: 'reduce',
         emoji: '🟠',
         title: 'REDUCE',
         subtitle: 'Trim remaining exposure after extension.',
@@ -231,9 +321,10 @@ export function TradeZonesPanel({
         price: formatRange(reduce.lo, reduce.hi, currency),
         className: 'border-orange-500/35 bg-orange-500/10',
         titleClass: 'text-orange-300',
+        matchKeys: ['reduce'],
       },
       {
-        key: 'exit' as const,
+        key: 'exit',
         emoji: '🔴',
         title: 'EXIT',
         subtitle: 'Close remaining position.',
@@ -241,6 +332,7 @@ export function TradeZonesPanel({
         price: formatRange(exit.lo, exit.hi, currency),
         className: 'border-rose-500/35 bg-rose-500/10',
         titleClass: 'text-rose-300',
+        matchKeys: ['exit'],
       },
     ];
 
@@ -250,7 +342,11 @@ export function TradeZonesPanel({
         ? (['add', 'hold', 'takeProfit', 'reduce', 'exit', 'stop'] as const)
         : (['buy', 'hold', 'stop'] as const));
 
-    const journey = allCards.filter((c) => keys.includes(c.key));
+    const wantBuy = keys.includes('buy');
+    const journey: JourneyCard[] = [
+      ...(wantBuy ? buyCards : []),
+      ...otherCards.filter((c) => keys.includes(c.key as (typeof keys)[number])),
+    ];
 
     return {
       journey,
@@ -258,6 +354,7 @@ export function TradeZonesPanel({
       showStop: keys.includes('stop'),
       warnings: [...new Set(warnings)],
       priceZoneKey,
+      activeBuyLevel: activeBuy?.level ?? null,
     };
   }, [
     lastClose,
@@ -268,11 +365,22 @@ export function TradeZonesPanel({
     currency,
     zoneScale,
     engineZones,
+    technical,
     userHasPosition,
     visibleZoneKeys,
   ]);
 
   const activeZoneKey = currentAction?.zoneKey || model.priceZoneKey;
+
+  const cardIsLive = (z: JourneyCard) => {
+    if (z.matchKeys.includes(activeZoneKey || '')) return true;
+    if (activeZoneKey === 'buy' && z.key.startsWith('buy')) {
+      // Engine still reports zoneKey 'buy' — highlight the tranche that contains live price
+      return model.priceZoneKey === z.key || model.activeBuyLevel === Number(z.key.replace('buy', ''));
+    }
+    return false;
+  };
+
   return (
     <GlassCard className="h-full">
       <SectionLabel icon={<Crosshair className="w-3.5 h-3.5 text-emerald-400" />}>
@@ -281,7 +389,8 @@ export function TradeZonesPanel({
 
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <p className="text-[10px] text-gray-500 leading-relaxed font-mono uppercase tracking-wider">
-          {horizonLabel} · synced with AI score Do Now · {userHasPosition ? 'owned: ADD only' : 'flat: BUY only'}
+          {horizonLabel} · synced with AI score Do Now ·{' '}
+          {userHasPosition ? 'owned: ADD only' : 'flat: Buy Zone 1–3'}
         </p>
         <label className="inline-flex items-center gap-2 cursor-pointer select-none">
           <span className="text-[10px] font-mono text-gray-400 uppercase tracking-wider">I own this stock</span>
@@ -328,6 +437,7 @@ export function TradeZonesPanel({
               <p className="mt-1.5 text-[11px] text-gray-300 leading-relaxed">{currentAction.reason}</p>
               <p className="mt-1 text-[10px] font-mono text-gray-500">
                 Confidence {currentAction.confidence}% · exactly one live action
+                {model.activeBuyLevel != null ? ` · inside Buy Zone ${model.activeBuyLevel}` : ''}
               </p>
             </>
           )}
@@ -352,9 +462,7 @@ export function TradeZonesPanel({
                 className={cn(
                   'rounded-xl border px-3 py-2.5 min-w-0 transition-transform duration-200 hover:scale-[1.01]',
                   z.className,
-                  currentAction?.zoneKey === z.key || activeZoneKey === z.key
-                    ? 'ring-1 ring-cyan-400/40'
-                    : undefined
+                  cardIsLive(z) ? 'ring-1 ring-cyan-400/40' : undefined
                 )}
               >
                 <div className="flex items-start justify-between gap-3 min-w-0">
@@ -364,7 +472,7 @@ export function TradeZonesPanel({
                         {z.emoji}
                       </span>
                       {z.title}
-                      {(currentAction?.zoneKey === z.key || activeZoneKey === z.key) && (
+                      {cardIsLive(z) && (
                         <span className="ml-1.5 text-[8px] font-mono text-cyan-300 normal-case tracking-normal">
                           · live
                         </span>
@@ -412,7 +520,7 @@ export function TradeZonesPanel({
                   <span className="mr-1.5" aria-hidden>
                     🔴
                   </span>
-                  Stop Loss Below
+                  Stop Loss Below Buy Zone 3
                   {(currentAction?.zoneKey === 'stop' || activeZoneKey === 'stop') && (
                     <span className="ml-1.5 text-[8px] font-mono text-cyan-300 normal-case tracking-normal">
                       · live
@@ -422,7 +530,7 @@ export function TradeZonesPanel({
                 <p className="mt-1 text-[11px] text-gray-300 leading-snug">
                   {userHasPosition
                     ? 'Exit only if price closes below this level.'
-                    : 'Invalidation for new entries — do not buy below this level.'}
+                    : 'Invalidation for new entries — do not buy below Buy Zone 3 / this stop.'}
                 </p>
               </div>
               <p className="font-mono text-[12px] sm:text-[13px] font-bold text-rose-200 tabular-nums shrink-0">
