@@ -428,8 +428,8 @@ export function SuggestATradePanel({
                     {c.error
                       ? `ERR ${c.error}`
                       : `${c.factorStrip || `${c.recommendation} · ${c.currentAction}`} · ${c.score}${
-                          c.buyZones?.length
-                            ? ` · BZ1 ${formatMoney(c.buyZones[0].lo)}-${formatMoney(c.buyZones[0].hi)} · BZ3 ${formatMoney(c.buyZones[2].lo)}-${formatMoney(c.buyZones[2].hi)}`
+                          formatBuyZonesStrip(c.buyZones)
+                            ? ` · ${formatBuyZonesStrip(c.buyZones)}`
                             : c.buyZone
                               ? ` · buy ${formatMoney(c.buyZone.lo)}-${formatMoney(c.buyZone.hi)}`
                               : ''
@@ -446,11 +446,9 @@ export function SuggestATradePanel({
   );
 }
 
-function formatZoneRange(lo?: number, hi?: number): string | null {
-  if (lo == null || hi == null || !Number.isFinite(lo) || !Number.isFinite(hi) || lo <= 0 || hi <= 0) {
-    return null;
-  }
-  return `${formatMoney(lo)} – ${formatMoney(hi)}`;
+function formatBuyZonesStrip(zones?: { lo: number; hi: number; level: number }[] | null): string | null {
+  if (!zones || zones.length < 3) return null;
+  return `BZ1 ${formatMoney(zones[0].lo)}–${formatMoney(zones[0].hi)} · BZ2 ${formatMoney(zones[1].lo)}–${formatMoney(zones[1].hi)} · BZ3 ${formatMoney(zones[2].lo)}–${formatMoney(zones[2].hi)}`;
 }
 
 function priceInBuyZone(price: number, lo?: number, hi?: number): boolean {
@@ -713,10 +711,7 @@ function CandidateRow({
 }) {
   const whale = c.factorRatings?.find((f) => f.key === 'whaleAccumulation')?.rating;
   const funds = c.factorRatings?.find((f) => f.key === 'institutionalInflow')?.rating;
-  const buyRange =
-    c.buyZones && c.buyZones.length >= 3
-      ? `BZ1 ${formatMoney(c.buyZones[0].lo)}–${formatMoney(c.buyZones[0].hi)} · BZ3 ${formatMoney(c.buyZones[2].lo)}–${formatMoney(c.buyZones[2].hi)}`
-      : formatZoneRange(c.buyZone?.lo, c.buyZone?.hi);
+  const buyRange = formatBuyZonesStrip(c.buyZones) || formatZoneRange(c.buyZone?.lo, c.buyZone?.hi);
   return (
     <button
       type="button"
@@ -730,9 +725,7 @@ function CandidateRow({
         </p>
         {buyRange && (
           <p className="text-[10px] font-mono text-emerald-300/90 mt-0.5 truncate">
-            {typeof buyRange === 'string' && buyRange.startsWith('BZ')
-              ? buyRange
-              : `Buy zone ${buyRange}`}
+            {buyRange.startsWith('BZ') ? buyRange : `Buy zone ${buyRange}`}
           </p>
         )}
       </div>

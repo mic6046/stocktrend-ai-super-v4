@@ -437,15 +437,15 @@ export async function findATrade(opts: {
       ? topPick
         ? buyCleared === 1
           ? `Factor engine: 1 of ${scannedCount} cleared · ${topPick.ticker}${
-              topPick.buyZones?.length
-                ? ` · BZ1 ${topPick.buyZones[0].lo.toFixed(2)}–${topPick.buyZones[0].hi.toFixed(2)} · BZ3 ${topPick.buyZones[2].lo.toFixed(2)}–${topPick.buyZones[2].hi.toFixed(2)}`
+              topPick.buyZones?.length >= 3
+                ? ` · BZ1 ${topPick.buyZones[0].lo.toFixed(2)}–${topPick.buyZones[0].hi.toFixed(2)} · BZ2 ${topPick.buyZones[1].lo.toFixed(2)}–${topPick.buyZones[1].hi.toFixed(2)} · BZ3 ${topPick.buyZones[2].lo.toFixed(2)}–${topPick.buyZones[2].hi.toFixed(2)}`
                 : topPick.buyZone
                   ? ` · buy zone ${topPick.buyZone.lo.toFixed(2)}–${topPick.buyZone.hi.toFixed(2)}`
                   : ''
             } (${topPick.factorStrip || `score ${topPick.score}`})`
           : `Factor engine: ${buyCleared} of ${scannedCount} cleared · top ${topPick.ticker}${
-              topPick.buyZones?.length
-                ? ` · BZ1–3 ${topPick.buyZones[0].hi.toFixed(2)}→${topPick.buyZones[2].lo.toFixed(2)}`
+              topPick.buyZones?.length >= 3
+                ? ` · BZ1–3 ${topPick.buyZones[0].hi.toFixed(2)}→${topPick.buyZones[1].lo.toFixed(2)}→${topPick.buyZones[2].lo.toFixed(2)}`
                 : topPick.buyZone
                   ? ` · buy zone ${topPick.buyZone.lo.toFixed(2)}–${topPick.buyZone.hi.toFixed(2)}`
                   : ''
