@@ -1,5 +1,5 @@
 /**
- * Find / Suggest Trades — batch scout over ticker lists.
+ * Find Trades / Suggest Trades — batch scout over ticker lists.
  *
  * - Find (`mode: 'find'`, default): Consensus AI BUY gates
  * - Suggest (`mode: 'suggest'`): priority factor engine
@@ -385,7 +385,7 @@ export async function findATrade(opts: {
       const res = await loggedFetch(apiUrl(url), {
         __qnMeta: {
           reason: mode === 'suggest' ? 'suggest-trade-factors' : 'find-or-suggest-trade',
-          userAction: mode === 'suggest' ? 'Click Suggest Trades' : 'Click Find/Suggest Trades',
+          userAction: mode === 'suggest' ? 'Click Suggest Trades' : 'Click Find Trades/Suggest Trades',
         },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);

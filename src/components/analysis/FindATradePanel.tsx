@@ -76,7 +76,7 @@ export function FindATradePanel({
       });
       setResult(out);
     } catch (e: any) {
-      setError(e?.message || 'Find a Trade failed');
+      setError(e?.message || 'Find Trades failed');
     } finally {
       setScanning(false);
     }
@@ -85,7 +85,7 @@ export function FindATradePanel({
   return (
     <GlassCard className={cn('space-y-3', className)}>
       <SectionLabel icon={<Rocket className="w-3.5 h-3.5 text-emerald-400" />}>
-        Find a Trade · {horizonLabel}
+        Find Trades · {horizonLabel}
       </SectionLabel>
 
       <p className="text-[11px] text-gray-400 leading-relaxed">
@@ -122,7 +122,7 @@ export function FindATradePanel({
           )}
         >
           {scanning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Crosshair className="w-3.5 h-3.5" />}
-          Find a Trade
+          Find Trades
         </button>
       </div>
 

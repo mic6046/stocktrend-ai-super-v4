@@ -7521,7 +7521,7 @@ export default function App() {
             title="Paste a ticker list and let Consensus AI find a BUY"
           >
             <Rocket className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Find a Trade</span>
+            <span className="hidden sm:inline">Find Trades</span>
             <span className="sm:hidden">Find</span>
           </button>
           <button
@@ -13041,7 +13041,7 @@ export default function App() {
                 <h2 className="text-xl font-sans font-bold text-white mb-2">Search a ticker to begin</h2>
                 <p className="text-sm text-gray-500 max-w-md mx-auto">
                   Press <span className="text-emerald-400 font-mono">Enter</span> in the search bar, or open{' '}
-                  <span className="text-emerald-400 font-semibold">Find a Trade</span> /{' '}
+                  <span className="text-emerald-400 font-semibold">Find Trades</span> /{' '}
                   <span className="text-sky-400 font-semibold">Suggest Trades</span>.
                 </p>
               </div>
@@ -13056,12 +13056,12 @@ export default function App() {
                     className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-emerald-500 text-black py-2.5 text-[12px] font-bold uppercase tracking-wider hover:bg-emerald-400 transition-colors cursor-pointer"
                   >
                     <Rocket className="w-4 h-4" />
-                    Open Find a Trade
+                    Open Find Trades
                   </button>
                 )}
                 {showFindATrade && (
                   <p className="text-[11px] text-emerald-300/80 font-mono text-center">
-                    Find a Trade panel is open above — paste tickers and scan.
+                    Find Trades panel is open above — paste tickers and scan.
                   </p>
                 )}
                 {!showSuggestATrade && (
