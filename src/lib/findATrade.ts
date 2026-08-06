@@ -1,6 +1,10 @@
 /**
- * Find a Trade — batch scout over user ticker lists using Consensus AI.
- * Only surfaces names that clear BUY / STRONG BUY with a constructive live action.
+ * Find / Suggest Trades — batch scout over ticker lists.
+ *
+ * - Find (`mode: 'find'`, default): Consensus AI BUY gates
+ * - Suggest (`mode: 'suggest'`): priority factor engine
+ *   whale → institutional inflow → momentum/support → fundamentals,
+ *   with RSI overheat + Bollinger stretch warnings (all rated 1–5)
  */
 
 import { computeTechnicalIndicators } from './technical';
@@ -10,9 +14,23 @@ import {
   type RecommendationLabel,
   type ZoneAction,
 } from './quantumRecommendationEngine';
+import {
+  buildRealisticSuggestEntry,
+  formatFactorStrip,
+  scoreSuggestTrade,
+  type SuggestBuyBand,
+  type SuggestFactorRating,
+} from './suggestTradeEngine';
 import type { HorizonKey } from '../components/analysis/analysisTheme';
 
 export const FIND_A_TRADE_MAX = 20;
+
+export type FindATradeMode = 'find' | 'suggest';
+
+export type SuggestBuyZone = {
+  lo: number;
+  hi: number;
+};
 
 export type FindATradeCandidate = {
   ticker: string;
@@ -26,6 +44,25 @@ export type FindATradeCandidate = {
   why: string;
   tradeScore: number;
   isBuyCandidate: boolean;
+  /** Preferred / core BUY band (Buy Zone 2). */
+  buyZone?: SuggestBuyZone;
+  /** Three scale-in entry chances: Buy Zone 1 → 3. */
+  buyZones?: SuggestBuyBand[];
+  stopLoss?: number;
+  takeProfit?: number;
+  /** How the Suggest buy zone was anchored (support / EMA / etc). */
+  buyZoneAnchor?: string;
+  /** Combined Buy Zone 1–3 width as % of live price. */
+  buyZoneWidthPct?: number;
+  /** Which buy zone live price is in, if any. */
+  activeBuyLevel?: 1 | 2 | 3 | null;
+  /** Suggest factor ratings (1–5) when mode=suggest. */
+  factorRatings?: SuggestFactorRating[];
+  /** Suggest weighted composite 0–100. */
+  suggestComposite?: number;
+  /** Compact Whale:4 Funds:5 … strip for logs. */
+  factorStrip?: string;
+  warnings?: string[];
   error?: string;
 };
 
@@ -95,40 +132,80 @@ async function mapPool<T, R>(
   return results;
 }
 
-function rankScore(c: FindATradeCandidate): number {
+function rankScoreFind(c: FindATradeCandidate): number {
   if (!c.isBuyCandidate) return -1e9;
   const actionBoost = c.currentAction === 'BUY' ? 18 : c.currentAction === 'WAIT' ? 4 : 0;
   const recBoost = c.recommendation === 'STRONG BUY' ? 12 : c.recommendation === 'BUY' ? 8 : 0;
   return c.score * 0.35 + c.confidence * 0.3 + Math.max(0, c.expectedReturn) * 2.2 + actionBoost + recBoost;
 }
 
+function rankScoreSuggest(c: FindATradeCandidate): number {
+  if (!c.isBuyCandidate) return -1e9;
+  const composite = c.suggestComposite ?? c.score;
+  const whale = c.factorRatings?.find((f) => f.key === 'whaleAccumulation')?.rating ?? 3;
+  const funds = c.factorRatings?.find((f) => f.key === 'institutionalInflow')?.rating ?? 3;
+  const actionBoost = c.currentAction === 'BUY' ? 10 : c.currentAction === 'WAIT' ? 3 : 0;
+  return composite * 1.15 + whale * 6 + funds * 5 + actionBoost + Math.max(0, c.expectedReturn);
+}
+
+/** Soft rank for near-miss / watchlist (not forced BUY). */
+function watchScore(c: FindATradeCandidate, mode: FindATradeMode): number {
+  if (c.error || c.price <= 0) return -1e9;
+  if (mode === 'suggest') {
+    const composite = c.suggestComposite ?? c.score;
+    const whale = c.factorRatings?.find((f) => f.key === 'whaleAccumulation')?.rating ?? 0;
+    const funds = c.factorRatings?.find((f) => f.key === 'institutionalInflow')?.rating ?? 0;
+    return composite + whale * 4 + funds * 3;
+  }
+  const recBoost =
+    c.recommendation === 'STRONG BUY'
+      ? 20
+      : c.recommendation === 'BUY'
+        ? 16
+        : c.recommendation === 'HOLD'
+          ? 8
+          : c.recommendation === 'REDUCE'
+            ? -4
+            : -12;
+  const actionBoost =
+    c.currentAction === 'BUY' ? 10 : c.currentAction === 'WAIT' || c.currentAction === 'HOLD' ? 3 : -6;
+  return c.score * 0.4 + c.confidence * 0.25 + Math.max(-5, c.expectedReturn) * 1.5 + recBoost + actionBoost;
+}
+
+function emptyFail(ticker: string, why: string, error?: string): FindATradeCandidate {
+  return {
+    ticker,
+    name: ticker,
+    price: 0,
+    recommendation: 'HOLD',
+    currentAction: 'WAIT',
+    confidence: 0,
+    score: 0,
+    expectedReturn: 0,
+    why,
+    tradeScore: -1e9,
+    isBuyCandidate: false,
+    error: error || why,
+  };
+}
+
 async function scoutOne(
   ticker: string,
   horizon: HorizonKey,
-  fetchJson: (url: string) => Promise<any>
+  mode: FindATradeMode,
+  fetchJson: (url: string) => Promise<any>,
+  bypassCache = false
 ): Promise<FindATradeCandidate> {
   try {
+    const cacheQs = bypassCache ? '&bypassCache=true' : '';
     const data = await fetchJson(
-      `/api/stock?ticker=${encodeURIComponent(ticker)}&range=3mo&interval=1d`
+      `/api/stock?ticker=${encodeURIComponent(ticker)}&range=3mo&interval=1d${cacheQs}`
     );
     const history = (data?.history || []).filter(
       (h: any) => h?.close != null && Number.isFinite(Number(h.close))
     );
     if (!history.length) {
-      return {
-        ticker,
-        name: ticker,
-        price: 0,
-        recommendation: 'HOLD',
-        currentAction: 'WAIT',
-        confidence: 0,
-        score: 0,
-        expectedReturn: 0,
-        why: 'No price history returned.',
-        tradeScore: -1e9,
-        isBuyCandidate: false,
-        error: 'No history',
-      };
+      return emptyFail(ticker, 'No price history returned.', 'No history');
     }
 
     const px =
@@ -201,6 +278,50 @@ async function scoutOne(
       ticker,
     });
 
+    if (mode === 'suggest') {
+      const suggest = scoreSuggestTrade({
+        technical: tech,
+        price: px,
+        quote: data?.quote ?? null,
+      });
+      const entry = buildRealisticSuggestEntry({
+        technical: tech,
+        price: px,
+        targetHint: engine.targetPrice,
+      });
+
+      const isBuyCandidate = suggest.isSuggestCandidate && engine.expectedReturn > -2;
+
+      const candidate: FindATradeCandidate = {
+        ticker: String(data?.ticker || ticker).toUpperCase(),
+        name: data?.quote?.shortName || data?.quote?.longName || ticker,
+        price: engine.currentPrice,
+        recommendation: engine.finalVerdict,
+        currentAction: entry.liveAction,
+        confidence: Math.round(
+          Math.min(95, Math.max(40, suggest.compositeScore * 0.55 + suggest.priorityAvg * 8))
+        ),
+        score: suggest.compositeScore,
+        expectedReturn: engine.expectedReturn,
+        why: `${suggest.summary} Scale-in: Buy Zone 1–3 via ${entry.anchorLabel}.`,
+        tradeScore: 0,
+        isBuyCandidate,
+        buyZone: entry.buyZone,
+        buyZones: entry.buyZones,
+        stopLoss: entry.stopLoss,
+        takeProfit: entry.takeProfit,
+        buyZoneAnchor: entry.anchorLabel,
+        buyZoneWidthPct: entry.widthPct,
+        activeBuyLevel: entry.activeLevel,
+        factorRatings: suggest.factors,
+        suggestComposite: suggest.compositeScore,
+        factorStrip: formatFactorStrip(suggest.factors),
+        warnings: suggest.warnings,
+      };
+      candidate.tradeScore = rankScoreSuggest(candidate);
+      return candidate;
+    }
+
     const isBuyCandidate =
       (engine.finalVerdict === 'BUY' || engine.finalVerdict === 'STRONG BUY') &&
       (engine.currentAction.action === 'BUY' || engine.currentAction.action === 'WAIT') &&
@@ -218,51 +339,53 @@ async function scoutOne(
       why: engine.whyWins,
       tradeScore: 0,
       isBuyCandidate,
+      buyZone: { lo: engine.buyZone.lo, hi: engine.buyZone.hi },
+      stopLoss: engine.stopLoss,
+      takeProfit: engine.takeProfit,
     };
-    candidate.tradeScore = rankScore(candidate);
+    candidate.tradeScore = rankScoreFind(candidate);
     return candidate;
   } catch (err: any) {
-    return {
-      ticker,
-      name: ticker,
-      price: 0,
-      recommendation: 'HOLD',
-      currentAction: 'WAIT',
-      confidence: 0,
-      score: 0,
-      expectedReturn: 0,
-      why: err?.message || 'Scout failed',
-      tradeScore: -1e9,
-      isBuyCandidate: false,
-      error: err?.message || 'Scout failed',
-    };
+    return emptyFail(ticker, err?.message || 'Scout failed', err?.message || 'Scout failed');
   }
 }
 
 export type FindATradeResult = {
   scanned: FindATradeCandidate[];
   buyCandidates: FindATradeCandidate[];
+  /** Best non-cleared names — watchlist only, not forced trades. */
+  watchlistCandidates: FindATradeCandidate[];
   topPick: FindATradeCandidate | null;
   message: string;
+  /** How many of the scout list cleared suggestion / BUY gates. */
+  buyCleared: number;
+  scannedCount: number;
+  mode: FindATradeMode;
 };
 
 export async function findATrade(opts: {
   tickers: string[];
   horizon?: HorizonKey;
   concurrency?: number;
+  /** Fresh market data for this scout (no 10-min stock cache). */
+  bypassCache?: boolean;
+  /** `suggest` uses the priority factor engine (1–5 ratings). */
+  mode?: FindATradeMode;
   fetchJson?: (url: string) => Promise<any>;
   onProgress?: (p: FindATradeProgress) => void;
 }): Promise<FindATradeResult> {
   const tickers = opts.tickers.slice(0, FIND_A_TRADE_MAX);
   const horizon = opts.horizon ?? '1M';
   const concurrency = opts.concurrency ?? 3;
+  const bypassCache = opts.bypassCache !== false;
+  const mode: FindATradeMode = opts.mode ?? 'find';
   const fetchJson =
     opts.fetchJson ??
     (async (url: string) => {
       const res = await loggedFetch(apiUrl(url), {
         __qnMeta: {
-          reason: 'find-or-suggest-trade',
-          userAction: 'Click Find/Suggest Trade',
+          reason: mode === 'suggest' ? 'suggest-trade-factors' : 'find-or-suggest-trade',
+          userAction: mode === 'suggest' ? 'Click Suggest Trade' : 'Click Find/Suggest Trade',
         },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -273,8 +396,12 @@ export async function findATrade(opts: {
     return {
       scanned: [],
       buyCandidates: [],
+      watchlistCandidates: [],
       topPick: null,
       message: 'Enter at least one ticker to scout.',
+      buyCleared: 0,
+      scannedCount: 0,
+      mode,
     };
   }
 
@@ -283,7 +410,7 @@ export async function findATrade(opts: {
   const scanned = await mapPool(
     tickers,
     concurrency,
-    (ticker) => scoutOne(ticker, horizon, fetchJson),
+    (ticker) => scoutOne(ticker, horizon, mode, fetchJson, bypassCache),
     (done, ticker) => opts.onProgress?.({ done, total: tickers.length, current: String(ticker) })
   );
 
@@ -295,12 +422,49 @@ export async function findATrade(opts: {
   const actionable = buyCandidates.filter((c) => c.currentAction === 'BUY');
   const topPick = (actionable[0] || buyCandidates[0]) ?? null;
 
+  const buySet = new Set(buyCandidates.map((c) => c.ticker));
+  const watchlistCandidates = scanned
+    .filter((c) => !buySet.has(c.ticker) && !c.error && c.price > 0)
+    .map((c) => ({ ...c, tradeScore: watchScore(c, mode) }))
+    .sort((a, b) => b.tradeScore - a.tradeScore)
+    .slice(0, 5);
+
+  const buyCleared = buyCandidates.length;
+  const scannedCount = scanned.length;
+
+  const message =
+    mode === 'suggest'
+      ? topPick
+        ? buyCleared === 1
+          ? `Factor engine: 1 of ${scannedCount} cleared · ${topPick.ticker}${
+              topPick.buyZones?.length >= 3
+                ? ` · BZ1 ${topPick.buyZones[0].lo.toFixed(2)}–${topPick.buyZones[0].hi.toFixed(2)} · BZ2 ${topPick.buyZones[1].lo.toFixed(2)}–${topPick.buyZones[1].hi.toFixed(2)} · BZ3 ${topPick.buyZones[2].lo.toFixed(2)}–${topPick.buyZones[2].hi.toFixed(2)}`
+                : topPick.buyZone
+                  ? ` · buy zone ${topPick.buyZone.lo.toFixed(2)}–${topPick.buyZone.hi.toFixed(2)}`
+                  : ''
+            } (${topPick.factorStrip || `score ${topPick.score}`})`
+          : `Factor engine: ${buyCleared} of ${scannedCount} cleared · top ${topPick.ticker}${
+              topPick.buyZones?.length >= 3
+                ? ` · BZ1–3 ${topPick.buyZones[0].hi.toFixed(2)}→${topPick.buyZones[1].lo.toFixed(2)}→${topPick.buyZones[2].lo.toFixed(2)}`
+                : topPick.buyZone
+                  ? ` · buy zone ${topPick.buyZone.lo.toFixed(2)}–${topPick.buyZone.hi.toFixed(2)}`
+                  : ''
+            } · ${topPick.factorStrip || `score ${topPick.score}`}`
+        : `Factor engine: 0 of ${scannedCount} cleared. See watchlist or refresh — priority is whale → funds → momentum → fundamentals.`
+      : topPick
+        ? buyCleared === 1
+          ? `Only 1 of ${scannedCount} cleared BUY gates: ${topPick.ticker} · Do now: ${topPick.currentAction}`
+          : `${buyCleared} of ${scannedCount} cleared BUY · top: ${topPick.ticker} · Do now: ${topPick.currentAction}`
+        : `0 of ${scannedCount} cleared BUY gates. See watchlist near-misses or refresh the list.`;
+
   return {
     scanned,
     buyCandidates,
+    watchlistCandidates,
     topPick,
-    message: topPick
-      ? `Top trade: ${topPick.ticker} · ${topPick.recommendation} · Do now: ${topPick.currentAction}`
-      : 'No BUY trade cleared Consensus gates in this list. Wait or refresh the universe.',
+    buyCleared,
+    scannedCount,
+    message,
+    mode,
   };
 }

@@ -19,9 +19,11 @@ export type SuggestedAction =
   | 'Buy'
   | 'Accumulate'
   | 'Hold'
+  | 'Wait'
   | 'Take Partial Profit'
   | 'Reduce'
-  | 'Exit';
+  | 'Exit'
+  | 'Avoid';
 
 export type SignalClass =
   | 'BUY SIGNAL'
@@ -182,6 +184,11 @@ export type QuantumEngineOutput = {
   zoneScale: number;
   userHasPosition: boolean;
   currentAction: LiveActionBrief;
+  /** Live Do Now for both audiences (price-aware) — UI always shows both. */
+  doNowByPosition: {
+    holding: LiveActionBrief;
+    noPosition: LiveActionBrief;
+  };
   /** Zones shown for this position state (no contradictory actions) */
   visibleZoneKeys: Array<'buy' | 'add' | 'hold' | 'takeProfit' | 'reduce' | 'exit' | 'stop'>;
   zonesConsistent: boolean;
@@ -1116,21 +1123,9 @@ function resolveLiveAction(
     };
   }
 
-  // Entry structure (buy + add ladder bands): ownership decides BUY vs ADD — never both
-  const inEntry =
-    inBand(px, zones.buyZone) ||
-    inBand(px, zones.addZone) ||
-    (px > zones.stopLoss && px < zones.addZone.hi);
-
-  if (inEntry) {
-    if (userHasPosition) {
-      return {
-        action: 'ADD POSITION',
-        reason: 'Price is in the entry/scale-in structure — BUY is replaced by ADD POSITION because you already own the stock.',
-        confidence: conf,
-        zoneKey: 'add',
-      };
-    }
+  // Entry structure: only claim BUY/ADD when price is inside that visible band
+  // (never the loose stop→add.hi gap, which desynced Do Now from Management Zones).
+  if (!userHasPosition && inBand(px, zones.buyZone)) {
     if (rec === 'AVOID NEW POSITION' || rec === 'SELL') {
       return {
         action: 'AVOID NEW POSITION',
@@ -1144,6 +1139,15 @@ function resolveLiveAction(
       reason: 'Price is in the BUY zone — best entry for a new position. ADD POSITION is hidden because you do not own the stock.',
       confidence: conf,
       zoneKey: 'buy',
+    };
+  }
+
+  if (userHasPosition && inBand(px, zones.addZone)) {
+    return {
+      action: 'ADD POSITION',
+      reason: 'Price is in the ADD POSITION zone — scale in because you already own the stock (BUY zone is hidden).',
+      confidence: conf,
+      zoneKey: 'add',
     };
   }
 
@@ -1221,28 +1225,29 @@ function positionAwareSignals(
     });
 }
 
+/** Map live Do Now → Suggested Action (same verb family; Wait ≠ Hold). */
 function positionAwareSuggestedAction(
   rec: RecommendationLabel,
   live: LiveActionBrief,
   userHasPosition: boolean,
-  evidence: EvidenceBag
+  _evidence: EvidenceBag
 ): SuggestedAction {
-  // Prefer live price action when it is specific
+  // Prefer live price action — keep Suggested Action aligned with Do Now
   if (live.action === 'BUY') return 'Buy';
   if (live.action === 'ADD POSITION') return 'Accumulate';
-  if (live.action === 'HOLD' || live.action === 'WAIT') return 'Hold';
+  if (live.action === 'HOLD') return 'Hold';
+  if (live.action === 'WAIT') return 'Wait';
   if (live.action === 'TAKE PROFIT') return 'Take Partial Profit';
   if (live.action === 'REDUCE' || live.action === 'STOP LOSS') return 'Reduce';
-  if (live.action === 'EXIT' || live.action === 'AVOID NEW POSITION') return 'Exit';
+  if (live.action === 'EXIT') return 'Exit';
+  if (live.action === 'AVOID NEW POSITION') return 'Avoid';
 
   if (!userHasPosition) {
-    if (rec === 'STRONG BUY' || rec === 'BUY') return 'Buy';
-    if (rec === 'AVOID NEW POSITION' || rec === 'SELL') return 'Exit';
-    return 'Hold';
+    if (rec === 'STRONG BUY' || rec === 'BUY') return 'Wait';
+    if (rec === 'AVOID NEW POSITION' || rec === 'SELL') return 'Avoid';
+    return 'Wait';
   }
-  if (rec === 'STRONG BUY' || rec === 'BUY') {
-    return evidence.bearish.some((b) => /overbought|resistance/i.test(b.label)) ? 'Accumulate' : 'Accumulate';
-  }
+  if (rec === 'STRONG BUY' || rec === 'BUY') return 'Hold';
   if (rec === 'HOLD') return 'Hold';
   if (rec === 'REDUCE') return 'Take Partial Profit';
   if (rec === 'SELL') return 'Reduce';
@@ -1483,6 +1488,20 @@ function emptyOutput(horizon: HorizonKey, horizonLabel: string, input: QuantumEn
       confidence: 40,
       zoneKey: 'hold',
     },
+    doNowByPosition: {
+      holding: {
+        action: 'HOLD',
+        reason: 'Awaiting price data',
+        confidence: 40,
+        zoneKey: 'hold',
+      },
+      noPosition: {
+        action: 'WAIT',
+        reason: 'Awaiting price data',
+        confidence: 40,
+        zoneKey: 'hold',
+      },
+    },
     visibleZoneKeys: visibleZonesFor(hasPos),
     zonesConsistent: false,
     keyReasons: ['Awaiting price data'],
@@ -1497,7 +1516,7 @@ function emptyOutput(horizon: HorizonKey, horizonLabel: string, input: QuantumEn
     neutralFactors: [],
     whyWins: 'Insufficient price data.',
     rejectedOpposite: '',
-    suggestedAction: 'Hold',
+    suggestedAction: hasPos ? 'Hold' : 'Wait',
     invalidationLevel: 'N/A',
     nextReviewTrigger: `Reassess when live price data is available (${horizonLabel}).`,
     supportHoldProbability: 50,
@@ -1615,7 +1634,11 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
     const zonesConsistent = zonesAreConsistent(zones);
     const targets = buildTargets(px, target, rec, input.levels);
     const userHasPosition = !!input.userHasPosition;
-    const currentAction = resolveLiveAction(px, zones, rec, userHasPosition, confidence);
+    const doNowByPosition = {
+      holding: resolveLiveAction(px, zones, rec, true, confidence),
+      noPosition: resolveLiveAction(px, zones, rec, false, confidence),
+    };
+    const currentAction = userHasPosition ? doNowByPosition.holding : doNowByPosition.noPosition;
     const visibleZoneKeys = visibleZonesFor(userHasPosition);
 
     const topFactors =
@@ -1636,7 +1659,8 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
     const suggestedAction = positionAwareSuggestedAction(rec, currentAction, userHasPosition, evidence);
     const note = consensusNote(evidence.committee, rec);
     const explainedSignals = positionAwareSignals(evidence.explainedSignals, userHasPosition);
-    const summaryLead = `Horizon recommendation: ${rec} (${confidence}% confidence). Do now: ${currentAction.action}. Expected return ${expectedReturn >= 0 ? '+' : ''}${expectedReturn.toFixed(1)}%. ${whyWins}`;
+    const positionLabel = userHasPosition ? 'Holding' : 'No position';
+    const summaryLead = `Do now (${positionLabel}): ${currentAction.action}. ${horizonLabel} Trend: ${rec} (${confidence}% confidence). Holding → ${doNowByPosition.holding.action} · No position → ${doNowByPosition.noPosition.action}. Expected return ${expectedReturn >= 0 ? '+' : ''}${expectedReturn.toFixed(1)}%. ${whyWins}`;
 
     const drawdown = round2(-Math.max(2, Math.abs(expectedReturn) * 0.55 + (vol ?? 20) * 0.12));
     const sharpe =
@@ -1682,11 +1706,12 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
       zoneScale,
       userHasPosition,
       currentAction,
+      doNowByPosition,
       visibleZoneKeys,
       zonesConsistent,
       keyReasons,
       summaryLead,
-      explanation: `Consensus process for ${horizonLabel}: committee votes weighed, conflicts shown, gates enforced, zones non-overlapping. Live action = ${currentAction.action}. ${note}`,
+      explanation: `Consensus process for ${horizonLabel}: committee votes weighed, conflicts shown, gates enforced, zones non-overlapping. Do now (${userHasPosition ? 'Holding' : 'No position'}) = ${currentAction.action}. Dual path: Holding → ${doNowByPosition.holding.action} · No position → ${doNowByPosition.noPosition.action}. ${note}`,
       chartStance: chartStanceFromRecommendation(rec),
       finalVerdict: rec,
       validationStatus: '✗ Recalculate',
