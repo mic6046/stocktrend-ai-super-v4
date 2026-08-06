@@ -1,6 +1,10 @@
 /**
- * Find a Trade — batch scout over user ticker lists using Consensus AI.
- * Only surfaces names that clear BUY / STRONG BUY with a constructive live action.
+ * Find / Suggest a Trade — batch scout over ticker lists.
+ *
+ * - Find (`mode: 'find'`, default): Consensus AI BUY gates
+ * - Suggest (`mode: 'suggest'`): priority factor engine
+ *   whale → institutional inflow → momentum/support → fundamentals,
+ *   with RSI overheat + Bollinger stretch warnings (all rated 1–5)
  */
 
 import { computeTechnicalIndicators } from './technical';
@@ -10,9 +14,16 @@ import {
   type RecommendationLabel,
   type ZoneAction,
 } from './quantumRecommendationEngine';
+import {
+  formatFactorStrip,
+  scoreSuggestTrade,
+  type SuggestFactorRating,
+} from './suggestTradeEngine';
 import type { HorizonKey } from '../components/analysis/analysisTheme';
 
 export const FIND_A_TRADE_MAX = 20;
+
+export type FindATradeMode = 'find' | 'suggest';
 
 export type FindATradeCandidate = {
   ticker: string;
@@ -26,6 +37,13 @@ export type FindATradeCandidate = {
   why: string;
   tradeScore: number;
   isBuyCandidate: boolean;
+  /** Suggest factor ratings (1–5) when mode=suggest. */
+  factorRatings?: SuggestFactorRating[];
+  /** Suggest weighted composite 0–100. */
+  suggestComposite?: number;
+  /** Compact Whale:4 Funds:5 … strip for logs. */
+  factorStrip?: string;
+  warnings?: string[];
   error?: string;
 };
 
@@ -95,16 +113,31 @@ async function mapPool<T, R>(
   return results;
 }
 
-function rankScore(c: FindATradeCandidate): number {
+function rankScoreFind(c: FindATradeCandidate): number {
   if (!c.isBuyCandidate) return -1e9;
   const actionBoost = c.currentAction === 'BUY' ? 18 : c.currentAction === 'WAIT' ? 4 : 0;
   const recBoost = c.recommendation === 'STRONG BUY' ? 12 : c.recommendation === 'BUY' ? 8 : 0;
   return c.score * 0.35 + c.confidence * 0.3 + Math.max(0, c.expectedReturn) * 2.2 + actionBoost + recBoost;
 }
 
+function rankScoreSuggest(c: FindATradeCandidate): number {
+  if (!c.isBuyCandidate) return -1e9;
+  const composite = c.suggestComposite ?? c.score;
+  const whale = c.factorRatings?.find((f) => f.key === 'whaleAccumulation')?.rating ?? 3;
+  const funds = c.factorRatings?.find((f) => f.key === 'institutionalInflow')?.rating ?? 3;
+  const actionBoost = c.currentAction === 'BUY' ? 10 : c.currentAction === 'WAIT' ? 3 : 0;
+  return composite * 1.15 + whale * 6 + funds * 5 + actionBoost + Math.max(0, c.expectedReturn);
+}
+
 /** Soft rank for near-miss / watchlist (not forced BUY). */
-function watchScore(c: FindATradeCandidate): number {
+function watchScore(c: FindATradeCandidate, mode: FindATradeMode): number {
   if (c.error || c.price <= 0) return -1e9;
+  if (mode === 'suggest') {
+    const composite = c.suggestComposite ?? c.score;
+    const whale = c.factorRatings?.find((f) => f.key === 'whaleAccumulation')?.rating ?? 0;
+    const funds = c.factorRatings?.find((f) => f.key === 'institutionalInflow')?.rating ?? 0;
+    return composite + whale * 4 + funds * 3;
+  }
   const recBoost =
     c.recommendation === 'STRONG BUY'
       ? 20
@@ -120,9 +153,27 @@ function watchScore(c: FindATradeCandidate): number {
   return c.score * 0.4 + c.confidence * 0.25 + Math.max(-5, c.expectedReturn) * 1.5 + recBoost + actionBoost;
 }
 
+function emptyFail(ticker: string, why: string, error?: string): FindATradeCandidate {
+  return {
+    ticker,
+    name: ticker,
+    price: 0,
+    recommendation: 'HOLD',
+    currentAction: 'WAIT',
+    confidence: 0,
+    score: 0,
+    expectedReturn: 0,
+    why,
+    tradeScore: -1e9,
+    isBuyCandidate: false,
+    error: error || why,
+  };
+}
+
 async function scoutOne(
   ticker: string,
   horizon: HorizonKey,
+  mode: FindATradeMode,
   fetchJson: (url: string) => Promise<any>,
   bypassCache = false
 ): Promise<FindATradeCandidate> {
@@ -135,20 +186,7 @@ async function scoutOne(
       (h: any) => h?.close != null && Number.isFinite(Number(h.close))
     );
     if (!history.length) {
-      return {
-        ticker,
-        name: ticker,
-        price: 0,
-        recommendation: 'HOLD',
-        currentAction: 'WAIT',
-        confidence: 0,
-        score: 0,
-        expectedReturn: 0,
-        why: 'No price history returned.',
-        tradeScore: -1e9,
-        isBuyCandidate: false,
-        error: 'No history',
-      };
+      return emptyFail(ticker, 'No price history returned.', 'No history');
     }
 
     const px =
@@ -221,6 +259,38 @@ async function scoutOne(
       ticker,
     });
 
+    if (mode === 'suggest') {
+      const suggest = scoreSuggestTrade({
+        technical: tech,
+        price: px,
+        quote: data?.quote ?? null,
+      });
+
+      const isBuyCandidate = suggest.isSuggestCandidate && engine.expectedReturn > -2;
+
+      const candidate: FindATradeCandidate = {
+        ticker: String(data?.ticker || ticker).toUpperCase(),
+        name: data?.quote?.shortName || data?.quote?.longName || ticker,
+        price: engine.currentPrice,
+        recommendation: engine.finalVerdict,
+        currentAction: engine.currentAction.action,
+        confidence: Math.round(
+          Math.min(95, Math.max(40, suggest.compositeScore * 0.55 + suggest.priorityAvg * 8))
+        ),
+        score: suggest.compositeScore,
+        expectedReturn: engine.expectedReturn,
+        why: suggest.summary,
+        tradeScore: 0,
+        isBuyCandidate,
+        factorRatings: suggest.factors,
+        suggestComposite: suggest.compositeScore,
+        factorStrip: formatFactorStrip(suggest.factors),
+        warnings: suggest.warnings,
+      };
+      candidate.tradeScore = rankScoreSuggest(candidate);
+      return candidate;
+    }
+
     const isBuyCandidate =
       (engine.finalVerdict === 'BUY' || engine.finalVerdict === 'STRONG BUY') &&
       (engine.currentAction.action === 'BUY' || engine.currentAction.action === 'WAIT') &&
@@ -239,36 +309,24 @@ async function scoutOne(
       tradeScore: 0,
       isBuyCandidate,
     };
-    candidate.tradeScore = rankScore(candidate);
+    candidate.tradeScore = rankScoreFind(candidate);
     return candidate;
   } catch (err: any) {
-    return {
-      ticker,
-      name: ticker,
-      price: 0,
-      recommendation: 'HOLD',
-      currentAction: 'WAIT',
-      confidence: 0,
-      score: 0,
-      expectedReturn: 0,
-      why: err?.message || 'Scout failed',
-      tradeScore: -1e9,
-      isBuyCandidate: false,
-      error: err?.message || 'Scout failed',
-    };
+    return emptyFail(ticker, err?.message || 'Scout failed', err?.message || 'Scout failed');
   }
 }
 
 export type FindATradeResult = {
   scanned: FindATradeCandidate[];
   buyCandidates: FindATradeCandidate[];
-  /** Best non-BUY names when few/no BUY cleared — watchlist only, not forced trades. */
+  /** Best non-cleared names — watchlist only, not forced trades. */
   watchlistCandidates: FindATradeCandidate[];
   topPick: FindATradeCandidate | null;
   message: string;
-  /** How many of the scout list cleared BUY gates. */
+  /** How many of the scout list cleared suggestion / BUY gates. */
   buyCleared: number;
   scannedCount: number;
+  mode: FindATradeMode;
 };
 
 export async function findATrade(opts: {
@@ -277,6 +335,8 @@ export async function findATrade(opts: {
   concurrency?: number;
   /** Fresh market data for this scout (no 10-min stock cache). */
   bypassCache?: boolean;
+  /** `suggest` uses the priority factor engine (1–5 ratings). */
+  mode?: FindATradeMode;
   fetchJson?: (url: string) => Promise<any>;
   onProgress?: (p: FindATradeProgress) => void;
 }): Promise<FindATradeResult> {
@@ -284,13 +344,14 @@ export async function findATrade(opts: {
   const horizon = opts.horizon ?? '1M';
   const concurrency = opts.concurrency ?? 3;
   const bypassCache = opts.bypassCache !== false;
+  const mode: FindATradeMode = opts.mode ?? 'find';
   const fetchJson =
     opts.fetchJson ??
     (async (url: string) => {
       const res = await loggedFetch(apiUrl(url), {
         __qnMeta: {
-          reason: 'find-or-suggest-trade',
-          userAction: 'Click Find/Suggest Trade',
+          reason: mode === 'suggest' ? 'suggest-trade-factors' : 'find-or-suggest-trade',
+          userAction: mode === 'suggest' ? 'Click Suggest Trade' : 'Click Find/Suggest Trade',
         },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -306,6 +367,7 @@ export async function findATrade(opts: {
       message: 'Enter at least one ticker to scout.',
       buyCleared: 0,
       scannedCount: 0,
+      mode,
     };
   }
 
@@ -314,7 +376,7 @@ export async function findATrade(opts: {
   const scanned = await mapPool(
     tickers,
     concurrency,
-    (ticker) => scoutOne(ticker, horizon, fetchJson, bypassCache),
+    (ticker) => scoutOne(ticker, horizon, mode, fetchJson, bypassCache),
     (done, ticker) => opts.onProgress?.({ done, total: tickers.length, current: String(ticker) })
   );
 
@@ -329,12 +391,25 @@ export async function findATrade(opts: {
   const buySet = new Set(buyCandidates.map((c) => c.ticker));
   const watchlistCandidates = scanned
     .filter((c) => !buySet.has(c.ticker) && !c.error && c.price > 0)
-    .map((c) => ({ ...c, tradeScore: watchScore(c) }))
+    .map((c) => ({ ...c, tradeScore: watchScore(c, mode) }))
     .sort((a, b) => b.tradeScore - a.tradeScore)
     .slice(0, 5);
 
   const buyCleared = buyCandidates.length;
   const scannedCount = scanned.length;
+
+  const message =
+    mode === 'suggest'
+      ? topPick
+        ? buyCleared === 1
+          ? `Factor engine: 1 of ${scannedCount} cleared · ${topPick.ticker} (${topPick.factorStrip || `score ${topPick.score}`})`
+          : `Factor engine: ${buyCleared} of ${scannedCount} cleared · top ${topPick.ticker} · ${topPick.factorStrip || `score ${topPick.score}`}`
+        : `Factor engine: 0 of ${scannedCount} cleared. See watchlist or refresh — priority is whale → funds → momentum → fundamentals.`
+      : topPick
+        ? buyCleared === 1
+          ? `Only 1 of ${scannedCount} cleared BUY gates: ${topPick.ticker} · Do now: ${topPick.currentAction}`
+          : `${buyCleared} of ${scannedCount} cleared BUY · top: ${topPick.ticker} · Do now: ${topPick.currentAction}`
+        : `0 of ${scannedCount} cleared BUY gates. See watchlist near-misses or refresh the list.`;
 
   return {
     scanned,
@@ -343,10 +418,7 @@ export async function findATrade(opts: {
     topPick,
     buyCleared,
     scannedCount,
-    message: topPick
-      ? buyCleared === 1
-        ? `Only 1 of ${scannedCount} cleared BUY gates: ${topPick.ticker} · Do now: ${topPick.currentAction}`
-        : `${buyCleared} of ${scannedCount} cleared BUY · top: ${topPick.ticker} · Do now: ${topPick.currentAction}`
-      : `0 of ${scannedCount} cleared BUY gates. See watchlist near-misses or refresh the list.`,
+    message,
+    mode,
   };
 }

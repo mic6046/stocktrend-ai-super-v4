@@ -13,6 +13,11 @@ import {
   type FindATradeResult,
 } from '../../lib/findATrade';
 import {
+  SUGGEST_FACTOR_ORDER,
+  type SuggestFactorRating,
+  type SuggestRating,
+} from '../../lib/suggestTradeEngine';
+import {
   SUGGEST_MARKETS,
   SUGGEST_THEMES,
   buildSuggestUniverse,
@@ -183,6 +188,7 @@ export function SuggestATradePanel({
         horizon,
         concurrency: 3,
         bypassCache: true,
+        mode: 'suggest',
         onProgress: setProgress,
       });
       setResult(out);
@@ -211,10 +217,9 @@ export function SuggestATradePanel({
       </SectionLabel>
 
       <p className="text-[11px] text-gray-400 leading-relaxed">
-        Load popular names, then <span className="text-sky-300 font-semibold">add your own tickers</span>{' '}
-        to the search list. Each press is a{' '}
-        <span className="text-sky-300 font-semibold">new search</span> with fresh prices. Consensus AI
-        suggests a <span className="text-emerald-300 font-semibold">BUY</span> only if gates clear.
+        Factor search engine (priority): whale accumulation → institutional inflow → momentum /
+        support → fundamentals, with RSI overheat and Bollinger stretch warnings. Each factor is rated{' '}
+        <span className="text-sky-300 font-semibold">1–5</span>. Fresh prices on every search.
       </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -360,8 +365,8 @@ export function SuggestATradePanel({
             <div className="rounded-xl border border-white/10 bg-black/30 px-3 py-2">
               <p className="text-[11px] text-gray-300 leading-relaxed">{result.message}</p>
               <p className="mt-1 text-[10px] font-mono text-gray-500">
-                BUY suggestions only when Consensus gates clear — HOLD / REDUCE never become the top
-                pick.
+                Ranked by factor composite · whale / funds weighted highest · RSI &amp; BB are safety
+                ratings (5 = safer).
               </p>
             </div>
 
@@ -369,10 +374,10 @@ export function SuggestATradePanel({
               <TopPickCard pick={result.topPick} onOpen={onOpenTicker} marketLabel={marketLabel} />
             ) : (
               <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 px-3 py-3">
-                <p className="text-[12px] text-amber-100 font-semibold">No BUY trade cleared</p>
+                <p className="text-[12px] text-amber-100 font-semibold">No factor clear this search</p>
                 <p className="mt-1 text-[11px] text-gray-400 leading-relaxed">
-                  None of the {result.scannedCount} names passed BUY gates on this search. Check the
-                  watchlist below or press New search.
+                  None of the {result.scannedCount} names cleared whale / funds / momentum gates without
+                  severe RSI or Bollinger warnings. Check the watchlist or press New search.
                 </p>
               </div>
             )}
@@ -380,7 +385,7 @@ export function SuggestATradePanel({
             {result.buyCandidates.length > 1 && (
               <div>
                 <p className="text-[10px] font-mono uppercase tracking-wider text-gray-500 mb-2">
-                  Other BUY candidates ({result.buyCandidates.length - 1})
+                  Other factor clears ({result.buyCandidates.length - 1})
                 </p>
                 <div className="space-y-1.5">
                   {result.buyCandidates.slice(1, 5).map((c) => (
@@ -393,10 +398,10 @@ export function SuggestATradePanel({
             {result.watchlistCandidates.length > 0 && (
               <div>
                 <p className="text-[10px] font-mono uppercase tracking-wider text-amber-200/80 mb-1">
-                  Near-miss watchlist (did not clear BUY)
+                  Near-miss watchlist (did not clear factors)
                 </p>
                 <p className="text-[10px] text-gray-500 mb-2 leading-relaxed">
-                  Closest names from this scout that stayed HOLD / REDUCE — not trade suggestions.
+                  Closest names by whale / funds / composite — not trade suggestions.
                 </p>
                 <div className="space-y-1.5">
                   {result.watchlistCandidates.map((c) => (
@@ -408,9 +413,9 @@ export function SuggestATradePanel({
 
             <details className="rounded-xl border border-white/8 bg-black/25 px-3 py-2">
               <summary className="text-[10px] font-mono uppercase tracking-wider text-gray-500 cursor-pointer">
-                Scout log ({result.scanned.length}) · {result.buyCleared} BUY cleared
+                Scout log ({result.scanned.length}) · {result.buyCleared} factor clears
               </summary>
-              <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
+              <div className="mt-2 space-y-1 max-h-48 overflow-y-auto">
                 {result.scanned.map((c) => (
                   <p
                     key={`slog-${searchId}-${c.ticker}`}
@@ -419,8 +424,11 @@ export function SuggestATradePanel({
                       c.isBuyCandidate ? 'text-emerald-300/90' : 'text-gray-500'
                     )}
                   >
-                    {c.ticker}: {c.error ? `ERR ${c.error}` : `${c.recommendation} · ${c.currentAction}`}
-                    {c.isBuyCandidate ? ' · BUY gate ✓' : ''}
+                    {c.ticker}:{' '}
+                    {c.error
+                      ? `ERR ${c.error}`
+                      : `${c.factorStrip || `${c.recommendation} · ${c.currentAction}`} · ${c.score}`}
+                    {c.isBuyCandidate ? ' · clear ✓' : ''}
                   </p>
                 ))}
               </div>
@@ -429,6 +437,46 @@ export function SuggestATradePanel({
         )}
       </AnimatePresence>
     </GlassCard>
+  );
+}
+
+function ratingTone(rating: SuggestRating, isWarning: boolean): string {
+  if (isWarning) {
+    if (rating <= 2) return 'text-rose-300 border-rose-500/30 bg-rose-500/10';
+    if (rating === 3) return 'text-amber-200 border-amber-500/25 bg-amber-500/10';
+    return 'text-emerald-300 border-emerald-500/25 bg-emerald-500/10';
+  }
+  if (rating >= 4) return 'text-emerald-300 border-emerald-500/25 bg-emerald-500/10';
+  if (rating === 3) return 'text-sky-200 border-sky-500/25 bg-sky-500/10';
+  return 'text-rose-300 border-rose-500/30 bg-rose-500/10';
+}
+
+function FactorRatingsGrid({ factors }: { factors: SuggestFactorRating[] }) {
+  const ordered = SUGGEST_FACTOR_ORDER.map((k) => factors.find((f) => f.key === k)).filter(
+    Boolean
+  ) as SuggestFactorRating[];
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+      {ordered.map((f) => (
+        <div
+          key={f.key}
+          title={f.detail}
+          className={cn(
+            'rounded-lg border px-2 py-1.5 min-w-0',
+            ratingTone(f.rating, f.isWarning)
+          )}
+        >
+          <p className="text-[8px] font-mono uppercase tracking-wider opacity-80 truncate">
+            {f.shortLabel}
+            {f.isWarning ? ' warn' : ''}
+          </p>
+          <p className="text-[13px] font-black leading-none mt-0.5">
+            {f.rating}
+            <span className="text-[9px] font-mono opacity-70">/5</span>
+          </p>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -442,11 +490,11 @@ function TopPickCard({
   marketLabel: string;
 }) {
   return (
-    <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-3 space-y-2">
+    <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-3 space-y-2.5">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-[9px] font-mono uppercase tracking-wider text-sky-300/80">
-            Suggested trade · {marketLabel}
+            Suggested trade · {marketLabel} · factor engine
           </p>
           <p className="text-lg font-black text-white tracking-wide">{pick.ticker}</p>
           <p className="text-[11px] text-gray-400 truncate max-w-[220px]">{pick.name}</p>
@@ -457,14 +505,32 @@ function TopPickCard({
           <p className="text-[11px] font-mono text-white mt-1">{formatMoney(pick.price)}</p>
         </div>
       </div>
+
+      {pick.factorRatings && pick.factorRatings.length > 0 && (
+        <FactorRatingsGrid factors={pick.factorRatings} />
+      )}
+
+      {pick.warnings && pick.warnings.length > 0 && (
+        <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 px-2.5 py-2">
+          <p className="text-[9px] font-mono uppercase tracking-wider text-amber-200/90 mb-1">
+            Warnings
+          </p>
+          {pick.warnings.map((w) => (
+            <p key={w} className="text-[10px] text-amber-100/90 leading-relaxed">
+              {w}
+            </p>
+          ))}
+        </div>
+      )}
+
       <div className="grid grid-cols-3 gap-2 text-[10px] font-mono">
         <div className="rounded-lg bg-black/30 border border-white/8 px-2 py-1.5">
           <p className="text-gray-500 uppercase text-[8px]">Conf</p>
           <p className="text-white">{pick.confidence}%</p>
         </div>
         <div className="rounded-lg bg-black/30 border border-white/8 px-2 py-1.5">
-          <p className="text-gray-500 uppercase text-[8px]">Score</p>
-          <p className="text-white">{pick.score}</p>
+          <p className="text-gray-500 uppercase text-[8px]">Factor</p>
+          <p className="text-white">{pick.suggestComposite ?? pick.score}</p>
         </div>
         <div className="rounded-lg bg-black/30 border border-white/8 px-2 py-1.5">
           <p className="text-gray-500 uppercase text-[8px]">ER</p>
@@ -493,6 +559,8 @@ function CandidateRow({
   c: FindATradeCandidate;
   onOpen: (t: string) => void;
 }) {
+  const whale = c.factorRatings?.find((f) => f.key === 'whaleAccumulation')?.rating;
+  const funds = c.factorRatings?.find((f) => f.key === 'institutionalInflow')?.rating;
   return (
     <button
       type="button"
@@ -501,10 +569,15 @@ function CandidateRow({
     >
       <div className="min-w-0">
         <p className="text-[12px] font-bold text-white">{c.ticker}</p>
-        <p className="text-[10px] text-gray-500 truncate">{c.recommendation} · {c.currentAction}</p>
+        <p className="text-[10px] text-gray-500 truncate">
+          {c.factorStrip || `${c.recommendation} · ${c.currentAction}`}
+        </p>
       </div>
       <div className="text-right shrink-0 font-mono text-[10px]">
-        <p className="text-sky-300">{c.confidence}%</p>
+        <p className="text-sky-300">
+          {c.suggestComposite ?? c.score}
+          {whale != null && funds != null ? ` · W${whale} F${funds}` : ''}
+        </p>
         <p className={c.expectedReturn >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
           {formatPct(c.expectedReturn)}
         </p>
