@@ -69,6 +69,12 @@ function JourneyArrow() {
   );
 }
 
+function inBand(px: number, band: ZoneBand): boolean {
+  const lo = Math.min(band.lo, band.hi);
+  const hi = Math.max(band.lo, band.hi);
+  return px >= lo - 1e-9 && px <= hi + 1e-9;
+}
+
 export function TradeZonesPanel({
   lastClose,
   levels,
@@ -163,6 +169,18 @@ export function TradeZonesPanel({
     }
     if (!(sl < buy.lo)) warnings.push('Stop Loss must sit strictly under the BUY zone.');
 
+    // Which band contains live price — used to sync highlight with AI score Do Now
+    let priceZoneKey: string | null = null;
+    if (px <= sl) priceZoneKey = 'stop';
+    else if (inBand(px, exit) || px > exit.hi) priceZoneKey = 'exit';
+    else if (inBand(px, reduce)) priceZoneKey = 'reduce';
+    else if (inBand(px, takeProfit)) priceZoneKey = 'takeProfit';
+    else if (inBand(px, hold)) priceZoneKey = 'hold';
+    else if (userHasPosition && inBand(px, add)) priceZoneKey = 'add';
+    else if (!userHasPosition && inBand(px, buy)) priceZoneKey = 'buy';
+    else if (userHasPosition) priceZoneKey = 'hold';
+    else priceZoneKey = 'hold';
+
     const allCards = [
       {
         key: 'buy' as const,
@@ -239,6 +257,7 @@ export function TradeZonesPanel({
       stop: { price: formatMoney(sl, currency), raw: sl },
       showStop: keys.includes('stop'),
       warnings: [...new Set(warnings)],
+      priceZoneKey,
     };
   }, [
     lastClose,
@@ -253,6 +272,7 @@ export function TradeZonesPanel({
     visibleZoneKeys,
   ]);
 
+  const activeZoneKey = currentAction?.zoneKey || model.priceZoneKey;
   return (
     <GlassCard className="h-full">
       <SectionLabel icon={<Crosshair className="w-3.5 h-3.5 text-emerald-400" />}>
@@ -261,7 +281,7 @@ export function TradeZonesPanel({
 
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <p className="text-[10px] text-gray-500 leading-relaxed font-mono uppercase tracking-wider">
-          {horizonLabel} · {userHasPosition ? 'owned: ADD only' : 'flat: BUY only'} · never both
+          {horizonLabel} · synced with AI score Do Now · {userHasPosition ? 'owned: ADD only' : 'flat: BUY only'}
         </p>
         <label className="inline-flex items-center gap-2 cursor-pointer select-none">
           <span className="text-[10px] font-mono text-gray-400 uppercase tracking-wider">I own this stock</span>
@@ -332,7 +352,9 @@ export function TradeZonesPanel({
                 className={cn(
                   'rounded-xl border px-3 py-2.5 min-w-0 transition-transform duration-200 hover:scale-[1.01]',
                   z.className,
-                  currentAction?.zoneKey === z.key && 'ring-1 ring-cyan-400/40'
+                  currentAction?.zoneKey === z.key || activeZoneKey === z.key
+                    ? 'ring-1 ring-cyan-400/40'
+                    : undefined
                 )}
               >
                 <div className="flex items-start justify-between gap-3 min-w-0">
@@ -342,6 +364,11 @@ export function TradeZonesPanel({
                         {z.emoji}
                       </span>
                       {z.title}
+                      {(currentAction?.zoneKey === z.key || activeZoneKey === z.key) && (
+                        <span className="ml-1.5 text-[8px] font-mono text-cyan-300 normal-case tracking-normal">
+                          · live
+                        </span>
+                      )}
                     </p>
                     <p className="mt-1 text-[11px] text-gray-300 leading-snug">{z.subtitle}</p>
                     {z.detail && (
@@ -376,7 +403,7 @@ export function TradeZonesPanel({
             transition={{ duration: 0.28, delay: 0.22 }}
             className={cn(
               'rounded-xl border border-rose-500/35 bg-rose-500/10 px-3 py-2.5 min-w-0',
-              currentAction?.zoneKey === 'stop' && 'ring-1 ring-cyan-400/40'
+              (currentAction?.zoneKey === 'stop' || activeZoneKey === 'stop') && 'ring-1 ring-cyan-400/40'
             )}
           >
             <div className="flex items-start justify-between gap-3 min-w-0">
@@ -386,6 +413,11 @@ export function TradeZonesPanel({
                     🔴
                   </span>
                   Stop Loss Below
+                  {(currentAction?.zoneKey === 'stop' || activeZoneKey === 'stop') && (
+                    <span className="ml-1.5 text-[8px] font-mono text-cyan-300 normal-case tracking-normal">
+                      · live
+                    </span>
+                  )}
                 </p>
                 <p className="mt-1 text-[11px] text-gray-300 leading-snug">
                   {userHasPosition
