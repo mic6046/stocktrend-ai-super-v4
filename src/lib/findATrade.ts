@@ -25,6 +25,11 @@ export const FIND_A_TRADE_MAX = 20;
 
 export type FindATradeMode = 'find' | 'suggest';
 
+export type SuggestBuyZone = {
+  lo: number;
+  hi: number;
+};
+
 export type FindATradeCandidate = {
   ticker: string;
   name: string;
@@ -37,6 +42,10 @@ export type FindATradeCandidate = {
   why: string;
   tradeScore: number;
   isBuyCandidate: boolean;
+  /** Suggested BUY entry band from trade-management zones. */
+  buyZone?: SuggestBuyZone;
+  stopLoss?: number;
+  takeProfit?: number;
   /** Suggest factor ratings (1–5) when mode=suggest. */
   factorRatings?: SuggestFactorRating[];
   /** Suggest weighted composite 0–100. */
@@ -282,6 +291,9 @@ async function scoutOne(
         why: suggest.summary,
         tradeScore: 0,
         isBuyCandidate,
+        buyZone: { lo: engine.buyZone.lo, hi: engine.buyZone.hi },
+        stopLoss: engine.stopLoss,
+        takeProfit: engine.takeProfit,
         factorRatings: suggest.factors,
         suggestComposite: suggest.compositeScore,
         factorStrip: formatFactorStrip(suggest.factors),
@@ -308,6 +320,9 @@ async function scoutOne(
       why: engine.whyWins,
       tradeScore: 0,
       isBuyCandidate,
+      buyZone: { lo: engine.buyZone.lo, hi: engine.buyZone.hi },
+      stopLoss: engine.stopLoss,
+      takeProfit: engine.takeProfit,
     };
     candidate.tradeScore = rankScoreFind(candidate);
     return candidate;
@@ -402,8 +417,16 @@ export async function findATrade(opts: {
     mode === 'suggest'
       ? topPick
         ? buyCleared === 1
-          ? `Factor engine: 1 of ${scannedCount} cleared · ${topPick.ticker} (${topPick.factorStrip || `score ${topPick.score}`})`
-          : `Factor engine: ${buyCleared} of ${scannedCount} cleared · top ${topPick.ticker} · ${topPick.factorStrip || `score ${topPick.score}`}`
+          ? `Factor engine: 1 of ${scannedCount} cleared · ${topPick.ticker}${
+              topPick.buyZone
+                ? ` · buy zone ${topPick.buyZone.lo.toFixed(2)}–${topPick.buyZone.hi.toFixed(2)}`
+                : ''
+            } (${topPick.factorStrip || `score ${topPick.score}`})`
+          : `Factor engine: ${buyCleared} of ${scannedCount} cleared · top ${topPick.ticker}${
+              topPick.buyZone
+                ? ` · buy zone ${topPick.buyZone.lo.toFixed(2)}–${topPick.buyZone.hi.toFixed(2)}`
+                : ''
+            } · ${topPick.factorStrip || `score ${topPick.score}`}`
         : `Factor engine: 0 of ${scannedCount} cleared. See watchlist or refresh — priority is whale → funds → momentum → fundamentals.`
       : topPick
         ? buyCleared === 1

@@ -427,7 +427,11 @@ export function SuggestATradePanel({
                     {c.ticker}:{' '}
                     {c.error
                       ? `ERR ${c.error}`
-                      : `${c.factorStrip || `${c.recommendation} · ${c.currentAction}`} · ${c.score}`}
+                      : `${c.factorStrip || `${c.recommendation} · ${c.currentAction}`} · ${c.score}${
+                          c.buyZone
+                            ? ` · buy ${formatMoney(c.buyZone.lo)}-${formatMoney(c.buyZone.hi)}`
+                            : ''
+                        }`}
                     {c.isBuyCandidate ? ' · clear ✓' : ''}
                   </p>
                 ))}
@@ -437,6 +441,56 @@ export function SuggestATradePanel({
         )}
       </AnimatePresence>
     </GlassCard>
+  );
+}
+
+function formatZoneRange(lo?: number, hi?: number): string | null {
+  if (lo == null || hi == null || !Number.isFinite(lo) || !Number.isFinite(hi) || lo <= 0 || hi <= 0) {
+    return null;
+  }
+  return `${formatMoney(lo)} – ${formatMoney(hi)}`;
+}
+
+function priceInBuyZone(price: number, lo?: number, hi?: number): boolean {
+  if (lo == null || hi == null || !Number.isFinite(price)) return false;
+  return price >= lo && price <= hi;
+}
+
+function SuggestedBuyZoneCard({ pick }: { pick: FindATradeCandidate }) {
+  const range = formatZoneRange(pick.buyZone?.lo, pick.buyZone?.hi);
+  if (!range || !pick.buyZone) return null;
+  const inZone = priceInBuyZone(pick.price, pick.buyZone.lo, pick.buyZone.hi);
+  const above = pick.price > pick.buyZone.hi;
+  const stance = inZone ? 'Live price is inside the BUY zone' : above ? 'Live price is above BUY zone — wait for pullback' : 'Live price is below BUY zone — watch support / stop';
+
+  return (
+    <div className="rounded-lg border border-emerald-500/35 bg-emerald-500/10 px-2.5 py-2 space-y-1.5">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <p className="text-[9px] font-mono uppercase tracking-wider text-emerald-300/90">
+            Suggested buy zone
+          </p>
+          <p className="text-[15px] font-black text-emerald-200 tracking-wide mt-0.5">{range}</p>
+        </div>
+        <div className="text-right shrink-0 font-mono text-[10px]">
+          <p className="text-gray-500 uppercase text-[8px]">Live</p>
+          <p className="text-white">{formatMoney(pick.price)}</p>
+        </div>
+      </div>
+      <p className="text-[10px] text-emerald-100/85 leading-relaxed">{stance}</p>
+      {(pick.stopLoss != null || pick.takeProfit != null) && (
+        <div className="grid grid-cols-2 gap-2 pt-0.5">
+          <div className="rounded-md bg-black/25 border border-white/8 px-2 py-1">
+            <p className="text-[8px] font-mono uppercase text-gray-500">Stop</p>
+            <p className="text-[11px] font-mono text-rose-300">{formatMoney(pick.stopLoss)}</p>
+          </div>
+          <div className="rounded-md bg-black/25 border border-white/8 px-2 py-1">
+            <p className="text-[8px] font-mono uppercase text-gray-500">Take profit</p>
+            <p className="text-[11px] font-mono text-violet-300">{formatMoney(pick.takeProfit)}</p>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -506,6 +560,8 @@ function TopPickCard({
         </div>
       </div>
 
+      <SuggestedBuyZoneCard pick={pick} />
+
       {pick.factorRatings && pick.factorRatings.length > 0 && (
         <FactorRatingsGrid factors={pick.factorRatings} />
       )}
@@ -561,6 +617,7 @@ function CandidateRow({
 }) {
   const whale = c.factorRatings?.find((f) => f.key === 'whaleAccumulation')?.rating;
   const funds = c.factorRatings?.find((f) => f.key === 'institutionalInflow')?.rating;
+  const buyRange = formatZoneRange(c.buyZone?.lo, c.buyZone?.hi);
   return (
     <button
       type="button"
@@ -572,6 +629,11 @@ function CandidateRow({
         <p className="text-[10px] text-gray-500 truncate">
           {c.factorStrip || `${c.recommendation} · ${c.currentAction}`}
         </p>
+        {buyRange && (
+          <p className="text-[10px] font-mono text-emerald-300/90 mt-0.5 truncate">
+            Buy zone {buyRange}
+          </p>
+        )}
       </div>
       <div className="text-right shrink-0 font-mono text-[10px]">
         <p className="text-sky-300">
