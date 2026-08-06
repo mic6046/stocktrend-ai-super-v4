@@ -25,6 +25,8 @@ type TradeZonesPanelProps = {
   stopLoss?: number | null;
   currency?: string;
   quoteAsOf?: number | null;
+  /** True when the feed is exchange-delayed (e.g. Yahoo HK ~15m). */
+  quoteDelayed?: boolean;
   zoneScale?: number;
   horizon?: HorizonKey;
   horizonLabel?: string;
@@ -119,6 +121,7 @@ export function TradeZonesPanel({
   stopLoss,
   currency,
   quoteAsOf,
+  quoteDelayed = false,
   zoneScale = 1,
   horizon = '1M',
   horizonLabel = '1 Month',
@@ -419,7 +422,7 @@ export function TradeZonesPanel({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-[10px] font-mono uppercase tracking-wider text-cyan-300/90 flex items-center gap-1.5">
               <Activity className="w-3.5 h-3.5" />
-              Live {formatMoney(lastClose, currency)}
+              {quoteDelayed ? 'Delayed' : 'Live'} {formatMoney(lastClose, currency)}
               {quoteAsOf != null && Number.isFinite(quoteAsOf) && (
                 <span className="text-gray-600 normal-case tracking-normal">
                   · {new Date(quoteAsOf).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}

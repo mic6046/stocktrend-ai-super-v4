@@ -385,7 +385,7 @@ export async function findATrade(opts: {
       const res = await loggedFetch(apiUrl(url), {
         __qnMeta: {
           reason: mode === 'suggest' ? 'suggest-trade-factors' : 'find-or-suggest-trade',
-          userAction: mode === 'suggest' ? 'Click Suggest Trade' : 'Click Find/Suggest Trade',
+          userAction: mode === 'suggest' ? 'Click Suggest Trades' : 'Click Find/Suggest Trades',
         },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);

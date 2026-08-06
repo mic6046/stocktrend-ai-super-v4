@@ -5964,6 +5964,7 @@ export default function App() {
               if (Number.isFinite(livePx) && livePx > 0) {
                 stockData.quote = { ...(stockData.quote || {}), ...qBody.quote };
                 stockData.quoteAsOf = qBody.asOf || Date.now();
+                stockData.quoteDelayed = !!qBody.delayed;
                 stockData.synthetic = false;
               }
             }
@@ -6007,6 +6008,9 @@ export default function App() {
             quoteAsOf: preferPrevQuote
               ? (prev as any).quoteAsOf
               : stockData.quoteAsOf || Date.now(),
+            quoteDelayed: preferPrevQuote
+              ? (prev as any).quoteDelayed
+              : !!(stockData as any).quoteDelayed,
             synthetic: preferPrevQuote ? false : !!stockData.synthetic,
           };
         });
@@ -6704,15 +6708,21 @@ export default function App() {
         return prev;
       }
       const prevPx = Number(prev.quote?.regularMarketPrice);
-      const asOf = Number(body?.asOf) || Date.now();
+      const asOf = Number(body?.asOf) || Number(live?.quoteAsOf) || Date.now();
+      const delayed = body?.delayed != null ? !!body.delayed : !!(live as any)?.quoteDelayed;
       if (Number.isFinite(prevPx) && Math.abs(prevPx - px) < 0.005) {
-        if ((prev as any).quoteAsOf === asOf) return prev;
-        return { ...prev, quoteAsOf: asOf };
+        if ((prev as any).quoteAsOf === asOf && (prev as any).quoteDelayed === delayed) return prev;
+        return { ...prev, quoteAsOf: asOf, quoteDelayed: delayed };
+      }
+      // Reject wild jumps from a clearly bad feed when we already have a good quote
+      if (Number.isFinite(prevPx) && prevPx > 0 && Math.abs(prevPx - px) / prevPx > 0.25) {
+        return prev;
       }
       return {
         ...prev,
         quote: { ...(prev.quote || {}), ...live },
         quoteAsOf: asOf,
+        quoteDelayed: delayed,
       };
     });
     checkAlertsForTicker(activeTicker, px);
@@ -8797,6 +8807,7 @@ export default function App() {
                     stopLoss={horizonView.stopLoss}
                     currency={data.quote?.currency}
                     quoteAsOf={(data as any)?.quoteAsOf ?? null}
+                    quoteDelayed={!!(data as any)?.quoteDelayed}
                     zoneScale={horizonView.zoneScale}
                     horizon={analysisHorizon}
                     horizonLabel={horizonView.horizonLabel}
