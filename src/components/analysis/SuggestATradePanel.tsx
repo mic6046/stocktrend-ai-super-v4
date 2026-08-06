@@ -428,9 +428,11 @@ export function SuggestATradePanel({
                     {c.error
                       ? `ERR ${c.error}`
                       : `${c.factorStrip || `${c.recommendation} · ${c.currentAction}`} · ${c.score}${
-                          c.buyZone
-                            ? ` · buy ${formatMoney(c.buyZone.lo)}-${formatMoney(c.buyZone.hi)}`
-                            : ''
+                          c.buyZones?.length
+                            ? ` · BZ1 ${formatMoney(c.buyZones[0].lo)}-${formatMoney(c.buyZones[0].hi)} · BZ3 ${formatMoney(c.buyZones[2].lo)}-${formatMoney(c.buyZones[2].hi)}`
+                            : c.buyZone
+                              ? ` · buy ${formatMoney(c.buyZone.lo)}-${formatMoney(c.buyZone.hi)}`
+                              : ''
                         }`}
                     {c.isBuyCandidate ? ' · clear ✓' : ''}
                   </p>
@@ -457,6 +459,92 @@ function priceInBuyZone(price: number, lo?: number, hi?: number): boolean {
 }
 
 function SuggestedBuyZoneCard({ pick }: { pick: FindATradeCandidate }) {
+  const zones = pick.buyZones;
+  if (zones && zones.length >= 3) {
+    const envelopeLo = zones[2].lo;
+    const envelopeHi = zones[0].hi;
+    const stance =
+      pick.activeBuyLevel != null
+        ? `Live price is inside Buy Zone ${pick.activeBuyLevel} — take that scale-in tranche`
+        : pick.price > envelopeHi
+          ? 'Live price is above Buy Zone 1 — wait for pullback into Zone 1 → 3'
+          : 'Live price is below Buy Zone 3 — watch support / stop';
+
+    return (
+      <div className="rounded-lg border border-emerald-500/35 bg-emerald-500/10 px-2.5 py-2 space-y-2">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <p className="text-[9px] font-mono uppercase tracking-wider text-emerald-300/90">
+              Suggested buy zones · 3 entry chances
+              {pick.buyZoneWidthPct != null ? ` · ~${pick.buyZoneWidthPct}% span` : ''}
+            </p>
+            <p className="text-[10px] text-emerald-100/70 mt-0.5">
+              Scale in 30% / 40% / 30% across Zone 1 → 3
+            </p>
+          </div>
+          <div className="text-right shrink-0 font-mono text-[10px]">
+            <p className="text-gray-500 uppercase text-[8px]">Live</p>
+            <p className="text-white">{formatMoney(pick.price)}</p>
+          </div>
+        </div>
+
+        <div className="space-y-1.5">
+          {zones.map((z) => {
+            const live = pick.activeBuyLevel === z.level;
+            const tone =
+              z.level === 1
+                ? 'border-emerald-400/40 bg-emerald-500/15'
+                : z.level === 2
+                  ? 'border-sky-400/35 bg-sky-500/10'
+                  : 'border-violet-400/35 bg-violet-500/10';
+            return (
+              <div
+                key={z.level}
+                className={cn(
+                  'rounded-md border px-2 py-1.5',
+                  tone,
+                  live && 'ring-1 ring-white/30'
+                )}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[10px] font-bold text-white">
+                    {z.label}
+                    <span className="ml-1.5 text-[9px] font-mono font-normal text-gray-400">
+                      ~{z.sizePct}% size
+                    </span>
+                    {live && (
+                      <span className="ml-1.5 text-[8px] font-mono uppercase tracking-wider text-emerald-200">
+                        · live
+                      </span>
+                    )}
+                  </p>
+                  <p className="text-[12px] font-black font-mono text-emerald-100">
+                    {formatMoney(z.lo)} – {formatMoney(z.hi)}
+                  </p>
+                </div>
+                <p className="text-[9px] text-gray-400 mt-0.5 truncate">via {z.anchor}</p>
+              </div>
+            );
+          })}
+        </div>
+
+        <p className="text-[10px] text-emerald-100/85 leading-relaxed">{stance}</p>
+        {(pick.stopLoss != null || pick.takeProfit != null) && (
+          <div className="grid grid-cols-2 gap-2 pt-0.5">
+            <div className="rounded-md bg-black/25 border border-white/8 px-2 py-1">
+              <p className="text-[8px] font-mono uppercase text-gray-500">Stop (under Z3)</p>
+              <p className="text-[11px] font-mono text-rose-300">{formatMoney(pick.stopLoss)}</p>
+            </div>
+            <div className="rounded-md bg-black/25 border border-white/8 px-2 py-1">
+              <p className="text-[8px] font-mono uppercase text-gray-500">Take profit</p>
+              <p className="text-[11px] font-mono text-violet-300">{formatMoney(pick.takeProfit)}</p>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   const range = formatZoneRange(pick.buyZone?.lo, pick.buyZone?.hi);
   if (!range || !pick.buyZone) return null;
   const inZone = priceInBuyZone(pick.price, pick.buyZone.lo, pick.buyZone.hi);
@@ -625,7 +713,10 @@ function CandidateRow({
 }) {
   const whale = c.factorRatings?.find((f) => f.key === 'whaleAccumulation')?.rating;
   const funds = c.factorRatings?.find((f) => f.key === 'institutionalInflow')?.rating;
-  const buyRange = formatZoneRange(c.buyZone?.lo, c.buyZone?.hi);
+  const buyRange =
+    c.buyZones && c.buyZones.length >= 3
+      ? `BZ1 ${formatMoney(c.buyZones[0].lo)}–${formatMoney(c.buyZones[0].hi)} · BZ3 ${formatMoney(c.buyZones[2].lo)}–${formatMoney(c.buyZones[2].hi)}`
+      : formatZoneRange(c.buyZone?.lo, c.buyZone?.hi);
   return (
     <button
       type="button"
@@ -639,7 +730,9 @@ function CandidateRow({
         </p>
         {buyRange && (
           <p className="text-[10px] font-mono text-emerald-300/90 mt-0.5 truncate">
-            Buy zone {buyRange}
+            {typeof buyRange === 'string' && buyRange.startsWith('BZ')
+              ? buyRange
+              : `Buy zone ${buyRange}`}
           </p>
         )}
       </div>

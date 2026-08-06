@@ -18,6 +18,7 @@ import {
   buildRealisticSuggestEntry,
   formatFactorStrip,
   scoreSuggestTrade,
+  type SuggestBuyBand,
   type SuggestFactorRating,
 } from './suggestTradeEngine';
 import type { HorizonKey } from '../components/analysis/analysisTheme';
@@ -43,14 +44,18 @@ export type FindATradeCandidate = {
   why: string;
   tradeScore: number;
   isBuyCandidate: boolean;
-  /** Suggested BUY entry band from trade-management zones. */
+  /** Preferred / core BUY band (Buy Zone 2). */
   buyZone?: SuggestBuyZone;
+  /** Three scale-in entry chances: Buy Zone 1 → 3. */
+  buyZones?: SuggestBuyBand[];
   stopLoss?: number;
   takeProfit?: number;
   /** How the Suggest buy zone was anchored (support / EMA / etc). */
   buyZoneAnchor?: string;
-  /** Buy zone width as % of live price. */
+  /** Combined Buy Zone 1–3 width as % of live price. */
   buyZoneWidthPct?: number;
+  /** Which buy zone live price is in, if any. */
+  activeBuyLevel?: 1 | 2 | 3 | null;
   /** Suggest factor ratings (1–5) when mode=suggest. */
   factorRatings?: SuggestFactorRating[];
   /** Suggest weighted composite 0–100. */
@@ -298,14 +303,16 @@ async function scoutOne(
         ),
         score: suggest.compositeScore,
         expectedReturn: engine.expectedReturn,
-        why: `${suggest.summary} Buy zone via ${entry.anchorLabel} (~${entry.widthPct}% wide).`,
+        why: `${suggest.summary} Scale-in: Buy Zone 1–3 via ${entry.anchorLabel}.`,
         tradeScore: 0,
         isBuyCandidate,
         buyZone: entry.buyZone,
+        buyZones: entry.buyZones,
         stopLoss: entry.stopLoss,
         takeProfit: entry.takeProfit,
         buyZoneAnchor: entry.anchorLabel,
         buyZoneWidthPct: entry.widthPct,
+        activeBuyLevel: entry.activeLevel,
         factorRatings: suggest.factors,
         suggestComposite: suggest.compositeScore,
         factorStrip: formatFactorStrip(suggest.factors),
@@ -430,14 +437,18 @@ export async function findATrade(opts: {
       ? topPick
         ? buyCleared === 1
           ? `Factor engine: 1 of ${scannedCount} cleared · ${topPick.ticker}${
-              topPick.buyZone
-                ? ` · buy zone ${topPick.buyZone.lo.toFixed(2)}–${topPick.buyZone.hi.toFixed(2)}`
-                : ''
+              topPick.buyZones?.length
+                ? ` · BZ1 ${topPick.buyZones[0].lo.toFixed(2)}–${topPick.buyZones[0].hi.toFixed(2)} · BZ3 ${topPick.buyZones[2].lo.toFixed(2)}–${topPick.buyZones[2].hi.toFixed(2)}`
+                : topPick.buyZone
+                  ? ` · buy zone ${topPick.buyZone.lo.toFixed(2)}–${topPick.buyZone.hi.toFixed(2)}`
+                  : ''
             } (${topPick.factorStrip || `score ${topPick.score}`})`
           : `Factor engine: ${buyCleared} of ${scannedCount} cleared · top ${topPick.ticker}${
-              topPick.buyZone
-                ? ` · buy zone ${topPick.buyZone.lo.toFixed(2)}–${topPick.buyZone.hi.toFixed(2)}`
-                : ''
+              topPick.buyZones?.length
+                ? ` · BZ1–3 ${topPick.buyZones[0].hi.toFixed(2)}→${topPick.buyZones[2].lo.toFixed(2)}`
+                : topPick.buyZone
+                  ? ` · buy zone ${topPick.buyZone.lo.toFixed(2)}–${topPick.buyZone.hi.toFixed(2)}`
+                  : ''
             } · ${topPick.factorStrip || `score ${topPick.score}`}`
         : `Factor engine: 0 of ${scannedCount} cleared. See watchlist or refresh — priority is whale → funds → momentum → fundamentals.`
       : topPick

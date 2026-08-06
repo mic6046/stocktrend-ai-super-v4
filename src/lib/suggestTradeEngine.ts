@@ -445,25 +445,40 @@ export function formatFactorStrip(factors: SuggestFactorRating[]): string {
     .join(' ');
 }
 
+export type SuggestBuyBand = {
+  lo: number;
+  hi: number;
+  /** 1 = first/highest entry, 3 = deepest value entry */
+  level: 1 | 2 | 3;
+  label: string;
+  /** Suggested share of planned size, e.g. 30 */
+  sizePct: number;
+  /** Structural anchor for this tranche */
+  anchor: string;
+};
+
 export type SuggestEntryPlan = {
+  /** Preferred / core band (usually Buy Zone 2). */
   buyZone: { lo: number; hi: number };
+  /** Three scale-in chances: BZ1 (closest) → BZ3 (deepest). */
+  buyZones: SuggestBuyBand[];
   stopLoss: number;
   takeProfit: number;
-  /** Human-readable anchor used for the zone. */
+  /** Human-readable primary anchor. */
   anchorLabel: string;
   /** Approximate ATR used for sizing. */
   atr: number;
-  /** Zone width as % of price. */
+  /** Combined BZ1→BZ3 width as % of price. */
   widthPct: number;
-  /** No-position live action vs this buy zone. */
+  /** No-position live action vs any buy zone. */
   liveAction: 'BUY' | 'WAIT';
   liveReason: string;
+  /** Which zone live price is in, if any. */
+  activeLevel: 1 | 2 | 3 | null;
 };
 
 function roundPx(n: number): number {
   if (!Number.isFinite(n)) return 0;
-  if (n >= 1000) return Math.round(n * 100) / 100;
-  if (n >= 100) return Math.round(n * 100) / 100;
   if (n >= 10) return Math.round(n * 100) / 100;
   return Math.round(n * 1000) / 1000;
 }
@@ -472,19 +487,44 @@ function estimateAtr(tech: TechnicalBreakdown, price: number): number {
   const atr = tech.indicators?.atr;
   if (atr != null && Number.isFinite(atr) && atr > 0) return atr;
   const vol = tech.indicators?.volatility;
-  // volatility here is avg abs daily return (decimal-ish); fallback ~1.2% of price
   if (vol != null && Number.isFinite(vol) && vol > 0) {
     return Math.max(price * 0.004, price * Math.min(0.04, vol) * 1.2);
   }
   return price * 0.012;
 }
 
+function bandAround(center: number, halfWidth: number, price: number, allowAboveSpot: boolean): { lo: number; hi: number } {
+  let lo = center - halfWidth;
+  let hi = center + halfWidth;
+  const maxHi = allowAboveSpot ? price * 1.004 : price * 0.998;
+  hi = Math.min(hi, maxHi);
+  lo = Math.min(lo, hi - halfWidth * 1.4);
+  lo = Math.max(lo, price * 0.88);
+  if (hi - lo < price * 0.008) {
+    lo = hi - price * 0.01;
+  }
+  if (!(lo < hi)) {
+    hi = lo + price * 0.01;
+  }
+  return { lo: roundPx(lo), hi: roundPx(hi) };
+}
+
+function dedupeDescending(levels: { level: number; label: string }[], minGap: number): { level: number; label: string }[] {
+  const sorted = [...levels].sort((a, b) => b.level - a.level);
+  const out: { level: number; label: string }[] = [];
+  for (const c of sorted) {
+    if (out.some((o) => Math.abs(o.level - c.level) < minGap)) continue;
+    out.push(c);
+  }
+  return out;
+}
+
 /**
- * Realistic Suggest entry plan:
- * - Buy zone anchored to nearest support / EMA pullback (not stop→price ladder)
- * - Width ≈ 0.8–1.4 ATR, capped ~1.2%–3.5% of price
- * - Stop under zone by ~1 ATR / next support
- * - Take-profit toward resistance with ~1.6–2.2R reward
+ * Realistic Suggest entry plan with 3 scale-in buy zones:
+ * - Buy Zone 1: nearest pullback (first chance)
+ * - Buy Zone 2: core support (primary)
+ * - Buy Zone 3: deep value support (best average if filled)
+ * Each band ~0.7–1.1 ATR wide (capped ~1–2.2% of price).
  */
 export function buildRealisticSuggestEntry(opts: {
   technical: TechnicalBreakdown;
@@ -494,6 +534,7 @@ export function buildRealisticSuggestEntry(opts: {
   const price = opts.price;
   const tech = opts.technical;
   const atr = estimateAtr(tech, price);
+  const minGap = Math.max(atr * 0.55, price * 0.008);
 
   const supports = (tech.quantumRefinement?.supportResistance?.supports || [])
     .filter((s) => Number.isFinite(s) && s > 0 && s < price * 1.002)
@@ -504,130 +545,158 @@ export function buildRealisticSuggestEntry(opts: {
 
   const ema20 = tech.indicators?.ema20;
   const sma50 = tech.indicators?.sma50;
+  const sma200 = tech.indicators?.sma200;
   const bbMid = tech.indicators?.bollinger?.middle;
   const bbLower = tech.indicators?.bollinger?.lower;
   const ma20 = tech.quantumRefinement?.trendStrength?.ma20;
+  const ma50 = tech.quantumRefinement?.trendStrength?.ma50;
 
-  const candidates: { level: number; label: string }[] = [];
-  if (supports[0] != null) candidates.push({ level: supports[0], label: 'nearest volume support' });
-  if (supports[1] != null) candidates.push({ level: supports[1], label: 'secondary support' });
-  if (ema20 != null && ema20 < price) candidates.push({ level: ema20, label: 'EMA20 pullback' });
-  if (sma50 != null && sma50 < price) candidates.push({ level: sma50, label: 'SMA50 pullback' });
-  if (ma20 != null && ma20 < price) candidates.push({ level: ma20, label: 'MA20 pullback' });
-  if (bbMid != null && bbMid < price) candidates.push({ level: bbMid, label: 'Bollinger mid' });
-  if (bbLower != null && bbLower < price) candidates.push({ level: bbLower, label: 'Bollinger lower' });
-  // Mild structural fallbacks — still below price
-  candidates.push({ level: price * 0.985, label: '≈1.5% pullback' });
-  candidates.push({ level: price * 0.97, label: '≈3% pullback' });
+  const pool: { level: number; label: string }[] = [];
+  if (supports[0] != null) pool.push({ level: supports[0], label: 'nearest volume support' });
+  if (supports[1] != null) pool.push({ level: supports[1], label: 'secondary support' });
+  if (supports[2] != null) pool.push({ level: supports[2], label: 'deeper support' });
+  if (ema20 != null && ema20 < price * 1.001) pool.push({ level: ema20, label: 'EMA20 pullback' });
+  if (ma20 != null && ma20 < price * 1.001) pool.push({ level: ma20, label: 'MA20 pullback' });
+  if (bbMid != null && bbMid < price) pool.push({ level: bbMid, label: 'Bollinger mid' });
+  if (sma50 != null && sma50 < price) pool.push({ level: sma50, label: 'SMA50 pullback' });
+  if (ma50 != null && ma50 < price) pool.push({ level: ma50, label: 'MA50 pullback' });
+  if (bbLower != null && bbLower < price) pool.push({ level: bbLower, label: 'Bollinger lower' });
+  if (sma200 != null && sma200 < price && sma200 > price * 0.88) {
+    pool.push({ level: sma200, label: 'SMA200 support' });
+  }
+  // Structural fallbacks so we always have 3 spaced levels
+  pool.push({ level: price * 0.988, label: '≈1.2% pullback' });
+  pool.push({ level: price * 0.975, label: '≈2.5% pullback' });
+  pool.push({ level: price * 0.955, label: '≈4.5% pullback' });
 
-  // Prefer the highest support that is still a meaningful pullback (≥ 0.35 ATR or ≥ 0.4%)
-  const minPull = Math.max(atr * 0.35, price * 0.004);
-  const deepEnough = candidates
-    .filter((c) => price - c.level >= minPull * 0.5 && c.level > price * 0.88)
-    .sort((a, b) => b.level - a.level);
-
-  // If price is already hugging support (< 0.4 ATR above), allow buying near spot
-  const nearSupport = deepEnough[0] && price - deepEnough[0].level <= atr * 0.45;
-  const anchor = deepEnough[0] || { level: price * 0.98, label: 'structural pullback' };
-
-  // Zone width: ~1 ATR, but keep realistic for liquid names
-  const widthRaw = atr * 1.05;
-  const width = Math.min(
-    Math.max(widthRaw, price * 0.012), // at least ~1.2%
-    price * 0.035, // at most ~3.5%
-    atr * 1.6
+  const unique = dedupeDescending(
+    pool.filter((c) => c.level > price * 0.88 && c.level < price * 1.002),
+    minGap
   );
 
-  let buyHi: number;
-  let buyLo: number;
-  if (nearSupport) {
-    // Price is at support — zone around current with slight room above/below
-    buyHi = Math.min(price * 1.004, anchor.level + width * 0.55);
-    buyLo = Math.max(anchor.level - width * 0.45, buyHi - width);
-  } else {
-    // Extended — wait for pullback into support band
-    buyHi = Math.min(anchor.level + width * 0.35, price * 0.997);
-    buyLo = buyHi - width;
-    // Keep zone centered near anchor
-    const mid = (buyLo + buyHi) / 2;
-    const shift = anchor.level - mid;
-    buyLo += shift * 0.65;
-    buyHi += shift * 0.65;
-    buyHi = Math.min(buyHi, price * 0.997);
-    buyLo = Math.min(buyLo, buyHi - width * 0.75);
+  // Need 3 descending anchors: z1 highest (closest to spot), z3 deepest
+  let a1 = unique[0] || { level: price * 0.988, label: 'near pullback' };
+  let a2 = unique[1] || { level: a1.level - minGap * 1.15, label: 'core pullback' };
+  let a3 = unique[2] || { level: a2.level - minGap * 1.15, label: 'deep pullback' };
+
+  // Enforce spacing BZ1 > BZ2 > BZ3
+  if (a2.level >= a1.level - minGap * 0.85) {
+    a2 = { level: a1.level - minGap * 1.1, label: a2.label };
+  }
+  if (a3.level >= a2.level - minGap * 0.85) {
+    a3 = { level: a2.level - minGap * 1.1, label: a3.label };
+  }
+  a3.level = Math.max(a3.level, price * 0.9);
+
+  const trancheHalf = Math.min(
+    Math.max(atr * 0.45, price * 0.005),
+    price * 0.011,
+    atr * 0.7
+  );
+
+  const nearSpot = price - a1.level <= atr * 0.4;
+  const z1 = bandAround(a1.level, trancheHalf, price, nearSpot);
+  const z2 = bandAround(a2.level, trancheHalf * 1.05, price, false);
+  const z3 = bandAround(a3.level, trancheHalf * 1.1, price, false);
+
+  // Keep non-overlapping descending bands: z1 above z2 above z3
+  const sep = Math.max(price * 0.002, atr * 0.12);
+  if (z2.hi >= z1.lo - sep) {
+    z2.hi = roundPx(z1.lo - sep);
+    z2.lo = roundPx(Math.min(z2.lo, z2.hi - trancheHalf * 1.2));
+  }
+  if (z3.hi >= z2.lo - sep) {
+    z3.hi = roundPx(z2.lo - sep);
+    z3.lo = roundPx(Math.min(z3.lo, z3.hi - trancheHalf * 1.2));
+  }
+  if (!(z2.lo < z2.hi)) {
+    z2.lo = roundPx(z2.hi - price * 0.01);
+  }
+  if (!(z3.lo < z3.hi)) {
+    z3.lo = roundPx(z3.hi - price * 0.01);
   }
 
-  // Safety clamps
-  buyHi = Math.min(buyHi, price * (nearSupport ? 1.006 : 0.998));
-  buyLo = Math.max(buyLo, price * 0.9);
-  if (buyHi - buyLo < price * 0.01) {
-    buyLo = buyHi - price * 0.012;
-  }
-  if (buyHi <= buyLo) {
-    buyHi = buyLo + price * 0.012;
-  }
+  const buyZones: SuggestBuyBand[] = [
+    {
+      level: 1,
+      label: 'Buy Zone 1',
+      sizePct: 30,
+      anchor: a1.label,
+      lo: z1.lo,
+      hi: z1.hi,
+    },
+    {
+      level: 2,
+      label: 'Buy Zone 2',
+      sizePct: 40,
+      anchor: a2.label,
+      lo: z2.lo,
+      hi: z2.hi,
+    },
+    {
+      level: 3,
+      label: 'Buy Zone 3',
+      sizePct: 30,
+      anchor: a3.label,
+      lo: z3.lo,
+      hi: z3.hi,
+    },
+  ];
 
-  // Stop: under buy zone by ~1 ATR, or under next support if closer
-  const nextSupport = supports.find((s) => s < buyLo - atr * 0.15) ?? buyLo - atr;
-  let stopLoss = Math.min(buyLo - Math.max(atr * 0.95, price * 0.01), nextSupport * 0.995);
-  if (buyLo - stopLoss > price * 0.055) {
-    // Cap stop distance ~5.5% so R:R stays usable
-    stopLoss = buyLo - price * 0.045;
-  }
-  if (!(stopLoss < buyLo)) stopLoss = buyLo - Math.max(atr * 0.8, price * 0.01);
+  // Preferred display band = core (zone 2); combined envelope for width stats
+  const buyZone = { lo: z2.lo, hi: z2.hi };
+  const envelopeLo = z3.lo;
+  const envelopeHi = z1.hi;
 
-  const risk = buyHi - stopLoss; // use zone top for conservative risk
-  const riskFromMid = (buyLo + buyHi) / 2 - stopLoss;
-  const rewardMultiple = 1.85;
+  // Stop under deepest zone
+  const nextSupport = supports.find((s) => s < envelopeLo - atr * 0.15) ?? envelopeLo - atr;
+  let stopLoss = Math.min(envelopeLo - Math.max(atr * 0.9, price * 0.01), nextSupport * 0.995);
+  if (envelopeLo - stopLoss > price * 0.06) stopLoss = envelopeLo - price * 0.05;
+  if (!(stopLoss < envelopeLo)) stopLoss = envelopeLo - Math.max(atr * 0.8, price * 0.01);
+
+  const midCore = (z2.lo + z2.hi) / 2;
+  const riskFromMid = midCore - stopLoss;
   const r1 = resistances[0];
   const targetHint =
     opts.targetHint != null && Number.isFinite(opts.targetHint) && opts.targetHint > price
       ? opts.targetHint
       : null;
 
-  let takeProfit = (buyLo + buyHi) / 2 + Math.max(riskFromMid, risk * 0.85) * rewardMultiple;
+  let takeProfit = midCore + Math.max(riskFromMid, atr) * 1.85;
   if (r1 != null) {
-    // Prefer first resistance if it offers at least ~1.4R
-    if (r1 > (buyLo + buyHi) / 2 + riskFromMid * 1.4) {
-      takeProfit = Math.min(r1 * 0.995, takeProfit * 1.08);
-    } else {
-      takeProfit = Math.max(takeProfit, r1);
-    }
+    if (r1 > midCore + riskFromMid * 1.4) takeProfit = Math.min(r1 * 0.995, takeProfit * 1.08);
+    else takeProfit = Math.max(takeProfit, r1);
   }
-  if (targetHint != null) {
-    takeProfit = takeProfit * 0.65 + targetHint * 0.35;
-  }
-  if (takeProfit <= buyHi * 1.01) {
-    takeProfit = buyHi + Math.max(riskFromMid * 1.6, price * 0.02);
-  }
+  if (targetHint != null) takeProfit = takeProfit * 0.65 + targetHint * 0.35;
+  if (takeProfit <= envelopeHi * 1.01) takeProfit = envelopeHi + Math.max(riskFromMid * 1.6, price * 0.02);
 
-  buyLo = roundPx(buyLo);
-  buyHi = roundPx(buyHi);
   stopLoss = roundPx(stopLoss);
   takeProfit = roundPx(takeProfit);
+  if (!(takeProfit > envelopeHi)) takeProfit = roundPx(envelopeHi + price * 0.025);
 
-  if (!(buyLo < buyHi)) buyHi = roundPx(buyLo + price * 0.012);
-  if (!(stopLoss < buyLo)) stopLoss = roundPx(buyLo - Math.max(atr * 0.8, price * 0.01));
-  if (!(takeProfit > buyHi)) takeProfit = roundPx(buyHi + price * 0.025);
+  const active =
+    buyZones.find((z) => price >= z.lo && price <= z.hi) ?? null;
+  const liveAction: 'BUY' | 'WAIT' = active ? 'BUY' : 'WAIT';
+  const liveReason = active
+    ? `Live price is inside ${active.label} (${active.anchor}) — scale-in tranche ~${active.sizePct}%.`
+    : price > envelopeHi
+      ? `Wait for pullback into Buy Zone 1–3 (${z1.lo.toFixed(2)} → ${z3.lo.toFixed(2)}).`
+      : `Price under Buy Zone 3 — confirm hold above stop ${stopLoss.toFixed(2)}.`;
 
-  const inZone = price >= buyLo && price <= buyHi;
-  const widthPct = ((buyHi - buyLo) / price) * 100;
-  const liveAction: 'BUY' | 'WAIT' = inZone ? 'BUY' : 'WAIT';
-  const liveReason = inZone
-    ? `Live price is inside the support buy zone (${anchor.label}).`
-    : price > buyHi
-      ? `Wait for pullback into ${anchor.label} buy zone ${buyLo.toFixed(2)}–${buyHi.toFixed(2)}.`
-      : `Price under buy zone — confirm support hold above stop ${stopLoss.toFixed(2)}.`;
+  const widthPct = ((envelopeHi - envelopeLo) / price) * 100;
 
   return {
-    buyZone: { lo: buyLo, hi: buyHi },
+    buyZone,
+    buyZones,
     stopLoss,
     takeProfit,
-    anchorLabel: anchor.label,
+    anchorLabel: `${a1.label} → ${a3.label}`,
     atr: roundPx(atr),
     widthPct: Math.round(widthPct * 10) / 10,
     liveAction,
     liveReason,
+    activeLevel: active?.level ?? null,
   };
 }
+
 
