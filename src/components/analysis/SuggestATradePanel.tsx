@@ -451,6 +451,13 @@ function formatBuyZonesStrip(zones?: { lo: number; hi: number; level: number }[]
   return `BZ1 ${formatMoney(zones[0].lo)}–${formatMoney(zones[0].hi)} · BZ2 ${formatMoney(zones[1].lo)}–${formatMoney(zones[1].hi)} · BZ3 ${formatMoney(zones[2].lo)}–${formatMoney(zones[2].hi)}`;
 }
 
+function formatZoneRange(lo?: number, hi?: number): string | null {
+  if (lo == null || hi == null || !Number.isFinite(lo) || !Number.isFinite(hi) || lo <= 0 || hi <= 0) {
+    return null;
+  }
+  return `${formatMoney(lo)} – ${formatMoney(hi)}`;
+}
+
 function priceInBuyZone(price: number, lo?: number, hi?: number): boolean {
   if (lo == null || hi == null || !Number.isFinite(price)) return false;
   return price >= lo && price <= hi;

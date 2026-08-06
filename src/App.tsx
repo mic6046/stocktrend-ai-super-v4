@@ -8787,6 +8787,33 @@ export default function App() {
                     }}
                     userHasPosition={userHasPosition}
                   />
+                  <TradeZonesPanel
+                    lastClose={
+                      horizonView.currentPrice > 0 ? horizonView.currentPrice : liveAnalysisPrice
+                    }
+                    levels={activeLevels}
+                    bullCase={horizonView.bullCase}
+                    bearCase={horizonView.bearCase}
+                    stopLoss={horizonView.stopLoss}
+                    currency={data.quote?.currency}
+                    quoteAsOf={(data as any)?.quoteAsOf ?? null}
+                    zoneScale={horizonView.zoneScale}
+                    horizon={analysisHorizon}
+                    horizonLabel={horizonView.horizonLabel}
+                    userHasPosition={userHasPosition}
+                    onUserHasPositionChange={handleUserHasPositionChange}
+                    currentAction={horizonView.currentAction}
+                    visibleZoneKeys={horizonView.visibleZoneKeys}
+                    engineZones={{
+                      buyZone: horizonView.buyZone,
+                      addZone: horizonView.addZone,
+                      holdZone: horizonView.holdZone,
+                      takeProfitZone: horizonView.takeProfitZone,
+                      reduceZone: horizonView.reduceZone,
+                      exitZone: horizonView.exitZone,
+                      stopLoss: horizonView.stopLoss,
+                    }}
+                  />
                   <AiInsightsStrip
                     keyRisks={keyRisks}
                     technical={{
@@ -8829,45 +8856,16 @@ export default function App() {
                     }
                   />
                   <DecisionBriefPanel decision={horizonView} />
-                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                    <TradeZonesPanel
-                      lastClose={
-                        horizonView.currentPrice > 0 ? horizonView.currentPrice : liveAnalysisPrice
-                      }
-                      levels={activeLevels}
-                      bullCase={horizonView.bullCase}
-                      bearCase={horizonView.bearCase}
-                      stopLoss={horizonView.stopLoss}
-                      currency={data.quote?.currency}
-                      quoteAsOf={(data as any)?.quoteAsOf ?? null}
-                      zoneScale={horizonView.zoneScale}
-                      horizon={analysisHorizon}
-                      horizonLabel={horizonView.horizonLabel}
-                      userHasPosition={userHasPosition}
-                      onUserHasPositionChange={handleUserHasPositionChange}
-                      currentAction={horizonView.currentAction}
-                      visibleZoneKeys={horizonView.visibleZoneKeys}
-                      engineZones={{
-                        buyZone: horizonView.buyZone,
-                        addZone: horizonView.addZone,
-                        holdZone: horizonView.holdZone,
-                        takeProfitZone: horizonView.takeProfitZone,
-                        reduceZone: horizonView.reduceZone,
-                        exitZone: horizonView.exitZone,
-                        stopLoss: horizonView.stopLoss,
-                      }}
-                    />
-                    <RiskMeterPanel
-                      riskScore={horizonView.riskScore}
-                      riskLabel={horizonView.riskLabel}
-                      volatility={horizonView.volatility}
-                      liquidityLabel={horizonView.liquidityLabel}
-                      drawdown={horizonView.drawdown}
-                      sharpe={horizonView.sharpe}
-                      horizon={analysisHorizon}
-                      horizonLabel={horizonView.horizonLabel}
-                    />
-                  </div>
+                  <RiskMeterPanel
+                    riskScore={horizonView.riskScore}
+                    riskLabel={horizonView.riskLabel}
+                    volatility={horizonView.volatility}
+                    liquidityLabel={horizonView.liquidityLabel}
+                    drawdown={horizonView.drawdown}
+                    sharpe={horizonView.sharpe}
+                    horizon={analysisHorizon}
+                    horizonLabel={horizonView.horizonLabel}
+                  />
                   <MetricRadialRow
                     metrics={[
                       {
