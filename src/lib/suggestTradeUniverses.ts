@@ -1,5 +1,5 @@
 /**
- * Curated popular-market universes for Suggest a Trade.
+ * Curated popular-market universes for Suggest Trades.
  * Kept modest (≤20 per scout) so Consensus scanning stays within API limits.
  */
 
@@ -133,13 +133,16 @@ const DEDUPED: UniverseName[] = (() => {
 })();
 
 /**
- * Build a scout list for Suggest a Trade.
+ * Build a scout list for Suggest Trades.
  * Caps at `max` tickers; for ALL markets, round-robins across regions.
+ * When `shuffle` is true, randomize order (and which names are kept when pool > max)
+ * so each Suggest press is a new search sample.
  */
 export function buildSuggestUniverse(
   market: SuggestMarket,
   theme: SuggestTheme,
-  max = 20
+  max = 20,
+  opts?: { shuffle?: boolean }
 ): UniverseName[] {
   let pool = DEDUPED;
   if (market !== 'ALL') {
@@ -149,14 +152,22 @@ export function buildSuggestUniverse(
     pool = pool.filter((r) => r.themes.includes(theme));
   }
 
+  const shuffle = !!opts?.shuffle;
+  const shuffledPool = shuffle ? shuffleCopy(pool) : pool;
+
   if (market !== 'ALL') {
-    return pool.slice(0, max);
+    return shuffledPool.slice(0, max);
   }
 
   // Round-robin US → HK → JP → EU for balanced multi-market scout
   const byMkt: Record<string, UniverseName[]> = { US: [], HK: [], JP: [], EU: [] };
-  for (const row of pool) {
+  for (const row of shuffledPool) {
     byMkt[row.market]?.push(row);
+  }
+  if (shuffle) {
+    for (const m of Object.keys(byMkt)) {
+      byMkt[m] = shuffleCopy(byMkt[m]);
+    }
   }
   const order: Array<Exclude<SuggestMarket, 'ALL'>> = ['US', 'HK', 'JP', 'EU'];
   const picked: UniverseName[] = [];
@@ -175,6 +186,15 @@ export function buildSuggestUniverse(
     i += 1;
   }
   return picked;
+}
+
+function shuffleCopy<T>(arr: T[]): T[] {
+  const out = arr.slice();
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
 }
 
 export function universeTickers(market: SuggestMarket, theme: SuggestTheme, max = 20): string[] {

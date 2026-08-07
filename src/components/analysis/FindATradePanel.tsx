@@ -76,7 +76,7 @@ export function FindATradePanel({
       });
       setResult(out);
     } catch (e: any) {
-      setError(e?.message || 'Find a Trade failed');
+      setError(e?.message || 'Find Trades failed');
     } finally {
       setScanning(false);
     }
@@ -85,7 +85,7 @@ export function FindATradePanel({
   return (
     <GlassCard className={cn('space-y-3', className)}>
       <SectionLabel icon={<Rocket className="w-3.5 h-3.5 text-emerald-400" />}>
-        Find a Trade · {horizonLabel}
+        Find Trades · {horizonLabel}
       </SectionLabel>
 
       <p className="text-[11px] text-gray-400 leading-relaxed">
@@ -122,7 +122,7 @@ export function FindATradePanel({
           )}
         >
           {scanning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Crosshair className="w-3.5 h-3.5" />}
-          Find a Trade
+          Find Trades
         </button>
       </div>
 
@@ -141,19 +141,23 @@ export function FindATradePanel({
             exit={{ opacity: 0 }}
             className="space-y-3"
           >
+            <p className="text-[11px] text-gray-400 leading-relaxed">{result.message}</p>
+
             {result.topPick ? (
               <TopPickCard pick={result.topPick} onOpen={onOpenTicker} />
             ) : (
               <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 px-3 py-3">
-                <p className="text-[12px] text-amber-100 font-semibold">No trade found</p>
-                <p className="mt-1 text-[11px] text-gray-400 leading-relaxed">{result.message}</p>
+                <p className="text-[12px] text-amber-100 font-semibold">No BUY trade found</p>
+                <p className="mt-1 text-[11px] text-gray-400 leading-relaxed">
+                  None of the {result.scannedCount} tickers cleared BUY gates on this scout.
+                </p>
               </div>
             )}
 
             {result.buyCandidates.length > 1 && (
               <div>
                 <p className="text-[10px] font-mono uppercase tracking-wider text-gray-500 mb-2">
-                  Other BUY candidates
+                  Other BUY candidates ({result.buyCandidates.length - 1})
                 </p>
                 <div className="space-y-1.5">
                   {result.buyCandidates.slice(1, 5).map((c) => (
@@ -163,10 +167,23 @@ export function FindATradePanel({
               </div>
             )}
 
+            {result.watchlistCandidates?.length > 0 && (
+              <div>
+                <p className="text-[10px] font-mono uppercase tracking-wider text-amber-200/80 mb-2">
+                  Near-miss watchlist (did not clear BUY)
+                </p>
+                <div className="space-y-1.5">
+                  {result.watchlistCandidates.map((c) => (
+                    <CandidateRow key={`w-${c.ticker}`} c={c} onOpen={onOpenTicker} />
+                  ))}
+                </div>
+              </div>
+            )}
+
             {result.scanned.some((c) => !c.isBuyCandidate) && (
               <details className="rounded-xl border border-white/8 bg-black/25 px-3 py-2">
                 <summary className="text-[10px] font-mono uppercase tracking-wider text-gray-500 cursor-pointer">
-                  Full scout log ({result.scanned.length})
+                  Full scout log ({result.scanned.length}) · {result.buyCleared} BUY cleared
                 </summary>
                 <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
                   {result.scanned.map((c) => (

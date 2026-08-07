@@ -17,6 +17,7 @@ import {
   RecommendationChangeLogPanel,
   FindATradePanel,
   SuggestATradePanel,
+  DayTradePanel,
   MarketDataRefreshBar,
   type HorizonKey,
 } from './components/analysis';
@@ -1220,6 +1221,11 @@ export default function App() {
   const [userHasPosition, setUserHasPosition] = useState(false);
   const [showFindATrade, setShowFindATrade] = useState(false);
   const [showSuggestATrade, setShowSuggestATrade] = useState(false);
+  const [showDayTrade, setShowDayTrade] = useState(false);
+  /** Bumped on every Suggest header/empty-state press → panel starts a new search. */
+  const [suggestRunToken, setSuggestRunToken] = useState(0);
+  /** Bumped on every Day Trade header press → panel starts a new scout. */
+  const [dayTradeRunToken, setDayTradeRunToken] = useState(0);
   const [refreshMode, setRefreshMode] = useState<RefreshMode>(() => loadRefreshMode());
   const [autoRefreshIntervalSec, setAutoRefreshIntervalSec] = useState<AutoRefreshIntervalSec>(
     () => loadAutoRefreshIntervalSec()
@@ -5944,6 +5950,32 @@ export default function App() {
 
       if (isInitial) {
         setError(null);
+        // If /api/stock returned synthetic fallback, try a dedicated live quote before painting
+        if (stockData.synthetic) {
+          try {
+            const qRes = await loggedFetch(
+              apiUrl(`/api/quote?ticker=${encodeURIComponent(stockData.ticker || cleanSymbol)}&bypassCache=true`),
+              {
+                __qnMeta: {
+                  reason: 'repair-synthetic-quote',
+                  userAction: runPredict ? 'Search stock' : 'Load stock',
+                },
+              } as any
+            );
+            if (qRes.ok) {
+              const qBody = await qRes.json();
+              const livePx = Number(qBody?.quote?.regularMarketPrice);
+              if (Number.isFinite(livePx) && livePx > 0) {
+                stockData.quote = { ...(stockData.quote || {}), ...qBody.quote };
+                stockData.quoteAsOf = qBody.asOf || Date.now();
+                stockData.quoteDelayed = !!qBody.delayed;
+                stockData.synthetic = false;
+              }
+            }
+          } catch {
+            /* keep synthetic chart if quote also fails */
+          }
+        }
         setData(stockData);
         setChartHistory(sanitizedHistory);
         // Predict + news only on explicit Search / Refresh (runPredict)
@@ -5959,11 +5991,33 @@ export default function App() {
       } else {
         if (requestId !== stockRequestSeq.current) return null;
         setChartHistory(sanitizedHistory);
-        setData(prev => prev ? {
-          ...prev,
-          quote: stockData.quote || prev.quote,
-          history: sanitizedHistory || prev.history,
-        } : stockData);
+        setData(prev => {
+          if (!prev) return stockData;
+          const incomingPx = Number(stockData.quote?.regularMarketPrice);
+          const prevPx = Number(prev.quote?.regularMarketPrice);
+          const incomingOk = Number.isFinite(incomingPx) && incomingPx > 0;
+          const prevOk = Number.isFinite(prevPx) && prevPx > 0;
+          // Never let synthetic / empty stock payloads wipe a good live quote after Refresh
+          const preferPrevQuote =
+            !!stockData.synthetic ||
+            !incomingOk ||
+            (prevOk &&
+              incomingOk &&
+              Math.abs(incomingPx - prevPx) / Math.max(prevPx, 1e-9) > 0.25);
+          return {
+            ...prev,
+            ...stockData,
+            history: sanitizedHistory || prev.history,
+            quote: preferPrevQuote ? prev.quote : stockData.quote || prev.quote,
+            quoteAsOf: preferPrevQuote
+              ? (prev as any).quoteAsOf
+              : stockData.quoteAsOf || Date.now(),
+            quoteDelayed: preferPrevQuote
+              ? (prev as any).quoteDelayed
+              : !!(stockData as any).quoteDelayed,
+            synthetic: preferPrevQuote ? false : !!stockData.synthetic,
+          };
+        });
         if (runPredict) {
           await handlePredict(stockData, bypassCache, newsItems, predictHistoryOverride);
         }
@@ -6658,15 +6712,21 @@ export default function App() {
         return prev;
       }
       const prevPx = Number(prev.quote?.regularMarketPrice);
-      const asOf = Number(body?.asOf) || Date.now();
+      const asOf = Number(body?.asOf) || Number(live?.quoteAsOf) || Date.now();
+      const delayed = body?.delayed != null ? !!body.delayed : !!(live as any)?.quoteDelayed;
       if (Number.isFinite(prevPx) && Math.abs(prevPx - px) < 0.005) {
-        if ((prev as any).quoteAsOf === asOf) return prev;
-        return { ...prev, quoteAsOf: asOf };
+        if ((prev as any).quoteAsOf === asOf && (prev as any).quoteDelayed === delayed) return prev;
+        return { ...prev, quoteAsOf: asOf, quoteDelayed: delayed };
+      }
+      // Reject wild jumps from a clearly bad feed when we already have a good quote
+      if (Number.isFinite(prevPx) && prevPx > 0 && Math.abs(prevPx - px) / prevPx > 0.25) {
+        return prev;
       }
       return {
         ...prev,
         quote: { ...(prev.quote || {}), ...live },
         quoteAsOf: asOf,
+        quoteDelayed: delayed,
       };
     });
     checkAlertsForTicker(activeTicker, px);
@@ -6674,9 +6734,12 @@ export default function App() {
   };
 
   const refreshLiveQuoteOnce = async (activeTicker: string, reason: string, userAction: string) => {
-    const res = await loggedFetch(apiUrl(`/api/quote?ticker=${encodeURIComponent(activeTicker)}`), {
-      __qnMeta: { reason, userAction },
-    } as any);
+    const res = await loggedFetch(
+      apiUrl(`/api/quote?ticker=${encodeURIComponent(activeTicker)}&bypassCache=true`),
+      {
+        __qnMeta: { reason, userAction },
+      } as any
+    );
     if (!res.ok) throw new Error(`Quote HTTP ${res.status}`);
     const body = await res.json();
     applyLiveQuote(activeTicker, body);
@@ -6970,13 +7033,28 @@ export default function App() {
   const technicalLevels = computeTechnicalLevels(visibleBaseHistory);
   const activeLevels: any = (srSource === 'AI' && levels) ? levels : technicalLevels;
 
+  /** Single live price for AI score card + Trade Management Zones (must stay in sync). */
+  const liveAnalysisPrice = React.useMemo(() => {
+    const candidates = [
+      Number(data?.quote?.regularMarketPrice),
+      Number(data?.quote?.price),
+      Number(projectionMeta.lastClose),
+      Number(cockpitData?.entryPrice),
+    ];
+    for (const n of candidates) {
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+    return 0;
+  }, [
+    data?.quote?.regularMarketPrice,
+    data?.quote?.price,
+    projectionMeta.lastClose,
+    cockpitData?.entryPrice,
+  ]);
+
   /** Investment Horizon is the single source of truth — QuantumNode Master Engine. */
   const horizonView = React.useMemo(() => {
-    const lastClose =
-      Number(data?.quote?.regularMarketPrice) ||
-      projectionMeta.lastClose ||
-      Number(cockpitData?.entryPrice) ||
-      0;
+    const lastClose = liveAnalysisPrice;
     const whaleScore =
       whaleAccumulation?.metrics?.whaleAccumulationIndex ??
       (aiStockScore?.components?.whaleAccumulation
@@ -7072,7 +7150,7 @@ export default function App() {
     });
   }, [
     analysisHorizon,
-    data?.quote?.regularMarketPrice,
+    liveAnalysisPrice,
     data?.ticker,
     projectionMeta,
     cockpitData,
@@ -7436,7 +7514,10 @@ export default function App() {
             onClick={() => {
               setActivePage('DASHBOARD');
               setShowFindATrade((v) => !v);
-              if (!showFindATrade) setShowSuggestATrade(false);
+              if (!showFindATrade) {
+                setShowSuggestATrade(false);
+                setShowDayTrade(false);
+              }
             }}
             className={cn(
               'shrink-0 inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
@@ -7447,15 +7528,18 @@ export default function App() {
             title="Paste a ticker list and let Consensus AI find a BUY"
           >
             <Rocket className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Find a Trade</span>
+            <span className="hidden sm:inline">Find Trades</span>
             <span className="sm:hidden">Find</span>
           </button>
           <button
             type="button"
             onClick={() => {
               setActivePage('DASHBOARD');
-              setShowSuggestATrade((v) => !v);
-              if (!showSuggestATrade) setShowFindATrade(false);
+              setShowFindATrade(false);
+              setShowDayTrade(false);
+              setShowSuggestATrade(true);
+              // Every header press is a new Suggest search
+              setSuggestRunToken((n) => n + 1);
             }}
             className={cn(
               'shrink-0 inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
@@ -7463,11 +7547,32 @@ export default function App() {
                 ? 'bg-sky-500 text-black border-sky-400 shadow-[0_0_16px_rgba(56,189,248,0.35)]'
                 : 'bg-sky-500/15 text-sky-300 border-sky-500/40 hover:bg-sky-500/25'
             )}
-            title="Suggest a BUY from popular US / HK / Japan / Europe markets"
+            title="New Suggest Trades search from popular US / HK / Japan / Europe markets"
           >
             <Sparkles className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Suggest a Trade</span>
+            <span className="hidden sm:inline">Suggest Trades</span>
             <span className="sm:hidden">Suggest</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActivePage('DASHBOARD');
+              setShowFindATrade(false);
+              setShowSuggestATrade(false);
+              setShowDayTrade(true);
+              setDayTradeRunToken((n) => n + 1);
+            }}
+            className={cn(
+              'shrink-0 inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
+              showDayTrade
+                ? 'bg-orange-500 text-black border-orange-400 shadow-[0_0_16px_rgba(249,115,22,0.35)]'
+                : 'bg-orange-500/15 text-orange-300 border-orange-500/40 hover:bg-orange-500/25'
+            )}
+            title="Scout popular stocks that clear day-trade liquidity / range / bias gates"
+          >
+            <Flame className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Day Trade</span>
+            <span className="sm:hidden">Day</span>
           </button>
         </div>
 
@@ -7638,9 +7743,28 @@ export default function App() {
             >
               <SuggestATradePanel
                 horizon={analysisHorizon}
+                runToken={suggestRunToken}
                 onOpenTicker={(sym) => {
                   if (!assertAnalysisCredits()) return;
                   setShowSuggestATrade(false);
+                  runTickerSearch(sym);
+                }}
+              />
+            </motion.div>
+          )}
+          {showDayTrade && (
+            <motion.div
+              key="day-trade-dock"
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              className="mb-6"
+            >
+              <DayTradePanel
+                runToken={dayTradeRunToken}
+                onOpenTicker={(sym) => {
+                  if (!assertAnalysisCredits()) return;
+                  setShowDayTrade(false);
                   runTickerSearch(sym);
                 }}
               />
@@ -8696,12 +8820,11 @@ export default function App() {
                     ticker={data.ticker}
                     stockName={data.quote?.shortName || data.quote?.longName || ''}
                     currentPrice={
-                      Number(
-                        data.quote?.regularMarketPrice ??
-                          data.quote?.price ??
-                          projectionMeta.lastClose ??
-                          0
-                      ) || null
+                      horizonView.currentPrice > 0
+                        ? horizonView.currentPrice
+                        : liveAnalysisPrice > 0
+                          ? liveAnalysisPrice
+                          : null
                     }
                     score={horizonView.score}
                     ratingLabel={horizonView.ratingLabel}
@@ -8715,7 +8838,40 @@ export default function App() {
                     isLoading={predicting || (loading && !aiStockScore && !prediction)}
                     currentAction={horizonView.currentAction.action}
                     currentActionReason={horizonView.currentAction.reason}
+                    doNowByPosition={{
+                      holding: horizonView.doNowByPosition.holding.action,
+                      noPosition: horizonView.doNowByPosition.noPosition.action,
+                    }}
                     userHasPosition={userHasPosition}
+                  />
+                  <TradeZonesPanel
+                    lastClose={
+                      horizonView.currentPrice > 0 ? horizonView.currentPrice : liveAnalysisPrice
+                    }
+                    levels={activeLevels}
+                    bullCase={horizonView.bullCase}
+                    bearCase={horizonView.bearCase}
+                    stopLoss={horizonView.stopLoss}
+                    currency={data.quote?.currency}
+                    quoteAsOf={(data as any)?.quoteAsOf ?? null}
+                    quoteDelayed={!!(data as any)?.quoteDelayed}
+                    zoneScale={horizonView.zoneScale}
+                    horizon={analysisHorizon}
+                    horizonLabel={horizonView.horizonLabel}
+                    userHasPosition={userHasPosition}
+                    onUserHasPositionChange={handleUserHasPositionChange}
+                    currentAction={horizonView.currentAction}
+                    visibleZoneKeys={horizonView.visibleZoneKeys}
+                    technical={technicalBreakdown}
+                    engineZones={{
+                      buyZone: horizonView.buyZone,
+                      addZone: horizonView.addZone,
+                      holdZone: horizonView.holdZone,
+                      takeProfitZone: horizonView.takeProfitZone,
+                      reduceZone: horizonView.reduceZone,
+                      exitZone: horizonView.exitZone,
+                      stopLoss: horizonView.stopLoss,
+                    }}
                   />
                   <AiInsightsStrip
                     keyRisks={keyRisks}
@@ -8759,47 +8915,16 @@ export default function App() {
                     }
                   />
                   <DecisionBriefPanel decision={horizonView} />
-                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                    <TradeZonesPanel
-                      lastClose={
-                        Number(data.quote?.regularMarketPrice) ||
-                        projectionMeta.lastClose ||
-                        0
-                      }
-                      levels={activeLevels}
-                      bullCase={horizonView.bullCase}
-                      bearCase={horizonView.bearCase}
-                      stopLoss={horizonView.stopLoss}
-                      currency={data.quote?.currency}
-                      quoteAsOf={(data as any)?.quoteAsOf ?? null}
-                      zoneScale={horizonView.zoneScale}
-                      horizon={analysisHorizon}
-                      horizonLabel={horizonView.horizonLabel}
-                      userHasPosition={userHasPosition}
-                      onUserHasPositionChange={handleUserHasPositionChange}
-                      currentAction={horizonView.currentAction}
-                      visibleZoneKeys={horizonView.visibleZoneKeys}
-                      engineZones={{
-                        buyZone: horizonView.buyZone,
-                        addZone: horizonView.addZone,
-                        holdZone: horizonView.holdZone,
-                        takeProfitZone: horizonView.takeProfitZone,
-                        reduceZone: horizonView.reduceZone,
-                        exitZone: horizonView.exitZone,
-                        stopLoss: horizonView.stopLoss,
-                      }}
-                    />
-                    <RiskMeterPanel
-                      riskScore={horizonView.riskScore}
-                      riskLabel={horizonView.riskLabel}
-                      volatility={horizonView.volatility}
-                      liquidityLabel={horizonView.liquidityLabel}
-                      drawdown={horizonView.drawdown}
-                      sharpe={horizonView.sharpe}
-                      horizon={analysisHorizon}
-                      horizonLabel={horizonView.horizonLabel}
-                    />
-                  </div>
+                  <RiskMeterPanel
+                    riskScore={horizonView.riskScore}
+                    riskLabel={horizonView.riskLabel}
+                    volatility={horizonView.volatility}
+                    liquidityLabel={horizonView.liquidityLabel}
+                    drawdown={horizonView.drawdown}
+                    sharpe={horizonView.sharpe}
+                    horizon={analysisHorizon}
+                    horizonLabel={horizonView.horizonLabel}
+                  />
                   <MetricRadialRow
                     metrics={[
                       {
@@ -12963,8 +13088,9 @@ export default function App() {
                 <h2 className="text-xl font-sans font-bold text-white mb-2">Search a ticker to begin</h2>
                 <p className="text-sm text-gray-500 max-w-md mx-auto">
                   Press <span className="text-emerald-400 font-mono">Enter</span> in the search bar, or open{' '}
-                  <span className="text-emerald-400 font-semibold">Find a Trade</span> /{' '}
-                  <span className="text-sky-400 font-semibold">Suggest a Trade</span>.
+                  <span className="text-emerald-400 font-semibold">Find Trades</span> /{' '}
+                  <span className="text-sky-400 font-semibold">Suggest Trades</span> /{' '}
+                  <span className="text-orange-400 font-semibold">Day Trade</span>.
                 </p>
               </div>
               <div className="w-full max-w-xl space-y-3">
@@ -12974,16 +13100,17 @@ export default function App() {
                     onClick={() => {
                       setShowFindATrade(true);
                       setShowSuggestATrade(false);
+                      setShowDayTrade(false);
                     }}
                     className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-emerald-500 text-black py-2.5 text-[12px] font-bold uppercase tracking-wider hover:bg-emerald-400 transition-colors cursor-pointer"
                   >
                     <Rocket className="w-4 h-4" />
-                    Open Find a Trade
+                    Open Find Trades
                   </button>
                 )}
                 {showFindATrade && (
                   <p className="text-[11px] text-emerald-300/80 font-mono text-center">
-                    Find a Trade panel is open above — paste tickers and scan.
+                    Find Trades panel is open above — paste tickers and scan.
                   </p>
                 )}
                 {!showSuggestATrade && (
@@ -12992,16 +13119,38 @@ export default function App() {
                     onClick={() => {
                       setShowSuggestATrade(true);
                       setShowFindATrade(false);
+                      setShowDayTrade(false);
+                      setSuggestRunToken((n) => n + 1);
                     }}
                     className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-sky-500 text-black py-2.5 text-[12px] font-bold uppercase tracking-wider hover:bg-sky-400 transition-colors cursor-pointer"
                   >
                     <Sparkles className="w-4 h-4" />
-                    Open Suggest a Trade
+                    Open Suggest Trades
                   </button>
                 )}
                 {showSuggestATrade && (
                   <p className="text-[11px] text-sky-300/80 font-mono text-center">
-                    Suggest a Trade panel is open above — pick a market and scan.
+                    Suggest Trades is searching above — press Suggest again for a new search.
+                  </p>
+                )}
+                {!showDayTrade && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowDayTrade(true);
+                      setShowFindATrade(false);
+                      setShowSuggestATrade(false);
+                      setDayTradeRunToken((n) => n + 1);
+                    }}
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-orange-500 text-black py-2.5 text-[12px] font-bold uppercase tracking-wider hover:bg-orange-400 transition-colors cursor-pointer"
+                  >
+                    <Flame className="w-4 h-4" />
+                    Open Day Trade
+                  </button>
+                )}
+                {showDayTrade && (
+                  <p className="text-[11px] text-orange-300/80 font-mono text-center">
+                    Day Trade scout is running above — press Day Trade again for a new search.
                   </p>
                 )}
               </div>

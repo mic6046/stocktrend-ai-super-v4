@@ -30,6 +30,11 @@ export type HeroCockpit = {
   confidence?: number;
 } | null;
 
+type DualDoNow = {
+  holding: string;
+  noPosition: string;
+};
+
 type AnalysisHeroCardProps = {
   ticker: string;
   stockName?: string;
@@ -46,9 +51,11 @@ type AnalysisHeroCardProps = {
   onHorizonChange: (h: HorizonKey) => void;
   horizonExplanation?: string;
   isLoading?: boolean;
-  /** Live do-now action (position + price) — distinct from horizon recommendation */
+  /** Live do-now for the user's selected ownership state */
   currentAction?: string | null;
   currentActionReason?: string | null;
+  /** Always show both paths (Holding vs No Position) */
+  doNowByPosition?: DualDoNow | null;
   userHasPosition?: boolean;
   /** @deprecated kept for compatibility — unused when target/return passed */
   projection?: HeroProjection;
@@ -136,16 +143,25 @@ export function AnalysisHeroCard({
   isLoading,
   currentAction,
   currentActionReason,
+  doNowByPosition,
   userHasPosition = false,
 }: AnalysisHeroCardProps) {
   const theme = useMemo(() => getRecommendationTheme(score), [score]);
-  const label = ratingLabel || theme.label;
-  const tone = ACTION_COLORS[actionToneFromLabel(label)];
+  const outlookLabel = ratingLabel || theme.label;
+  const primaryAction =
+    currentAction ||
+    (userHasPosition ? doNowByPosition?.holding : doNowByPosition?.noPosition) ||
+    outlookLabel;
+  const actionTone = ACTION_COLORS[actionToneFromLabel(primaryAction)];
+  const outlookTone = ACTION_COLORS[actionToneFromLabel(outlookLabel)];
   const conf = confidence != null && Number.isFinite(confidence) ? confidence : 70;
   const displayName = stockName?.trim() || '';
   const priceValue =
     currentPrice != null && Number.isFinite(currentPrice) && currentPrice > 0 ? currentPrice : null;
   const priceLabel = priceValue != null ? formatMoney(priceValue, currency) : '';
+  const horizonLabel = HORIZON_OPTIONS.find((o) => o.key === horizon)?.label || horizon;
+  const holdingAction = doNowByPosition?.holding || (userHasPosition ? primaryAction : 'HOLD');
+  const flatAction = doNowByPosition?.noPosition || (!userHasPosition ? primaryAction : 'WAIT');
 
   if (isLoading) {
     return (
@@ -165,7 +181,7 @@ export function AnalysisHeroCard({
 
   return (
     <GlassCard
-      className={cn('relative overflow-hidden', tone.border, tone.glow)}
+      className={cn('relative overflow-hidden', actionTone.border, actionTone.glow)}
       glow
       padding="lg"
     >
@@ -218,43 +234,90 @@ export function AnalysisHeroCard({
           </motion.div>
         </div>
 
-        {/* Recommendation + gauge */}
+        {/* Do Now primary + demoted horizon trend */}
         <div className="flex flex-col sm:flex-row items-center sm:items-start gap-5 flex-1 min-w-0">
-          <ConfidenceRadial value={conf} accent={tone.hex} resetKey={horizon} />
+          <ConfidenceRadial value={conf} accent={actionTone.hex} resetKey={horizon} />
 
           <div className="flex-1 min-w-0 w-full">
-            <p className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">
-              Recommendation · {HORIZON_OPTIONS.find((o) => o.key === horizon)?.label}
+            <p className="text-[10px] uppercase tracking-wider text-cyan-300/80 mb-1">
+              Do now · {userHasPosition ? 'Holding' : 'No position'}
             </p>
             <AnimatePresence mode="wait">
               <motion.p
-                key={`${horizon}-${label}`}
+                key={`${horizon}-${primaryAction}-${userHasPosition ? 'own' : 'flat'}`}
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -4 }}
                 transition={{ duration: 0.35 }}
                 className={cn(
                   'font-display font-black text-3xl sm:text-4xl tracking-tight leading-none uppercase',
-                  tone.text
+                  actionTone.text
                 )}
               >
-                {tone.emoji} {label}
+                {primaryAction}
               </motion.p>
             </AnimatePresence>
 
-            {currentAction && (
-              <div className="mt-3 rounded-xl border border-cyan-500/25 bg-cyan-500/5 px-3 py-2">
-                <p className="text-[9px] uppercase tracking-wider text-cyan-300/80">
-                  Do now · Current Action · {userHasPosition ? 'Position held' : 'No position'}
-                </p>
-                <p className="mt-0.5 text-[15px] font-bold text-white tracking-wide">{currentAction}</p>
-                {currentActionReason && (
-                  <p className="mt-1 text-[10px] text-gray-400 leading-snug">{currentActionReason}</p>
-                )}
-              </div>
+            {currentActionReason && (
+              <p className="mt-2 text-[11px] text-gray-400 leading-snug">{currentActionReason}</p>
             )}
 
-            <div className="mt-5 grid grid-cols-2 gap-3">
+            <div className="mt-3 rounded-xl border border-white/10 bg-black/35 px-3 py-2.5">
+              <p className="text-[9px] uppercase tracking-wider text-gray-500 mb-1.5">
+                By ownership · live price
+              </p>
+              <div className="flex flex-wrap items-stretch gap-2">
+                <div
+                  className={cn(
+                    'rounded-lg border px-2.5 py-1.5 min-w-[7.5rem] flex-1',
+                    userHasPosition
+                      ? 'border-cyan-400/40 bg-cyan-500/10'
+                      : 'border-white/8 bg-white/[0.02]'
+                  )}
+                >
+                  <p className="text-[8px] uppercase tracking-wider text-gray-500">Holding</p>
+                  <p
+                    className={cn(
+                      'mt-0.5 text-sm font-bold uppercase',
+                      ACTION_COLORS[actionToneFromLabel(holdingAction)].text
+                    )}
+                  >
+                    {holdingAction}
+                  </p>
+                </div>
+                <div
+                  className={cn(
+                    'rounded-lg border px-2.5 py-1.5 min-w-[7.5rem] flex-1',
+                    !userHasPosition
+                      ? 'border-cyan-400/40 bg-cyan-500/10'
+                      : 'border-white/8 bg-white/[0.02]'
+                  )}
+                >
+                  <p className="text-[8px] uppercase tracking-wider text-gray-500">No position</p>
+                  <p
+                    className={cn(
+                      'mt-0.5 text-sm font-bold uppercase',
+                      ACTION_COLORS[actionToneFromLabel(flatAction)].text
+                    )}
+                  >
+                    {flatAction}
+                  </p>
+                </div>
+              </div>
+              <p className="mt-2 text-[9px] text-gray-500 leading-snug">
+                Toggle “I own this stock” in Trade Zones to switch your Do now path.
+              </p>
+            </div>
+
+            <p className="mt-3 text-[11px] text-gray-400">
+              <span className="text-[9px] uppercase tracking-wider text-gray-500 mr-1.5">
+                {horizonLabel} Trend
+              </span>
+              <span className={cn('font-semibold uppercase', outlookTone.text)}>{outlookLabel}</span>
+              <span className="text-gray-600"> · thesis for the selected horizon, not the live entry cue</span>
+            </p>
+
+            <div className="mt-4 grid grid-cols-2 gap-3">
               <div className="rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 min-w-0">
                 <p className="text-[9px] uppercase tracking-wider text-gray-500">Target Price</p>
                 <AnimatePresence mode="wait">
@@ -315,9 +378,9 @@ export function AnalysisHeroCard({
                     active
                       ? {
                           boxShadow: [
-                            `0 0 0 0 ${tone.hex}00`,
-                            `0 0 22px 2px ${tone.hex}55`,
-                            `0 0 16px 1px ${tone.hex}40`,
+                            `0 0 0 0 ${actionTone.hex}00`,
+                            `0 0 22px 2px ${actionTone.hex}55`,
+                            `0 0 16px 1px ${actionTone.hex}40`,
                           ],
                         }
                       : { boxShadow: '0 0 0 0 rgba(0,0,0,0)' }
@@ -326,7 +389,7 @@ export function AnalysisHeroCard({
                   className={cn(
                     'rounded-lg border px-3 py-2.5 text-[11px] font-semibold transition-colors cursor-pointer',
                     active
-                      ? cn(tone.bg, tone.border, tone.text, 'ring-1 ring-white/10')
+                      ? cn(actionTone.bg, actionTone.border, actionTone.text, 'ring-1 ring-white/10')
                       : 'border-white/8 bg-white/[0.02] text-gray-400 hover:text-gray-200 hover:border-white/15'
                   )}
                 >
