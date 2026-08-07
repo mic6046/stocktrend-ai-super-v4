@@ -17,6 +17,7 @@ import {
   RecommendationChangeLogPanel,
   FindATradePanel,
   SuggestATradePanel,
+  DayTradePanel,
   MarketDataRefreshBar,
   type HorizonKey,
 } from './components/analysis';
@@ -1220,8 +1221,11 @@ export default function App() {
   const [userHasPosition, setUserHasPosition] = useState(false);
   const [showFindATrade, setShowFindATrade] = useState(false);
   const [showSuggestATrade, setShowSuggestATrade] = useState(false);
+  const [showDayTrade, setShowDayTrade] = useState(false);
   /** Bumped on every Suggest header/empty-state press → panel starts a new search. */
   const [suggestRunToken, setSuggestRunToken] = useState(0);
+  /** Bumped on every Day Trade header press → panel starts a new scout. */
+  const [dayTradeRunToken, setDayTradeRunToken] = useState(0);
   const [refreshMode, setRefreshMode] = useState<RefreshMode>(() => loadRefreshMode());
   const [autoRefreshIntervalSec, setAutoRefreshIntervalSec] = useState<AutoRefreshIntervalSec>(
     () => loadAutoRefreshIntervalSec()
@@ -7510,7 +7514,10 @@ export default function App() {
             onClick={() => {
               setActivePage('DASHBOARD');
               setShowFindATrade((v) => !v);
-              if (!showFindATrade) setShowSuggestATrade(false);
+              if (!showFindATrade) {
+                setShowSuggestATrade(false);
+                setShowDayTrade(false);
+              }
             }}
             className={cn(
               'shrink-0 inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
@@ -7529,6 +7536,7 @@ export default function App() {
             onClick={() => {
               setActivePage('DASHBOARD');
               setShowFindATrade(false);
+              setShowDayTrade(false);
               setShowSuggestATrade(true);
               // Every header press is a new Suggest search
               setSuggestRunToken((n) => n + 1);
@@ -7544,6 +7552,27 @@ export default function App() {
             <Sparkles className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Suggest Trades</span>
             <span className="sm:hidden">Suggest</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActivePage('DASHBOARD');
+              setShowFindATrade(false);
+              setShowSuggestATrade(false);
+              setShowDayTrade(true);
+              setDayTradeRunToken((n) => n + 1);
+            }}
+            className={cn(
+              'shrink-0 inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
+              showDayTrade
+                ? 'bg-orange-500 text-black border-orange-400 shadow-[0_0_16px_rgba(249,115,22,0.35)]'
+                : 'bg-orange-500/15 text-orange-300 border-orange-500/40 hover:bg-orange-500/25'
+            )}
+            title="Scout popular stocks that clear day-trade liquidity / range / bias gates"
+          >
+            <Flame className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Day Trade</span>
+            <span className="sm:hidden">Day</span>
           </button>
         </div>
 
@@ -7718,6 +7747,24 @@ export default function App() {
                 onOpenTicker={(sym) => {
                   if (!assertAnalysisCredits()) return;
                   setShowSuggestATrade(false);
+                  runTickerSearch(sym);
+                }}
+              />
+            </motion.div>
+          )}
+          {showDayTrade && (
+            <motion.div
+              key="day-trade-dock"
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              className="mb-6"
+            >
+              <DayTradePanel
+                runToken={dayTradeRunToken}
+                onOpenTicker={(sym) => {
+                  if (!assertAnalysisCredits()) return;
+                  setShowDayTrade(false);
                   runTickerSearch(sym);
                 }}
               />
@@ -13042,7 +13089,8 @@ export default function App() {
                 <p className="text-sm text-gray-500 max-w-md mx-auto">
                   Press <span className="text-emerald-400 font-mono">Enter</span> in the search bar, or open{' '}
                   <span className="text-emerald-400 font-semibold">Find Trades</span> /{' '}
-                  <span className="text-sky-400 font-semibold">Suggest Trades</span>.
+                  <span className="text-sky-400 font-semibold">Suggest Trades</span> /{' '}
+                  <span className="text-orange-400 font-semibold">Day Trade</span>.
                 </p>
               </div>
               <div className="w-full max-w-xl space-y-3">
@@ -13052,6 +13100,7 @@ export default function App() {
                     onClick={() => {
                       setShowFindATrade(true);
                       setShowSuggestATrade(false);
+                      setShowDayTrade(false);
                     }}
                     className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-emerald-500 text-black py-2.5 text-[12px] font-bold uppercase tracking-wider hover:bg-emerald-400 transition-colors cursor-pointer"
                   >
@@ -13070,6 +13119,7 @@ export default function App() {
                     onClick={() => {
                       setShowSuggestATrade(true);
                       setShowFindATrade(false);
+                      setShowDayTrade(false);
                       setSuggestRunToken((n) => n + 1);
                     }}
                     className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-sky-500 text-black py-2.5 text-[12px] font-bold uppercase tracking-wider hover:bg-sky-400 transition-colors cursor-pointer"
@@ -13081,6 +13131,26 @@ export default function App() {
                 {showSuggestATrade && (
                   <p className="text-[11px] text-sky-300/80 font-mono text-center">
                     Suggest Trades is searching above — press Suggest again for a new search.
+                  </p>
+                )}
+                {!showDayTrade && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowDayTrade(true);
+                      setShowFindATrade(false);
+                      setShowSuggestATrade(false);
+                      setDayTradeRunToken((n) => n + 1);
+                    }}
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-orange-500 text-black py-2.5 text-[12px] font-bold uppercase tracking-wider hover:bg-orange-400 transition-colors cursor-pointer"
+                  >
+                    <Flame className="w-4 h-4" />
+                    Open Day Trade
+                  </button>
+                )}
+                {showDayTrade && (
+                  <p className="text-[11px] text-orange-300/80 font-mono text-center">
+                    Day Trade scout is running above — press Day Trade again for a new search.
                   </p>
                 )}
               </div>
