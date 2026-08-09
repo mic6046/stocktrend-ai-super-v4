@@ -7,7 +7,11 @@
     {
       "site": "stocktrend-ai-super",
       "public": "dist",
-      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ],
       "rewrites": [
         {
           "source": "/api/**",
@@ -46,6 +50,59 @@
             {
               "key": "Cache-Control",
               "value": "max-age=31536000"
+            }
+          ]
+        },
+        {
+          "source": "/manifest.webmanifest",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "no-cache, no-store, must-revalidate"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/manifest+json"
+            }
+          ]
+        },
+        {
+          "source": "/sw.js",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "no-cache, no-store, must-revalidate"
+            },
+            {
+              "key": "Service-Worker-Allowed",
+              "value": "/"
+            }
+          ]
+        },
+        {
+          "source": "/workbox-*.js",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "no-cache, no-store, must-revalidate"
+            }
+          ]
+        },
+        {
+          "source": "/registerSW.js",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "no-cache, no-store, must-revalidate"
+            }
+          ]
+        },
+        {
+          "source": "/icons/**",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "public, max-age=604800"
             }
           ]
         }
@@ -54,7 +111,11 @@
     {
       "site": "quantumstocktrend",
       "public": "dist",
-      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ],
       "rewrites": [
         {
           "source": "/api/**",
@@ -93,6 +154,59 @@
             {
               "key": "Cache-Control",
               "value": "max-age=31536000"
+            }
+          ]
+        },
+        {
+          "source": "/manifest.webmanifest",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "no-cache, no-store, must-revalidate"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/manifest+json"
+            }
+          ]
+        },
+        {
+          "source": "/sw.js",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "no-cache, no-store, must-revalidate"
+            },
+            {
+              "key": "Service-Worker-Allowed",
+              "value": "/"
+            }
+          ]
+        },
+        {
+          "source": "/workbox-*.js",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "no-cache, no-store, must-revalidate"
+            }
+          ]
+        },
+        {
+          "source": "/registerSW.js",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "no-cache, no-store, must-revalidate"
+            }
+          ]
+        },
+        {
+          "source": "/icons/**",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "public, max-age=604800"
             }
           ]
         }
@@ -101,7 +215,11 @@
     {
       "site": "aistocktrend",
       "public": "dist",
-      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ],
       "rewrites": [
         {
           "source": "/api/**",
@@ -140,6 +258,59 @@
             {
               "key": "Cache-Control",
               "value": "max-age=31536000"
+            }
+          ]
+        },
+        {
+          "source": "/manifest.webmanifest",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "no-cache, no-store, must-revalidate"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/manifest+json"
+            }
+          ]
+        },
+        {
+          "source": "/sw.js",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "no-cache, no-store, must-revalidate"
+            },
+            {
+              "key": "Service-Worker-Allowed",
+              "value": "/"
+            }
+          ]
+        },
+        {
+          "source": "/workbox-*.js",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "no-cache, no-store, must-revalidate"
+            }
+          ]
+        },
+        {
+          "source": "/registerSW.js",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "no-cache, no-store, must-revalidate"
+            }
+          ]
+        },
+        {
+          "source": "/icons/**",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "public, max-age=604800"
             }
           ]
         }

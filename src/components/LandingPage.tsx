@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Activity } from 'lucide-react';
 import { AuthModal } from './AuthModal';
+import { InstallAppBanner } from './InstallAppBanner';
 import { LegalLinks } from './LegalDocs';
 import { openLegalDoc } from '../lib/legal';
 
@@ -67,7 +68,9 @@ export function LandingPage() {
           >
             Sign in with Google
           </button>
-          <p className="mt-6 text-xs text-gray-600 font-sans">Login to access</p>
+          <p className="mt-6 text-xs text-gray-600 font-sans">
+            Installable on PC, Android, and iPhone — look for Install / Add to Home Screen.
+          </p>
         </div>
       </main>
 
@@ -76,6 +79,7 @@ export function LandingPage() {
         <LegalLinks />
       </footer>
 
+      <InstallAppBanner />
       <AuthModal open={showAuthModal} onClose={() => setShowAuthModal(false)} />
     </div>
   );

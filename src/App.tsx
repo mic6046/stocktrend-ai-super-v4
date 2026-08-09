@@ -29,6 +29,7 @@ import { buildHorizonView } from './lib/horizonView';
 import { TruncatedText } from './components/TruncatedText';
 import { AuthModal } from './components/AuthModal';
 import { MobileDockSheet } from './components/MobileDockSheet';
+import { InstallAppBanner } from './components/InstallAppBanner';
 import { UsageQuotaBar, QuotaExhaustedBanner } from './components/UsageQuotaBar';
 import { LegalLinks } from './components/LegalDocs';
 import { useAuth } from './lib/auth';
@@ -13243,6 +13244,8 @@ export default function App() {
           <LegalLinks className="justify-center md:justify-end" />
         </div>
       </footer>
+
+      <InstallAppBanner />
 
       {/* Mobile bottom navigation */}
       <nav
