@@ -50,12 +50,15 @@ function mapIntervalToTwelveData(intervalStr: string): string {
   return '1day';
 }
 
-// Convert symbol for Twelve Data
+// Convert symbol for Twelve Data (HKEX keeps leading zeros; use HKEX exchange code)
 function formatSymbolForTwelveData(ticker: string): string {
   const t = ticker.toUpperCase().trim();
   if (t.endsWith('.HK')) {
-    const rawNum = t.slice(0, -3);
-    return `${parseInt(rawNum)}:XHKG`; 
+    const rawNum = t.slice(0, -3).replace(/\D/g, '');
+    if (!rawNum) return t;
+    // Twelve Data expects e.g. 0700:HKEX / 2318:HKEX (zero-padded to 4)
+    const padded = rawNum.padStart(4, '0');
+    return `${padded}:HKEX`;
   }
   return t;
 }
@@ -212,52 +215,176 @@ function mapTwelveDataToYahooQuote(ticker: string, tdQuote: any) {
   const change = parseFloat(tdQuote.change || '0');
   const changePercent = parseFloat(tdQuote.percent_change || '0');
   const prevClose = parseFloat(tdQuote.previous_close || (price - change).toString());
+  const dayLow = parseFloat(tdQuote.low || tdQuote.day_low || '');
+  const dayHigh = parseFloat(tdQuote.high || tdQuote.day_high || '');
+  const isHk = String(ticker).toUpperCase().endsWith('.HK');
+  // Twelve returns unix seconds in `timestamp` and/or an ISO-ish `datetime`
+  let regularMarketTime: string | number | undefined;
+  const ts = Number(tdQuote.timestamp);
+  if (Number.isFinite(ts) && ts > 0) {
+    regularMarketTime = new Date(ts > 1e12 ? ts : ts * 1000).toISOString();
+  } else if (tdQuote.datetime) {
+    const parsed = Date.parse(String(tdQuote.datetime));
+    if (Number.isFinite(parsed)) regularMarketTime = new Date(parsed).toISOString();
+  }
   return {
     symbol: ticker,
+    providerSymbol: tdQuote.symbol || undefined,
     regularMarketPrice: price,
     regularMarketChange: change,
     regularMarketChangePercent: changePercent,
     regularMarketPreviousClose: prevClose,
     regularMarketOpen: parseFloat(tdQuote.open || price.toString()),
-    regularMarketDayLow: tdQuote.fifty_two_week?.low
-      ? parseFloat(tdQuote.fifty_two_week.low)
-      : parseFloat(tdQuote.low || price.toString()) * 0.98,
-    regularMarketDayHigh: tdQuote.fifty_two_week?.high
-      ? parseFloat(tdQuote.fifty_two_week.high)
-      : parseFloat(tdQuote.high || price.toString()) * 1.02,
+    // Day range must come from today's high/low — never 52-week extremes
+    regularMarketDayLow: Number.isFinite(dayLow) ? dayLow : price * 0.98,
+    regularMarketDayHigh: Number.isFinite(dayHigh) ? dayHigh : price * 1.02,
     regularMarketVolume: parseInt(tdQuote.volume || '0', 10),
     shortName: tdQuote.name || ticker,
     longName: tdQuote.name || ticker,
-    currency: tdQuote.currency || 'USD',
+    currency: tdQuote.currency || (isHk ? 'HKD' : 'USD'),
     fiftyTwoWeekLow: tdQuote.fifty_two_week?.low ? parseFloat(tdQuote.fifty_two_week.low) : undefined,
     fiftyTwoWeekHigh: tdQuote.fifty_two_week?.high ? parseFloat(tdQuote.fifty_two_week.high) : undefined,
     marketState: 'REGULAR',
-    exchange: tdQuote.exchange || 'NMS',
+    exchange: tdQuote.exchange || (isHk ? 'HKG' : 'NMS'),
+    regularMarketTime,
+    quoteSourceName: 'Twelve Data',
   };
 }
 
+function quoteTimeMs(q: any): number | null {
+  if (!q) return null;
+  const t = q.regularMarketTime ?? q.timestamp;
+  if (t == null) return null;
+  if (typeof t === 'number' && Number.isFinite(t)) return t > 1e12 ? t : t * 1000;
+  const parsed = Date.parse(String(t));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isValidLivePrice(px: unknown): px is number {
+  const n = Number(px);
+  return Number.isFinite(n) && n > 0;
+}
+
+/**
+ * Prefer the fresher valid quote when providers disagree.
+ * Yahoo HKEX is typically ~15m delayed — do not let it overwrite fresher Twelve.
+ */
+function pickPreferredQuote(opts: {
+  ticker: string;
+  twelve: any | null;
+  yahoo: any | null;
+}): { quote: any; source: 'twelve' | 'yahoo' } {
+  const { ticker, twelve, yahoo } = opts;
+  const tOk = twelve && isValidLivePrice(twelve.regularMarketPrice);
+  const yOk = yahoo && isValidLivePrice(yahoo.regularMarketPrice);
+  if (tOk && !yOk) return { quote: twelve, source: 'twelve' };
+  if (yOk && !tOk) return { quote: yahoo, source: 'yahoo' };
+  if (!tOk && !yOk) throw new Error(`No valid live quote for ${ticker}`);
+
+  const tPx = Number(twelve.regularMarketPrice);
+  const yPx = Number(yahoo.regularMarketPrice);
+  const diverge = Math.abs(tPx - yPx) / Math.max(yPx, tPx, 1e-9);
+  const tMs = quoteTimeMs(twelve);
+  const yMs = quoteTimeMs(yahoo);
+  const isHk = String(ticker).toUpperCase().endsWith('.HK');
+
+  if (diverge <= 0.015) {
+    // Close enough — prefer Twelve when present (lower latency), else Yahoo
+    return { quote: twelve, source: 'twelve' };
+  }
+
+  // Large disagreement: use freshness, not a blind Yahoo preference
+  if (tMs != null && yMs != null) {
+    const skew = tMs - yMs;
+    if (skew >= 30_000) return { quote: twelve, source: 'twelve' };
+    if (skew <= -30_000) return { quote: yahoo, source: 'yahoo' };
+  }
+
+  // HK: Yahoo is delayed by design — keep Twelve unless Yahoo is clearly newer
+  if (isHk) {
+    if (yMs != null && tMs != null && yMs > tMs + 60_000) {
+      return { quote: yahoo, source: 'yahoo' };
+    }
+    return { quote: twelve, source: 'twelve' };
+  }
+
+  // Non-HK: keep prior Yahoo preference when timestamps are inconclusive
+  return { quote: yahoo, source: 'yahoo' };
+}
+
 /** Fresh last-trade quote with short TTL + in-flight coalescing (no synthetic jitter). */
-async function fetchLiveQuote(ticker: string): Promise<any> {
+async function fetchLiveQuote(ticker: string, opts?: { bypassCache?: boolean }): Promise<any> {
   const key = String(ticker || '').toUpperCase();
   if (!key) throw new Error('Ticker required');
+  const bypassCache = !!opts?.bypassCache;
 
-  return withInflight(`live_quote_${key}`, async () => {
+  return withInflight(`live_quote_${key}${bypassCache ? '_fresh' : ''}`, async () => {
     const hit = quoteCacheStore[key];
-    if (hit && Date.now() - hit.timestamp < QUOTE_CACHE_TTL_MS) {
+    if (!bypassCache && hit && Date.now() - hit.timestamp < QUOTE_CACHE_TTL_MS) {
       return hit.data;
     }
 
-    let quote: any = null;
+    let twelveQuote: any = null;
     if (getTwelveDataApiKey()) {
       try {
-        quote = mapTwelveDataToYahooQuote(key, await fetchTwelveDataQuote(key));
+        const td = await fetchTwelveDataQuote(key);
+        const mapped = mapTwelveDataToYahooQuote(key, td);
+        if (isValidLivePrice(mapped.regularMarketPrice)) {
+          twelveQuote = mapped;
+        }
       } catch (err) {
         console.warn(`[quote] Twelve Data failed for ${key}, trying Yahoo:`, (err as any)?.message || err);
       }
     }
-    if (!quote || quote.regularMarketPrice == null || !Number.isFinite(Number(quote.regularMarketPrice))) {
-      quote = await safeQuote(key);
+
+    let yahooQuote: any = null;
+    try {
+      yahooQuote = await safeQuote(key);
+    } catch (err) {
+      if (!twelveQuote) throw err;
+      console.warn(`[quote] Yahoo failed for ${key} (keeping Twelve):`, (err as any)?.message || err);
     }
+
+    let picked: { quote: any; source: 'twelve' | 'yahoo' };
+    try {
+      picked = pickPreferredQuote({ ticker: key, twelve: twelveQuote, yahoo: yahooQuote });
+    } catch {
+      const fallback = await safeQuote(key);
+      if (!isValidLivePrice(fallback?.regularMarketPrice)) {
+        throw new Error(`Live quote unavailable for ${key}`);
+      }
+      picked = { quote: fallback, source: 'yahoo' };
+    }
+
+    let quote = picked.quote;
+    const source = picked.source;
+
+    // Prefer extended-hours last when regular session has no print yet
+    const regular = Number(quote.regularMarketPrice);
+    const post = Number(quote.postMarketPrice);
+    const pre = Number(quote.preMarketPrice);
+    const state = String(quote.marketState || '').toUpperCase();
+    if ((!Number.isFinite(regular) || regular <= 0) && state.includes('POST') && Number.isFinite(post) && post > 0) {
+      quote = { ...quote, regularMarketPrice: post };
+    } else if ((!Number.isFinite(regular) || regular <= 0) && state.includes('PRE') && Number.isFinite(pre) && pre > 0) {
+      quote = { ...quote, regularMarketPrice: pre };
+    }
+
+    const providerAsOf = quoteTimeMs(quote);
+    const ageMs = providerAsOf != null ? Math.max(0, Date.now() - providerAsOf) : null;
+    // Yahoo HK/most non-US feeds are delayed; also mark delayed when print is >90s old
+    const delayed =
+      source === 'yahoo' ||
+      String(quote.quoteSourceName || '').toLowerCase().includes('delay') ||
+      (ageMs != null && ageMs > 90_000);
+
+    quote = {
+      ...quote,
+      symbol: quote.symbol || key,
+      quoteSource: source,
+      quoteDelayed: delayed,
+      quoteAsOf: providerAsOf ?? Date.now(),
+    };
 
     quoteCacheStore[key] = { data: quote, timestamp: Date.now() };
 
@@ -265,11 +392,15 @@ async function fetchLiveQuote(ticker: string): Promise<any> {
     for (const ck of Object.keys(cacheStore.stocks)) {
       if (!ck.startsWith(`${key}_`) || !cacheStore.stocks[ck]?.data) continue;
       const prev = cacheStore.stocks[ck].data;
+      // Never write live quote into a synthetic payload without clearing the flag
       cacheStore.stocks[ck] = {
         ...cacheStore.stocks[ck],
         data: {
           ...prev,
+          synthetic: false,
           quote: { ...(prev.quote || {}), ...quote },
+          quoteAsOf: quote.quoteAsOf,
+          quoteDelayed: delayed,
         },
       };
     }
@@ -278,15 +409,17 @@ async function fetchLiveQuote(ticker: string): Promise<any> {
   });
 }
 
-async function withFreshStockQuote(payload: any) {
+async function withFreshStockQuote(payload: any, opts?: { bypassCache?: boolean }) {
   if (!payload?.ticker) return payload;
   try {
-    const live = await fetchLiveQuote(payload.ticker);
-    if (live && live.regularMarketPrice != null && Number.isFinite(Number(live.regularMarketPrice))) {
+    const live = await fetchLiveQuote(payload.ticker, { bypassCache: !!opts?.bypassCache });
+    if (live && isValidLivePrice(live.regularMarketPrice)) {
       return {
         ...payload,
+        synthetic: false,
         quote: { ...(payload.quote || {}), ...live },
-        quoteAsOf: Date.now(),
+        quoteAsOf: live.quoteAsOf || quoteTimeMs(live) || Date.now(),
+        quoteDelayed: !!live.quoteDelayed,
       };
     }
   } catch (err) {
@@ -1437,7 +1570,9 @@ app.get('/api/stock/:ticker?', async (req, res) => {
   const now = Date.now();
   if (bypassCache !== 'true' && cacheStore.stocks[cacheKey] && (now - cacheStore.stocks[cacheKey].timestamp < 600000)) { // 10 minutes cache
     // Serve cached history, but always merge a fresh last-trade quote (no synthetic jitter)
-    const fresh = await withFreshStockQuote(cacheStore.stocks[cacheKey].data);
+    const fresh = await withFreshStockQuote(cacheStore.stocks[cacheKey].data, {
+      bypassCache: false,
+    });
     return res.json(fresh);
   }
 
@@ -1489,16 +1624,22 @@ app.get('/api/stock/:ticker?', async (req, res) => {
             regularMarketChangePercent: changePercent,
             regularMarketPreviousClose: prevClose,
             regularMarketOpen: parseFloat(tdQuote.open || price.toString()),
-            regularMarketDayLow: tdQuote.fifty_two_week?.low ? parseFloat(tdQuote.fifty_two_week.low) : parseFloat(tdQuote.low || price.toString()) * 0.98,
-            regularMarketDayHigh: tdQuote.fifty_two_week?.high ? parseFloat(tdQuote.fifty_two_week.high) : parseFloat(tdQuote.high || price.toString()) * 1.02,
+            regularMarketDayLow: Number.isFinite(parseFloat(tdQuote.low))
+              ? parseFloat(tdQuote.low)
+              : price * 0.98,
+            regularMarketDayHigh: Number.isFinite(parseFloat(tdQuote.high))
+              ? parseFloat(tdQuote.high)
+              : price * 1.02,
             regularMarketVolume: parseInt(tdQuote.volume || '0'),
             shortName: tdQuote.name || resolvedTicker,
             longName: tdQuote.name || resolvedTicker,
-            currency: tdQuote.currency || 'USD',
+            currency:
+              tdQuote.currency ||
+              (String(resolvedTicker).toUpperCase().endsWith('.HK') ? 'HKD' : 'USD'),
             fiftyTwoWeekLow: tdQuote.fifty_two_week?.low ? parseFloat(tdQuote.fifty_two_week.low) : undefined,
             fiftyTwoWeekHigh: tdQuote.fifty_two_week?.high ? parseFloat(tdQuote.fifty_two_week.high) : undefined,
             marketState: 'REGULAR',
-            exchange: tdQuote.exchange || 'NMS'
+            exchange: tdQuote.exchange || (String(resolvedTicker).toUpperCase().endsWith('.HK') ? 'HKG' : 'NMS'),
           };
 
           if (tdTs.values && Array.isArray(tdTs.values)) {
@@ -1592,7 +1733,7 @@ app.get('/api/stock/:ticker?', async (req, res) => {
       return built;
     });
 
-    res.json(await withFreshStockQuote(payload));
+    res.json(await withFreshStockQuote(payload, { bypassCache: bypassCache === 'true' }));
   } catch (error: any) {
     if (error?.status === 404) {
       return res.status(404).json({ error: error.message });
@@ -1604,8 +1745,17 @@ app.get('/api/stock/:ticker?', async (req, res) => {
     console.warn('Yahoo stock data fetch failed, engaging synthetic high-fidelity stock generator for:', ticker, error?.message || error);
     try {
       const payload = getFallbackStock(ticker, range, interval);
-      cacheStore.stocks[cacheKey] = { data: payload, timestamp: now };
-      return res.json(payload);
+      // Always try to attach a real last-trade quote so Refresh cannot show a fake price
+      const withLive = await withFreshStockQuote({ ...payload, synthetic: true });
+      const livePx = Number(withLive?.quote?.regularMarketPrice);
+      if (Number.isFinite(livePx) && livePx > 0 && withLive.quote?.quoteSource) {
+        withLive.synthetic = false;
+      }
+      // Do not poison the 10-minute stock cache with synthetic quotes
+      if (!withLive.synthetic) {
+        cacheStore.stocks[cacheKey] = { data: withLive, timestamp: Date.now() };
+      }
+      return res.json(withLive);
     } catch (fallbackError: any) {
       console.error('Synthetic generator failure:', fallbackError);
       return res.status(500).json({ error: 'Failed to establish data uplink.' });
@@ -1636,14 +1786,19 @@ app.get('/api/quote/:ticker?', async (req, res) => {
       }
     }
 
-    const quote = await fetchLiveQuote(ticker);
-    if (!quote || quote.regularMarketPrice == null) {
+    const bypassCache = String(req.query.bypassCache || '') === 'true';
+    const quote = await fetchLiveQuote(ticker, { bypassCache });
+    if (!quote || !isValidLivePrice(quote.regularMarketPrice)) {
       return res.status(404).json({ error: `Live quote unavailable for ${ticker}` });
     }
+    const asOf = Number(quote.quoteAsOf) || quoteTimeMs(quote) || Date.now();
+    const delayed = quote.quoteDelayed != null ? !!quote.quoteDelayed : true;
     return res.json({
       ticker,
       quote,
-      asOf: Date.now(),
+      asOf,
+      delayed,
+      source: quote.quoteSource || null,
     });
   } catch (error: any) {
     console.warn('[quote] endpoint failed:', error?.message || error);
