@@ -100,7 +100,7 @@ export function FindATradePanel({
         onChange={(e) => setListText(e.target.value)}
         rows={compact ? 2 : 3}
         placeholder="AAPL, NVDA, MSFT, 0700.HK"
-        className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-[12px] font-mono text-gray-200 placeholder:text-gray-600 focus:outline-none focus:border-emerald-500/40 resize-y min-h-[56px]"
+        className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-3 text-base sm:text-[13px] font-mono text-gray-200 placeholder:text-gray-600 focus:outline-none focus:border-emerald-500/40 resize-y min-h-[64px]"
       />
 
       <div className="flex flex-wrap items-center gap-2 justify-between">
@@ -115,7 +115,7 @@ export function FindATradePanel({
           disabled={scanning || parsed.length === 0}
           onClick={() => void runScout()}
           className={cn(
-            'inline-flex items-center gap-2 rounded-full px-4 py-2 text-[11px] font-bold uppercase tracking-wider transition-all cursor-pointer',
+            'touch-manipulation inline-flex items-center justify-center gap-2 rounded-full min-h-11 px-5 py-2.5 text-[12px] font-bold uppercase tracking-wider transition-all cursor-pointer',
             scanning || parsed.length === 0
               ? 'bg-white/5 text-gray-500 border border-white/10'
               : 'bg-emerald-500 text-black border border-emerald-400 shadow-[0_0_18px_rgba(16,185,129,0.35)] hover:bg-emerald-400'
@@ -225,7 +225,7 @@ function TopPickCard({
       <button
         type="button"
         onClick={() => onOpen(pick.ticker)}
-        className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-white text-black py-2 text-[11px] font-bold uppercase tracking-wider hover:bg-emerald-100 transition-colors cursor-pointer"
+        className="touch-manipulation w-full inline-flex items-center justify-center gap-2 rounded-xl bg-white text-black min-h-11 py-2.5 text-[12px] font-bold uppercase tracking-wider hover:bg-emerald-100 transition-colors cursor-pointer"
       >
         <Search className="w-3.5 h-3.5" />
         Open full analysis
@@ -245,7 +245,7 @@ function CandidateRow({
     <button
       type="button"
       onClick={() => onOpen(c.ticker)}
-      className="w-full flex items-center justify-between gap-2 rounded-xl border border-white/8 bg-black/30 px-3 py-2 text-left hover:border-emerald-500/30 transition-colors cursor-pointer"
+      className="touch-manipulation w-full flex items-center justify-between gap-2 rounded-xl border border-white/8 bg-black/30 px-3 py-3 min-h-12 text-left hover:border-emerald-500/30 transition-colors cursor-pointer"
     >
       <div className="min-w-0">
         <p className="text-[12px] font-bold text-white">{c.ticker}</p>

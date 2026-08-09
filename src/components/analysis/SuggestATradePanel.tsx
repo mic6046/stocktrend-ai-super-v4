@@ -119,7 +119,7 @@ export function SuggestATradePanel({
           <select
             value={market}
             onChange={(e) => setMarket(e.target.value as SuggestMarket)}
-            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-[12px] text-gray-100 focus:outline-none focus:border-sky-500/40"
+            className="w-full min-h-11 rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-base sm:text-[13px] text-gray-100 focus:outline-none focus:border-sky-500/40"
           >
             {SUGGEST_MARKETS.map((m) => (
               <option key={m.key} value={m.key}>
@@ -133,7 +133,7 @@ export function SuggestATradePanel({
           <select
             value={theme}
             onChange={(e) => setTheme(e.target.value as SuggestTheme)}
-            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-[12px] text-gray-100 focus:outline-none focus:border-sky-500/40"
+            className="w-full min-h-11 rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-base sm:text-[13px] text-gray-100 focus:outline-none focus:border-sky-500/40"
           >
             {SUGGEST_THEMES.map((t) => (
               <option key={t.key} value={t.key}>
@@ -167,7 +167,7 @@ export function SuggestATradePanel({
           disabled={scanning || universe.length === 0}
           onClick={() => void runSuggest()}
           className={cn(
-            'inline-flex items-center gap-2 rounded-full px-4 py-2 text-[11px] font-bold uppercase tracking-wider transition-all cursor-pointer',
+            'touch-manipulation inline-flex items-center justify-center gap-2 rounded-full min-h-11 px-5 py-2.5 text-[12px] font-bold uppercase tracking-wider transition-all cursor-pointer',
             scanning || universe.length === 0
               ? 'bg-white/5 text-gray-500 border border-white/10'
               : 'bg-sky-500 text-black border border-sky-400 shadow-[0_0_18px_rgba(56,189,248,0.35)] hover:bg-sky-400'
@@ -282,7 +282,7 @@ function TopPickCard({
       <button
         type="button"
         onClick={() => onOpen(pick.ticker)}
-        className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-white text-black py-2 text-[11px] font-bold uppercase tracking-wider hover:bg-sky-100 transition-colors cursor-pointer"
+        className="touch-manipulation w-full inline-flex items-center justify-center gap-2 rounded-xl bg-white text-black min-h-11 py-2.5 text-[12px] font-bold uppercase tracking-wider hover:bg-sky-100 transition-colors cursor-pointer"
       >
         <Search className="w-3.5 h-3.5" />
         Open full analysis
@@ -302,7 +302,7 @@ function CandidateRow({
     <button
       type="button"
       onClick={() => onOpen(c.ticker)}
-      className="w-full flex items-center justify-between gap-2 rounded-xl border border-white/8 bg-black/30 px-3 py-2 text-left hover:border-sky-500/30 transition-colors cursor-pointer"
+      className="touch-manipulation w-full flex items-center justify-between gap-2 rounded-xl border border-white/8 bg-black/30 px-3 py-3 min-h-12 text-left hover:border-sky-500/30 transition-colors cursor-pointer"
     >
       <div className="min-w-0">
         <p className="text-[12px] font-bold text-white">{c.ticker}</p>

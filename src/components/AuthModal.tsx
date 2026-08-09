@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Loader2, X, ShieldAlert } from 'lucide-react';
 import { useAuth, SignInNotAllowedError } from '../lib/auth';
 import { cn } from '../lib/utils';
@@ -37,6 +37,17 @@ export function AuthModal({ open, onClose, onSuccess }: AuthModalProps) {
   const { signInWithGoogle, accessDenied, clearAccessDenied } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const visible = open || !!accessDenied;
+
+  useEffect(() => {
+    if (!visible) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [visible]);
 
   if (!open && !accessDenied) return null;
 
@@ -77,8 +88,8 @@ export function AuthModal({ open, onClose, onSuccess }: AuthModalProps) {
 
   if (accessDenied) {
     return (
-      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-        <div className="w-full max-w-md rounded-2xl border border-red-500/30 bg-[#0c0c0e] shadow-2xl">
+      <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/70 backdrop-blur-sm p-0 sm:p-4 pb-[env(safe-area-inset-bottom)]">
+        <div className="w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl border border-red-500/30 bg-[#0c0c0e] shadow-2xl">
           <div className="flex items-center justify-between border-b border-white/5 px-5 py-4">
             <div className="flex items-center gap-3">
               <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-2">
@@ -92,7 +103,7 @@ export function AuthModal({ open, onClose, onSuccess }: AuthModalProps) {
             <button
               type="button"
               onClick={handleClose}
-              className="rounded-lg border border-white/10 p-2 text-gray-400 hover:bg-white/5 hover:text-white"
+              className="touch-target touch-manipulation rounded-xl border border-white/10 p-2 text-gray-400 hover:bg-white/5 hover:text-white"
             >
               <X className="h-4 w-4" />
             </button>
@@ -104,7 +115,7 @@ export function AuthModal({ open, onClose, onSuccess }: AuthModalProps) {
             <button
               type="button"
               onClick={handleClose}
-              className="flex w-full items-center justify-center rounded-xl border border-white/10 bg-white/5 py-2.5 text-sm font-bold text-white hover:bg-white/10"
+              className="touch-manipulation flex w-full min-h-11 items-center justify-center rounded-xl border border-white/10 bg-white/5 py-3 text-sm font-bold text-white hover:bg-white/10"
             >
               Close
             </button>
@@ -117,8 +128,8 @@ export function AuthModal({ open, onClose, onSuccess }: AuthModalProps) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0c0c0e] shadow-2xl">
+    <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/70 backdrop-blur-sm p-0 sm:p-4 pb-[env(safe-area-inset-bottom)]">
+      <div className="w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl border border-white/10 bg-[#0c0c0e] shadow-2xl">
         <div className="flex items-center justify-between border-b border-white/5 px-5 py-4">
           <div>
             <p className="text-[10px] font-mono uppercase tracking-widest text-emerald-400">Quantum Node</p>
@@ -127,7 +138,7 @@ export function AuthModal({ open, onClose, onSuccess }: AuthModalProps) {
           <button
             type="button"
             onClick={handleClose}
-            className="rounded-lg border border-white/10 p-2 text-gray-400 hover:bg-white/5 hover:text-white"
+            className="touch-target touch-manipulation rounded-xl border border-white/10 p-2 text-gray-400 hover:bg-white/5 hover:text-white"
           >
             <X className="h-4 w-4" />
           </button>
@@ -149,7 +160,7 @@ export function AuthModal({ open, onClose, onSuccess }: AuthModalProps) {
             disabled={busy}
             onClick={handleGoogleSignIn}
             className={cn(
-              'flex w-full items-center justify-center gap-3 rounded-xl border border-white/10 bg-white py-2.5 text-sm font-bold text-gray-900 transition hover:bg-gray-100 disabled:opacity-60'
+              'touch-manipulation flex w-full min-h-11 items-center justify-center gap-3 rounded-xl border border-white/10 bg-white py-3 text-sm font-bold text-gray-900 transition hover:bg-gray-100 disabled:opacity-60'
             )}
           >
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <GoogleIcon className="h-5 w-5" />}

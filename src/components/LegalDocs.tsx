@@ -93,7 +93,7 @@ function LegalPage({
         role="dialog"
         aria-modal="true"
         aria-labelledby="legal-title"
-        className="relative w-full sm:max-w-2xl max-h-[92vh] sm:max-h-[85vh] flex flex-col rounded-t-2xl sm:rounded-2xl border border-white/10 bg-[#0c0c0e] shadow-2xl"
+        className="relative w-full sm:max-w-2xl max-h-[min(92dvh,92vh)] sm:max-h-[85vh] flex flex-col rounded-t-2xl sm:rounded-2xl border border-white/10 bg-[#0c0c0e] shadow-2xl pb-[env(safe-area-inset-bottom)]"
       >
         <div className="flex items-start justify-between gap-3 border-b border-white/10 px-5 py-4 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
