@@ -17,6 +17,7 @@ import {
   RecommendationChangeLogPanel,
   FindATradePanel,
   SuggestATradePanel,
+  DayTradePanel,
   MarketDataRefreshBar,
   type HorizonKey,
 } from './components/analysis';
@@ -27,6 +28,8 @@ import {
 import { buildHorizonView } from './lib/horizonView';
 import { TruncatedText } from './components/TruncatedText';
 import { AuthModal } from './components/AuthModal';
+import { MobileDockSheet } from './components/MobileDockSheet';
+import { InstallAppBanner } from './components/InstallAppBanner';
 import { UsageQuotaBar, QuotaExhaustedBanner } from './components/UsageQuotaBar';
 import { LegalLinks } from './components/LegalDocs';
 import { useAuth } from './lib/auth';
@@ -1220,6 +1223,11 @@ export default function App() {
   const [userHasPosition, setUserHasPosition] = useState(false);
   const [showFindATrade, setShowFindATrade] = useState(false);
   const [showSuggestATrade, setShowSuggestATrade] = useState(false);
+  const [showDayTrade, setShowDayTrade] = useState(false);
+  /** Bumped on every Suggest header/empty-state press → panel starts a new search. */
+  const [suggestRunToken, setSuggestRunToken] = useState(0);
+  /** Bumped on every Day Trade header press → panel starts a new scout. */
+  const [dayTradeRunToken, setDayTradeRunToken] = useState(0);
   const [refreshMode, setRefreshMode] = useState<RefreshMode>(() => loadRefreshMode());
   const [autoRefreshIntervalSec, setAutoRefreshIntervalSec] = useState<AutoRefreshIntervalSec>(
     () => loadAutoRefreshIntervalSec()
@@ -5944,6 +5952,32 @@ export default function App() {
 
       if (isInitial) {
         setError(null);
+        // If /api/stock returned synthetic fallback, try a dedicated live quote before painting
+        if (stockData.synthetic) {
+          try {
+            const qRes = await loggedFetch(
+              apiUrl(`/api/quote?ticker=${encodeURIComponent(stockData.ticker || cleanSymbol)}&bypassCache=true`),
+              {
+                __qnMeta: {
+                  reason: 'repair-synthetic-quote',
+                  userAction: runPredict ? 'Search stock' : 'Load stock',
+                },
+              } as any
+            );
+            if (qRes.ok) {
+              const qBody = await qRes.json();
+              const livePx = Number(qBody?.quote?.regularMarketPrice);
+              if (Number.isFinite(livePx) && livePx > 0) {
+                stockData.quote = { ...(stockData.quote || {}), ...qBody.quote };
+                stockData.quoteAsOf = qBody.asOf || Date.now();
+                stockData.quoteDelayed = !!qBody.delayed;
+                stockData.synthetic = false;
+              }
+            }
+          } catch {
+            /* keep synthetic chart if quote also fails */
+          }
+        }
         setData(stockData);
         setChartHistory(sanitizedHistory);
         // Predict + news only on explicit Search / Refresh (runPredict)
@@ -5959,11 +5993,33 @@ export default function App() {
       } else {
         if (requestId !== stockRequestSeq.current) return null;
         setChartHistory(sanitizedHistory);
-        setData(prev => prev ? {
-          ...prev,
-          quote: stockData.quote || prev.quote,
-          history: sanitizedHistory || prev.history,
-        } : stockData);
+        setData(prev => {
+          if (!prev) return stockData;
+          const incomingPx = Number(stockData.quote?.regularMarketPrice);
+          const prevPx = Number(prev.quote?.regularMarketPrice);
+          const incomingOk = Number.isFinite(incomingPx) && incomingPx > 0;
+          const prevOk = Number.isFinite(prevPx) && prevPx > 0;
+          // Never let synthetic / empty stock payloads wipe a good live quote after Refresh
+          const preferPrevQuote =
+            !!stockData.synthetic ||
+            !incomingOk ||
+            (prevOk &&
+              incomingOk &&
+              Math.abs(incomingPx - prevPx) / Math.max(prevPx, 1e-9) > 0.25);
+          return {
+            ...prev,
+            ...stockData,
+            history: sanitizedHistory || prev.history,
+            quote: preferPrevQuote ? prev.quote : stockData.quote || prev.quote,
+            quoteAsOf: preferPrevQuote
+              ? (prev as any).quoteAsOf
+              : stockData.quoteAsOf || Date.now(),
+            quoteDelayed: preferPrevQuote
+              ? (prev as any).quoteDelayed
+              : !!(stockData as any).quoteDelayed,
+            synthetic: preferPrevQuote ? false : !!stockData.synthetic,
+          };
+        });
         if (runPredict) {
           await handlePredict(stockData, bypassCache, newsItems, predictHistoryOverride);
         }
@@ -6658,15 +6714,21 @@ export default function App() {
         return prev;
       }
       const prevPx = Number(prev.quote?.regularMarketPrice);
-      const asOf = Number(body?.asOf) || Date.now();
+      const asOf = Number(body?.asOf) || Number(live?.quoteAsOf) || Date.now();
+      const delayed = body?.delayed != null ? !!body.delayed : !!(live as any)?.quoteDelayed;
       if (Number.isFinite(prevPx) && Math.abs(prevPx - px) < 0.005) {
-        if ((prev as any).quoteAsOf === asOf) return prev;
-        return { ...prev, quoteAsOf: asOf };
+        if ((prev as any).quoteAsOf === asOf && (prev as any).quoteDelayed === delayed) return prev;
+        return { ...prev, quoteAsOf: asOf, quoteDelayed: delayed };
+      }
+      // Reject wild jumps from a clearly bad feed when we already have a good quote
+      if (Number.isFinite(prevPx) && prevPx > 0 && Math.abs(prevPx - px) / prevPx > 0.25) {
+        return prev;
       }
       return {
         ...prev,
         quote: { ...(prev.quote || {}), ...live },
         quoteAsOf: asOf,
+        quoteDelayed: delayed,
       };
     });
     checkAlertsForTicker(activeTicker, px);
@@ -6674,9 +6736,12 @@ export default function App() {
   };
 
   const refreshLiveQuoteOnce = async (activeTicker: string, reason: string, userAction: string) => {
-    const res = await loggedFetch(apiUrl(`/api/quote?ticker=${encodeURIComponent(activeTicker)}`), {
-      __qnMeta: { reason, userAction },
-    } as any);
+    const res = await loggedFetch(
+      apiUrl(`/api/quote?ticker=${encodeURIComponent(activeTicker)}&bypassCache=true`),
+      {
+        __qnMeta: { reason, userAction },
+      } as any
+    );
     if (!res.ok) throw new Error(`Quote HTTP ${res.status}`);
     const body = await res.json();
     applyLiveQuote(activeTicker, body);
@@ -6970,13 +7035,28 @@ export default function App() {
   const technicalLevels = computeTechnicalLevels(visibleBaseHistory);
   const activeLevels: any = (srSource === 'AI' && levels) ? levels : technicalLevels;
 
+  /** Single live price for AI score card + Trade Management Zones (must stay in sync). */
+  const liveAnalysisPrice = React.useMemo(() => {
+    const candidates = [
+      Number(data?.quote?.regularMarketPrice),
+      Number(data?.quote?.price),
+      Number(projectionMeta.lastClose),
+      Number(cockpitData?.entryPrice),
+    ];
+    for (const n of candidates) {
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+    return 0;
+  }, [
+    data?.quote?.regularMarketPrice,
+    data?.quote?.price,
+    projectionMeta.lastClose,
+    cockpitData?.entryPrice,
+  ]);
+
   /** Investment Horizon is the single source of truth — QuantumNode Master Engine. */
   const horizonView = React.useMemo(() => {
-    const lastClose =
-      Number(data?.quote?.regularMarketPrice) ||
-      projectionMeta.lastClose ||
-      Number(cockpitData?.entryPrice) ||
-      0;
+    const lastClose = liveAnalysisPrice;
     const whaleScore =
       whaleAccumulation?.metrics?.whaleAccumulationIndex ??
       (aiStockScore?.components?.whaleAccumulation
@@ -7072,7 +7152,7 @@ export default function App() {
     });
   }, [
     analysisHorizon,
-    data?.quote?.regularMarketPrice,
+    liveAnalysisPrice,
     data?.ticker,
     projectionMeta,
     cockpitData,
@@ -7335,7 +7415,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#050505] text-[#e0e0e0] font-sans selection:bg-emerald-500 selection:text-black overflow-x-hidden relative">
+    <div className="min-h-dvh bg-[#050505] text-[#e0e0e0] font-sans selection:bg-emerald-500 selection:text-black overflow-x-hidden relative">
       <AuthModal
         open={showAuthModal}
         onClose={() => setShowAuthModal(false)}
@@ -7347,56 +7427,143 @@ export default function App() {
       <div className="fixed top-[-100px] left-[-100px] w-[500px] h-[500px] bg-emerald-500/10 rounded-full blur-[120px] pointer-events-none" />
       <div className="fixed bottom-[-100px] right-[-100px] w-[600px] h-[600px] bg-blue-600/10 rounded-full blur-[150px] pointer-events-none" />
 
-      {/* Navigation */}
-      <nav className="relative z-10 border-b border-white/5 backdrop-blur-md sticky top-0 px-4 sm:px-6 py-3 sm:py-4 flex flex-wrap items-center gap-x-3 gap-y-2">
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="w-9 h-9 bg-emerald-500 rounded-lg flex items-center justify-center shadow-[0_0_18px_rgba(16,185,129,0.45)] shrink-0">
-            <Activity className="w-5 h-5 text-black" />
+      {/* Navigation — stacked on phone, wrap-friendly on desktop */}
+      <nav className="relative z-40 border-b border-white/5 backdrop-blur-md sticky top-0 bg-[#050505]/92 safe-px pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 sm:pb-4 flex flex-col gap-2.5 sm:gap-3">
+        <div className="flex items-center gap-3 min-w-0 w-full">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
+            <div className="w-9 h-9 bg-emerald-500 rounded-lg flex items-center justify-center shadow-[0_0_18px_rgba(16,185,129,0.45)] shrink-0">
+              <Activity className="w-5 h-5 text-black" />
+            </div>
+            <h1 className="text-base sm:text-xl font-sans font-extrabold tracking-tight uppercase whitespace-nowrap">
+              QUANTUM<span className="text-emerald-500">NODE</span>
+            </h1>
+            <div className="hidden lg:flex items-center gap-0.5 ml-5 border-l border-white/10 pl-5">
+              <button
+                type="button"
+                onClick={() => setActivePage('DASHBOARD')}
+                className={cn(
+                  "touch-manipulation px-2.5 py-2.5 min-h-11 rounded-xl text-[11px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer",
+                  activePage === 'DASHBOARD'
+                    ? "bg-emerald-500 text-black border-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.35)]"
+                    : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
+                )}
+              >
+                Dashboard
+              </button>
+              <button
+                type="button"
+                onClick={() => setActivePage('NEWS_CENTER')}
+                className={cn(
+                  "touch-manipulation px-2.5 py-2.5 min-h-11 rounded-xl text-[11px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer",
+                  activePage === 'NEWS_CENTER'
+                    ? "bg-blue-500 text-white border-blue-400 shadow-[0_0_18px_rgba(59,130,246,0.3)]"
+                    : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
+                )}
+              >
+                News Center
+              </button>
+              <button
+                type="button"
+                onClick={() => setActivePage('SELF_LEARNING')}
+                className={cn(
+                  "touch-manipulation px-2.5 py-2.5 min-h-11 rounded-xl text-[11px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer",
+                  activePage === 'SELF_LEARNING'
+                    ? "bg-indigo-500 text-white border-indigo-400 shadow-[0_0_18px_rgba(99,102,241,0.3)]"
+                    : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
+                )}
+              >
+                Self-Learning
+              </button>
+            </div>
           </div>
-          <h1 className="text-lg sm:text-xl font-sans font-extrabold tracking-tight uppercase whitespace-nowrap">
-            QUANTUM<span className="text-emerald-500">NODE</span>
-          </h1>
-          <div className="hidden lg:flex items-center gap-0.5 ml-5 border-l border-white/10 pl-5">
-            <button
-              type="button"
-              onClick={() => setActivePage('DASHBOARD')}
-              className={cn(
-                "px-2.5 py-2 rounded-xl text-[11px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer",
-                activePage === 'DASHBOARD'
-                  ? "bg-emerald-500 text-black border-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.35)]"
-                  : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
-              )}
-            >
-              Dashboard
-            </button>
-            <button
-              type="button"
-              onClick={() => setActivePage('NEWS_CENTER')}
-              className={cn(
-                "px-2.5 py-2 rounded-xl text-[11px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer",
-                activePage === 'NEWS_CENTER'
-                  ? "bg-blue-500 text-white border-blue-400 shadow-[0_0_18px_rgba(59,130,246,0.3)]"
-                  : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
-              )}
-            >
-              News Center
-            </button>
-            <button
-              type="button"
-              onClick={() => setActivePage('SELF_LEARNING')}
-              className={cn(
-                "px-2.5 py-2 rounded-xl text-[11px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer",
-                activePage === 'SELF_LEARNING'
-                  ? "bg-indigo-500 text-white border-indigo-400 shadow-[0_0_18px_rgba(99,102,241,0.3)]"
-                  : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
-              )}
-            >
-              Self-Learning
-            </button>
+
+          <div className="hidden md:block shrink-0 max-w-[min(100%,28rem)] overflow-x-auto">
+            {user && (
+              <UsageQuotaBar usage={usage} email={user.email} onRefresh={refreshUsage} />
+            )}
           </div>
+
+          <div className="hidden xl:flex gap-3 items-center text-[11px] tracking-wide uppercase shrink-0">
+            <div className="flex flex-col items-end font-sans opacity-80 leading-tight gap-0">
+              <span className="text-[9px] text-gray-500 normal-case tracking-normal">Mode</span>
+              <span className={cn(
+                "font-semibold flex items-center gap-1 font-mono text-[10px]",
+                autoRefresh ? "text-amber-400" : "text-emerald-400"
+              )}>
+                <span className={cn("w-1.5 h-1.5 rounded-full", autoRefresh ? "bg-amber-400" : "bg-emerald-400")} />
+                {autoRefresh ? `AUTO ${autoRefreshIntervalSec}s` : 'MANUAL'}
+              </span>
+            </div>
+            <div className="w-[1px] h-6 bg-white/10" />
+            <div className="flex flex-col items-end font-sans opacity-70">
+              <span className="text-[10px] text-gray-500 normal-case tracking-normal">Status</span>
+              <span className="text-emerald-400 font-semibold text-[10px]">ACTIVE</span>
+            </div>
+            <div className="w-[1px] h-6 bg-white/10" />
+            <div className="flex flex-col items-end font-sans opacity-70">
+              <span className="text-[10px] text-gray-500 normal-case tracking-normal">Cloud</span>
+              <span className={cn(
+                "font-semibold text-[10px]",
+                cloudSyncStatus === 'synced' ? 'text-emerald-400' :
+                cloudSyncStatus === 'loading' ? 'text-amber-400' :
+                cloudSyncStatus === 'error' ? 'text-red-400' : 'text-gray-500'
+              )}>
+                {user
+                  ? (accessState === 'active'
+                      ? (cloudSyncStatus === 'loading' ? 'SYNCING' : cloudSyncStatus === 'error' ? 'ERROR' : 'ACTIVE')
+                      : String(accessState).toUpperCase())
+                  : 'LOCAL'}
+              </span>
+            </div>
+            {user && (
+              <>
+                <div className="w-[1px] h-6 bg-white/10" />
+                <div className="flex items-center gap-2">
+                  <div className="flex flex-col items-end max-w-[140px] font-sans">
+                    <span className="text-[10px] text-gray-500 normal-case tracking-normal">Account</span>
+                    <span className="text-blue-400 truncate text-[10px] font-mono" title={user.email || user.uid}>
+                      {user.displayName || user.email || 'Signed in'}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => signOut()}
+                    className="touch-manipulation min-h-11 rounded-xl border border-white/10 px-3 py-2 text-[11px] font-sans font-semibold text-gray-300 hover:bg-white/5 hover:text-white normal-case tracking-normal"
+                  >
+                    Sign out
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
+          {!user && (
+            <button
+              type="button"
+              onClick={() => setShowAuthModal(true)}
+              disabled={authLoading}
+              className="touch-manipulation shrink-0 flex items-center gap-2 min-h-11 rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-3.5 py-2 font-sans font-bold text-[11px] text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50"
+            >
+              <Shield className="h-3.5 w-3.5" />
+              Sign in
+            </button>
+          )}
+
+          {user && (
+            <div className="flex xl:hidden items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => signOut()}
+                className="touch-manipulation min-h-11 rounded-xl border border-white/10 px-3 py-2 text-[11px] font-sans font-semibold text-gray-300 hover:bg-white/5 hover:text-white normal-case tracking-normal"
+              >
+                Sign out
+              </button>
+            </div>
+          )}
         </div>
 
-        <div className="flex items-center gap-2 flex-1 min-w-[200px] max-w-xl">
+        {/* Full-width search — avoids cramped phone chrome */}
+        <div className="flex items-center gap-2 w-full lg:max-w-3xl">
           <form
             onSubmit={handleSubmit}
             className="flex-1 min-w-0 group"
@@ -7421,140 +7588,154 @@ export default function App() {
                 autoCapitalize="off"
                 spellCheck={false}
                 inputMode="search"
+                enterKeyHint="search"
                 name={`qn-ticker-${searchInputKey}`}
                 id={`qn-ticker-${searchInputKey}`}
                 placeholder="Ticker then Enter (e.g. AAPL)"
                 title="Press Enter to search"
-                className="w-full bg-[#111113] border border-white/10 rounded-full pl-10 pr-9 py-2 text-sm focus:outline-none focus:border-emerald-500/50 transition-all placeholder:text-gray-600 font-mono tracking-wide"
+                className="w-full min-h-11 bg-[#111113] border border-white/10 rounded-full pl-11 pr-10 py-2.5 text-base sm:text-sm focus:outline-none focus:border-emerald-500/50 transition-all placeholder:text-gray-600 font-mono tracking-wide"
               />
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500 group-focus-within:text-emerald-500 transition-colors pointer-events-none" />
-              {loading && <Loader2 className="absolute right-3.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-emerald-500" />}
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 group-focus-within:text-emerald-500 transition-colors pointer-events-none" />
+              {loading && <Loader2 className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 animate-spin text-emerald-500" />}
             </div>
           </form>
+
+          {/* Desktop / tablet: Find + Suggest beside search */}
           <button
             type="button"
             onClick={() => {
               setActivePage('DASHBOARD');
               setShowFindATrade((v) => !v);
-              if (!showFindATrade) setShowSuggestATrade(false);
+              if (!showFindATrade) {
+                setShowSuggestATrade(false);
+                setShowDayTrade(false);
+              }
             }}
             className={cn(
-              'shrink-0 inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
+              'hidden sm:inline-flex touch-manipulation shrink-0 items-center gap-1.5 rounded-full min-h-11 px-3.5 py-2 text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
               showFindATrade
                 ? 'bg-emerald-500 text-black border-emerald-400 shadow-[0_0_16px_rgba(16,185,129,0.35)]'
                 : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/25'
             )}
             title="Paste a ticker list and let Consensus AI find a BUY"
           >
-            <Rocket className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Find a Trade</span>
-            <span className="sm:hidden">Find</span>
+            <Rocket className="w-4 h-4" />
+            Find Trades
           </button>
           <button
             type="button"
             onClick={() => {
               setActivePage('DASHBOARD');
-              setShowSuggestATrade((v) => !v);
-              if (!showSuggestATrade) setShowFindATrade(false);
+              setShowFindATrade(false);
+              setShowDayTrade(false);
+              setShowSuggestATrade(true);
+              // Every header press is a new Suggest search
+              setSuggestRunToken((n) => n + 1);
             }}
             className={cn(
-              'shrink-0 inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
+              'hidden sm:inline-flex touch-manipulation shrink-0 items-center gap-1.5 rounded-full min-h-11 px-3.5 py-2 text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
               showSuggestATrade
                 ? 'bg-sky-500 text-black border-sky-400 shadow-[0_0_16px_rgba(56,189,248,0.35)]'
                 : 'bg-sky-500/15 text-sky-300 border-sky-500/40 hover:bg-sky-500/25'
             )}
-            title="Suggest a BUY from popular US / HK / Japan / Europe markets"
+            title="New Suggest Trades search from popular US / HK / Japan / Europe markets"
           >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Suggest a Trade</span>
-            <span className="sm:hidden">Suggest</span>
+            <Sparkles className="w-4 h-4" />
+            Suggest Trades
           </button>
-        </div>
-
-        {user && (
-          <UsageQuotaBar usage={usage} email={user.email} onRefresh={refreshUsage} />
-        )}
-
-        <div className="hidden xl:flex gap-3 items-center text-[11px] tracking-wide uppercase shrink-0 ml-auto">
-          <div className="flex flex-col items-end font-sans opacity-80 leading-tight gap-0">
-            <span className="text-[9px] text-gray-500 normal-case tracking-normal">Mode</span>
-            <span className={cn(
-              "font-semibold flex items-center gap-1 font-mono text-[10px]",
-              autoRefresh ? "text-amber-400" : "text-emerald-400"
-            )}>
-              <span className={cn("w-1.5 h-1.5 rounded-full", autoRefresh ? "bg-amber-400" : "bg-emerald-400")} />
-              {autoRefresh ? `AUTO ${autoRefreshIntervalSec}s` : 'MANUAL'}
-            </span>
-          </div>
-          <div className="w-[1px] h-6 bg-white/10" />
-          <div className="flex flex-col items-end font-sans opacity-70">
-            <span className="text-[10px] text-gray-500 normal-case tracking-normal">Status</span>
-            <span className="text-emerald-400 font-semibold text-[10px]">ACTIVE</span>
-          </div>
-          <div className="w-[1px] h-6 bg-white/10" />
-          <div className="flex flex-col items-end font-sans opacity-70">
-            <span className="text-[10px] text-gray-500 normal-case tracking-normal">Cloud</span>
-            <span className={cn(
-              "font-semibold text-[10px]",
-              cloudSyncStatus === 'synced' ? 'text-emerald-400' :
-              cloudSyncStatus === 'loading' ? 'text-amber-400' :
-              cloudSyncStatus === 'error' ? 'text-red-400' : 'text-gray-500'
-            )}>
-              {user
-                ? (accessState === 'active'
-                    ? (cloudSyncStatus === 'loading' ? 'SYNCING' : cloudSyncStatus === 'error' ? 'ERROR' : 'ACTIVE')
-                    : String(accessState).toUpperCase())
-                : 'LOCAL'}
-            </span>
-          </div>
-          {user && (
-            <>
-              <div className="w-[1px] h-6 bg-white/10" />
-              <div className="flex items-center gap-2">
-                <div className="flex flex-col items-end max-w-[140px] font-sans">
-                  <span className="text-[10px] text-gray-500 normal-case tracking-normal">Account</span>
-                  <span className="text-blue-400 truncate text-[10px] font-mono" title={user.email || user.uid}>
-                    {user.displayName || user.email || 'Signed in'}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => signOut()}
-                  className="rounded-lg border border-white/10 px-2.5 py-1.5 text-[10px] font-sans font-semibold text-gray-300 hover:bg-white/5 hover:text-white normal-case tracking-normal"
-                >
-                  Sign out
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-
-        {!user && (
           <button
             type="button"
-            onClick={() => setShowAuthModal(true)}
-            disabled={authLoading}
-            className="ml-auto flex items-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-3.5 py-2 font-sans font-bold text-[11px] text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50"
+            onClick={() => {
+              setActivePage('DASHBOARD');
+              setShowFindATrade(false);
+              setShowSuggestATrade(false);
+              setShowDayTrade(true);
+              setDayTradeRunToken((n) => n + 1);
+            }}
+            className={cn(
+              'hidden sm:inline-flex touch-manipulation shrink-0 items-center gap-1.5 rounded-full min-h-11 px-3.5 py-2 text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
+              showDayTrade
+                ? 'bg-orange-500 text-black border-orange-400 shadow-[0_0_16px_rgba(249,115,22,0.35)]'
+                : 'bg-orange-500/15 text-orange-300 border-orange-500/40 hover:bg-orange-500/25'
+            )}
+            title="Scout popular stocks that clear day-trade liquidity / range / bias gates"
           >
-            <Shield className="h-3.5 w-3.5" />
-            Sign in
+            <Flame className="w-4 h-4" />
+            Day Trade
           </button>
-        )}
+        </div>
 
+        {/* Phone: full-width Find / Suggest / Day row */}
+        <div className="grid grid-cols-3 gap-2 w-full sm:hidden">
+          <button
+            type="button"
+            onClick={() => {
+              setActivePage('DASHBOARD');
+              setShowFindATrade((v) => !v);
+              if (!showFindATrade) {
+                setShowSuggestATrade(false);
+                setShowDayTrade(false);
+              }
+            }}
+            className={cn(
+              'touch-manipulation inline-flex items-center justify-center gap-1 rounded-xl min-h-11 px-2 text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer',
+              showFindATrade
+                ? 'bg-emerald-500 text-black border-emerald-400'
+                : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
+            )}
+          >
+            <Rocket className="w-4 h-4" />
+            Find
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActivePage('DASHBOARD');
+              setShowFindATrade(false);
+              setShowDayTrade(false);
+              setShowSuggestATrade(true);
+              setSuggestRunToken((n) => n + 1);
+            }}
+            className={cn(
+              'touch-manipulation inline-flex items-center justify-center gap-1 rounded-xl min-h-11 px-2 text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer',
+              showSuggestATrade
+                ? 'bg-sky-500 text-black border-sky-400'
+                : 'bg-sky-500/15 text-sky-300 border-sky-500/40'
+            )}
+          >
+            <Sparkles className="w-4 h-4" />
+            Suggest
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActivePage('DASHBOARD');
+              setShowFindATrade(false);
+              setShowSuggestATrade(false);
+              setShowDayTrade(true);
+              setDayTradeRunToken((n) => n + 1);
+            }}
+            className={cn(
+              'touch-manipulation inline-flex items-center justify-center gap-1 rounded-xl min-h-11 px-2 text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer',
+              showDayTrade
+                ? 'bg-orange-500 text-black border-orange-400'
+                : 'bg-orange-500/15 text-orange-300 border-orange-500/40'
+            )}
+          >
+            <Flame className="w-4 h-4" />
+            Day
+          </button>
+        </div>
+
+        {/* Phone quota strip — kept out of the brand row */}
         {user && (
-          <div className="flex xl:hidden items-center gap-2 ml-auto shrink-0">
-            <button
-              type="button"
-              onClick={() => signOut()}
-              className="rounded-lg border border-white/10 px-2.5 py-1.5 text-[10px] font-sans font-semibold text-gray-300 hover:bg-white/5 hover:text-white normal-case tracking-normal"
-            >
-              Sign out
-            </button>
+          <div className="md:hidden w-full overflow-x-auto -mx-0 pb-0.5">
+            <UsageQuotaBar usage={usage} email={user.email} onRefresh={refreshUsage} compact />
           </div>
         )}
       </nav>
 
-      <div className="relative z-10 px-4 sm:px-6 py-2 border-b border-white/5 bg-[#08080A]/90">
+      <div className="relative z-10 safe-px py-2 border-b border-white/5 bg-[#08080A]/90">
         <MarketDataRefreshBar
           lastUpdatedAt={lastMarketUpdatedAt}
           status={marketDataStatus}
@@ -7574,7 +7755,7 @@ export default function App() {
       </div>
 
       {quotaBanner && (
-        <div className="relative z-10 px-4 sm:px-6 pt-3">
+        <div className="relative z-10 safe-px pt-3">
           <QuotaExhaustedBanner
             kind={quotaBanner.kind}
             message={quotaBanner.message}
@@ -7585,14 +7766,14 @@ export default function App() {
       )}
 
       {/* Market Pulse Bar */}
-      <div className="relative z-10 bg-[#0A0A0C] border-b border-white/5 py-2.5 overflow-hidden flex whitespace-nowrap">
+      <div className="relative z-10 bg-[#0A0A0C] border-b border-white/5 py-2 overflow-hidden flex whitespace-nowrap">
         <motion.div 
           animate={{ x: [0, -1000] }}
           transition={{ duration: 30, repeat: Infinity, ease: "linear" }}
           className="flex gap-12 px-6 items-center"
         >
           {indices.length > 0 ? indices.concat(indices).map((idx, i) => (
-            <div key={`${idx.symbol}-${i}`} className="flex gap-2.5 items-center font-mono text-[13px] tracking-tight">
+            <div key={`${idx.symbol}-${i}`} className="flex gap-2.5 items-center font-mono text-[12px] sm:text-[13px] tracking-tight">
               <span className="text-gray-400">{idx.shortName || idx.symbol}:</span>
               <span className="text-white font-semibold">${idx.regularMarketPrice?.toFixed(2) || '---'}</span>
               <span className={(idx.regularMarketChange || 0) >= 0 ? "text-emerald-400 font-semibold" : "text-rose-400 font-semibold"}>
@@ -7605,18 +7786,15 @@ export default function App() {
         </motion.div>
       </div>
 
-      <main className="relative z-10 max-w-[1400px] mx-auto p-6 md:p-10 pb-28 lg:pb-10">
-        {/* Desktop-only spacer; mobile uses bottom nav */}
-        <div className="hidden" />
-
+      <main className="relative z-10 max-w-[1400px] mx-auto p-4 sm:p-6 md:p-10 pb-[calc(var(--mobile-dock-h)+1.25rem)] lg:pb-10">
         <AnimatePresence>
           {showFindATrade && (
-            <motion.div
+            <MobileDockSheet
               key="find-a-trade-dock"
-              initial={{ opacity: 0, y: -8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              className="mb-6"
+              open={showFindATrade}
+              title="Find Trades"
+              accentClassName="text-emerald-400"
+              onClose={() => setShowFindATrade(false)}
             >
               <FindATradePanel
                 horizon={analysisHorizon}
@@ -7626,25 +7804,44 @@ export default function App() {
                   runTickerSearch(sym);
                 }}
               />
-            </motion.div>
+            </MobileDockSheet>
           )}
           {showSuggestATrade && (
-            <motion.div
+            <MobileDockSheet
               key="suggest-a-trade-dock"
-              initial={{ opacity: 0, y: -8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              className="mb-6"
+              open={showSuggestATrade}
+              title="Suggest Trades"
+              accentClassName="text-sky-400"
+              onClose={() => setShowSuggestATrade(false)}
             >
               <SuggestATradePanel
                 horizon={analysisHorizon}
+                runToken={suggestRunToken}
                 onOpenTicker={(sym) => {
                   if (!assertAnalysisCredits()) return;
                   setShowSuggestATrade(false);
                   runTickerSearch(sym);
                 }}
               />
-            </motion.div>
+            </MobileDockSheet>
+          )}
+          {showDayTrade && (
+            <MobileDockSheet
+              key="day-trade-dock"
+              open={showDayTrade}
+              title="Day Trade"
+              accentClassName="text-orange-400"
+              onClose={() => setShowDayTrade(false)}
+            >
+              <DayTradePanel
+                runToken={dayTradeRunToken}
+                onOpenTicker={(sym) => {
+                  if (!assertAnalysisCredits()) return;
+                  setShowDayTrade(false);
+                  runTickerSearch(sym);
+                }}
+              />
+            </MobileDockSheet>
           )}
         </AnimatePresence>
 
@@ -7659,7 +7856,7 @@ export default function App() {
             >
               {/* === NEWS CENTER PAGE === */}
               {/* News Center Header block */}
-              <div className="relative bg-[#0D0D10] border border-white/5 rounded-2xl p-8 overflow-hidden shadow-2xl">
+              <div className="relative bg-[#0D0D10] border border-white/5 rounded-2xl p-5 sm:p-8 overflow-hidden shadow-2xl">
                 <div className="absolute top-0 right-0 w-[500px] h-[300px] bg-blue-500/[0.015] blur-3xl rounded-full pointer-events-none" />
                 <div className="absolute top-0 bottom-0 left-0 w-1 bg-gradient-to-b from-blue-500 to-indigo-500" />
                 
@@ -8696,12 +8893,11 @@ export default function App() {
                     ticker={data.ticker}
                     stockName={data.quote?.shortName || data.quote?.longName || ''}
                     currentPrice={
-                      Number(
-                        data.quote?.regularMarketPrice ??
-                          data.quote?.price ??
-                          projectionMeta.lastClose ??
-                          0
-                      ) || null
+                      horizonView.currentPrice > 0
+                        ? horizonView.currentPrice
+                        : liveAnalysisPrice > 0
+                          ? liveAnalysisPrice
+                          : null
                     }
                     score={horizonView.score}
                     ratingLabel={horizonView.ratingLabel}
@@ -8715,7 +8911,40 @@ export default function App() {
                     isLoading={predicting || (loading && !aiStockScore && !prediction)}
                     currentAction={horizonView.currentAction.action}
                     currentActionReason={horizonView.currentAction.reason}
+                    doNowByPosition={{
+                      holding: horizonView.doNowByPosition.holding.action,
+                      noPosition: horizonView.doNowByPosition.noPosition.action,
+                    }}
                     userHasPosition={userHasPosition}
+                  />
+                  <TradeZonesPanel
+                    lastClose={
+                      horizonView.currentPrice > 0 ? horizonView.currentPrice : liveAnalysisPrice
+                    }
+                    levels={activeLevels}
+                    bullCase={horizonView.bullCase}
+                    bearCase={horizonView.bearCase}
+                    stopLoss={horizonView.stopLoss}
+                    currency={data.quote?.currency}
+                    quoteAsOf={(data as any)?.quoteAsOf ?? null}
+                    quoteDelayed={!!(data as any)?.quoteDelayed}
+                    zoneScale={horizonView.zoneScale}
+                    horizon={analysisHorizon}
+                    horizonLabel={horizonView.horizonLabel}
+                    userHasPosition={userHasPosition}
+                    onUserHasPositionChange={handleUserHasPositionChange}
+                    currentAction={horizonView.currentAction}
+                    visibleZoneKeys={horizonView.visibleZoneKeys}
+                    technical={technicalBreakdown}
+                    engineZones={{
+                      buyZone: horizonView.buyZone,
+                      addZone: horizonView.addZone,
+                      holdZone: horizonView.holdZone,
+                      takeProfitZone: horizonView.takeProfitZone,
+                      reduceZone: horizonView.reduceZone,
+                      exitZone: horizonView.exitZone,
+                      stopLoss: horizonView.stopLoss,
+                    }}
                   />
                   <AiInsightsStrip
                     keyRisks={keyRisks}
@@ -8759,47 +8988,16 @@ export default function App() {
                     }
                   />
                   <DecisionBriefPanel decision={horizonView} />
-                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                    <TradeZonesPanel
-                      lastClose={
-                        Number(data.quote?.regularMarketPrice) ||
-                        projectionMeta.lastClose ||
-                        0
-                      }
-                      levels={activeLevels}
-                      bullCase={horizonView.bullCase}
-                      bearCase={horizonView.bearCase}
-                      stopLoss={horizonView.stopLoss}
-                      currency={data.quote?.currency}
-                      quoteAsOf={(data as any)?.quoteAsOf ?? null}
-                      zoneScale={horizonView.zoneScale}
-                      horizon={analysisHorizon}
-                      horizonLabel={horizonView.horizonLabel}
-                      userHasPosition={userHasPosition}
-                      onUserHasPositionChange={handleUserHasPositionChange}
-                      currentAction={horizonView.currentAction}
-                      visibleZoneKeys={horizonView.visibleZoneKeys}
-                      engineZones={{
-                        buyZone: horizonView.buyZone,
-                        addZone: horizonView.addZone,
-                        holdZone: horizonView.holdZone,
-                        takeProfitZone: horizonView.takeProfitZone,
-                        reduceZone: horizonView.reduceZone,
-                        exitZone: horizonView.exitZone,
-                        stopLoss: horizonView.stopLoss,
-                      }}
-                    />
-                    <RiskMeterPanel
-                      riskScore={horizonView.riskScore}
-                      riskLabel={horizonView.riskLabel}
-                      volatility={horizonView.volatility}
-                      liquidityLabel={horizonView.liquidityLabel}
-                      drawdown={horizonView.drawdown}
-                      sharpe={horizonView.sharpe}
-                      horizon={analysisHorizon}
-                      horizonLabel={horizonView.horizonLabel}
-                    />
-                  </div>
+                  <RiskMeterPanel
+                    riskScore={horizonView.riskScore}
+                    riskLabel={horizonView.riskLabel}
+                    volatility={horizonView.volatility}
+                    liquidityLabel={horizonView.liquidityLabel}
+                    drawdown={horizonView.drawdown}
+                    sharpe={horizonView.sharpe}
+                    horizon={analysisHorizon}
+                    horizonLabel={horizonView.horizonLabel}
+                  />
                   <MetricRadialRow
                     metrics={[
                       {
@@ -12963,8 +13161,9 @@ export default function App() {
                 <h2 className="text-xl font-sans font-bold text-white mb-2">Search a ticker to begin</h2>
                 <p className="text-sm text-gray-500 max-w-md mx-auto">
                   Press <span className="text-emerald-400 font-mono">Enter</span> in the search bar, or open{' '}
-                  <span className="text-emerald-400 font-semibold">Find a Trade</span> /{' '}
-                  <span className="text-sky-400 font-semibold">Suggest a Trade</span>.
+                  <span className="text-emerald-400 font-semibold">Find Trades</span> /{' '}
+                  <span className="text-sky-400 font-semibold">Suggest Trades</span> /{' '}
+                  <span className="text-orange-400 font-semibold">Day Trade</span>.
                 </p>
               </div>
               <div className="w-full max-w-xl space-y-3">
@@ -12974,16 +13173,17 @@ export default function App() {
                     onClick={() => {
                       setShowFindATrade(true);
                       setShowSuggestATrade(false);
+                      setShowDayTrade(false);
                     }}
                     className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-emerald-500 text-black py-2.5 text-[12px] font-bold uppercase tracking-wider hover:bg-emerald-400 transition-colors cursor-pointer"
                   >
                     <Rocket className="w-4 h-4" />
-                    Open Find a Trade
+                    Open Find Trades
                   </button>
                 )}
                 {showFindATrade && (
                   <p className="text-[11px] text-emerald-300/80 font-mono text-center">
-                    Find a Trade panel is open above — paste tickers and scan.
+                    Find Trades panel is open above — paste tickers and scan.
                   </p>
                 )}
                 {!showSuggestATrade && (
@@ -12992,16 +13192,38 @@ export default function App() {
                     onClick={() => {
                       setShowSuggestATrade(true);
                       setShowFindATrade(false);
+                      setShowDayTrade(false);
+                      setSuggestRunToken((n) => n + 1);
                     }}
                     className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-sky-500 text-black py-2.5 text-[12px] font-bold uppercase tracking-wider hover:bg-sky-400 transition-colors cursor-pointer"
                   >
                     <Sparkles className="w-4 h-4" />
-                    Open Suggest a Trade
+                    Open Suggest Trades
                   </button>
                 )}
                 {showSuggestATrade && (
                   <p className="text-[11px] text-sky-300/80 font-mono text-center">
-                    Suggest a Trade panel is open above — pick a market and scan.
+                    Suggest Trades is searching above — press Suggest again for a new search.
+                  </p>
+                )}
+                {!showDayTrade && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowDayTrade(true);
+                      setShowFindATrade(false);
+                      setShowSuggestATrade(false);
+                      setDayTradeRunToken((n) => n + 1);
+                    }}
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-orange-500 text-black py-2.5 text-[12px] font-bold uppercase tracking-wider hover:bg-orange-400 transition-colors cursor-pointer"
+                  >
+                    <Flame className="w-4 h-4" />
+                    Open Day Trade
+                  </button>
+                )}
+                {showDayTrade && (
+                  <p className="text-[11px] text-orange-300/80 font-mono text-center">
+                    Day Trade scout is running above — press Day Trade again for a new search.
                   </p>
                 )}
               </div>
@@ -13011,7 +13233,7 @@ export default function App() {
       </main>
 
       {/* Footer */}
-      <footer className="mt-12 py-8 px-6 sm:px-10 border-t border-white/5 flex flex-col md:flex-row items-center justify-between text-[11px] font-sans text-gray-500 gap-4 relative z-10 mb-16 lg:mb-0">
+      <footer className="mt-12 py-8 safe-px sm:px-10 border-t border-white/5 flex flex-col md:flex-row items-center justify-between text-[11px] font-sans text-gray-500 gap-4 relative z-10 mb-[calc(var(--mobile-dock-h)+0.5rem)] lg:mb-0">
         <div className="flex flex-wrap justify-center gap-x-6 gap-y-2">
           <span className="font-mono text-gray-400">Session: {sessionId}</span>
           <span className="hidden md:inline">Latency: <span className="text-emerald-400/80 font-mono">12.4ms</span></span>
@@ -13023,53 +13245,58 @@ export default function App() {
         </div>
       </footer>
 
+      <InstallAppBanner />
+
       {/* Mobile bottom navigation */}
-      <nav className="lg:hidden fixed bottom-0 inset-x-0 z-50 border-t border-white/10 bg-[#0a0a0c]/95 backdrop-blur-xl pb-[env(safe-area-inset-bottom)]">
-        <div className="grid grid-cols-3 gap-1 px-2 py-2">
+      <nav
+        className="lg:hidden fixed bottom-0 inset-x-0 z-50 border-t border-white/10 bg-[#0a0a0c]/95 backdrop-blur-xl pb-[env(safe-area-inset-bottom)]"
+        style={{ paddingLeft: 'max(0.5rem, env(safe-area-inset-left))', paddingRight: 'max(0.5rem, env(safe-area-inset-right))' }}
+      >
+        <div className="grid grid-cols-3 gap-1 px-1 py-1.5">
           <button
             type="button"
             onClick={() => setActivePage('DASHBOARD')}
             className={cn(
-              "flex flex-col items-center gap-1 rounded-xl px-2 py-2.5 text-[11px] font-sans font-semibold transition-all cursor-pointer",
+              "touch-manipulation flex flex-col items-center justify-center gap-1 rounded-xl min-h-12 px-2 py-2 text-[11px] font-sans font-semibold transition-all cursor-pointer",
               activePage === 'DASHBOARD'
                 ? "bg-emerald-500 text-black shadow-[0_0_18px_rgba(16,185,129,0.35)]"
                 : "text-gray-400 hover:text-white hover:bg-white/[0.04]"
             )}
           >
-            <Activity className="w-4 h-4" />
+            <Activity className="w-5 h-5" />
             Dashboard
           </button>
           <button
             type="button"
             onClick={() => setActivePage('NEWS_CENTER')}
             className={cn(
-              "flex flex-col items-center gap-1 rounded-xl px-2 py-2.5 text-[11px] font-sans font-semibold transition-all cursor-pointer",
+              "touch-manipulation flex flex-col items-center justify-center gap-1 rounded-xl min-h-12 px-2 py-2 text-[11px] font-sans font-semibold transition-all cursor-pointer",
               activePage === 'NEWS_CENTER'
                 ? "bg-blue-500 text-white shadow-[0_0_18px_rgba(59,130,246,0.3)]"
                 : "text-gray-400 hover:text-white hover:bg-white/[0.04]"
             )}
           >
-            <Newspaper className="w-4 h-4" />
+            <Newspaper className="w-5 h-5" />
             News
           </button>
           <button
             type="button"
             onClick={() => setActivePage('SELF_LEARNING')}
             className={cn(
-              "flex flex-col items-center gap-1 rounded-xl px-2 py-2.5 text-[11px] font-sans font-semibold transition-all cursor-pointer",
+              "touch-manipulation flex flex-col items-center justify-center gap-1 rounded-xl min-h-12 px-2 py-2 text-[11px] font-sans font-semibold transition-all cursor-pointer",
               activePage === 'SELF_LEARNING'
                 ? "bg-indigo-500 text-white shadow-[0_0_18px_rgba(99,102,241,0.3)]"
                 : "text-gray-400 hover:text-white hover:bg-white/[0.04]"
             )}
           >
-            <Brain className="w-4 h-4" />
+            <Brain className="w-5 h-5" />
             Learning
           </button>
         </div>
       </nav>
 
       {/* Floating Price Alerts Toasts Viewport */}
-      <div className="fixed bottom-24 lg:bottom-6 right-4 sm:right-6 z-[999] flex flex-col gap-3 max-w-sm w-full pointer-events-none">
+      <div className="fixed bottom-[calc(var(--mobile-dock-h)+0.75rem)] lg:bottom-6 right-3 sm:right-6 z-[999] flex flex-col gap-3 max-w-sm w-[calc(100%-1.5rem)] sm:w-full pointer-events-none">
         <AnimatePresence>
           {toasts.map(toast => (
             <motion.div

@@ -22,6 +22,7 @@ if (typeof window !== 'undefined' && window.performance && typeof window.perform
 
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
+import {registerSW} from 'virtual:pwa-register';
 import App from './App.tsx';
 import { AuthProvider } from './lib/auth';
 import { SubscriptionGate } from './components/SubscriptionGate';
@@ -31,6 +32,9 @@ import './index.css';
 if (typeof document !== 'undefined') {
   document.title = 'Quantum Node';
 }
+
+// Auto-update service worker so installed PWA stays current
+registerSW({ immediate: true });
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

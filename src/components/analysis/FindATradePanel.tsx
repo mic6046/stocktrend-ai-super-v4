@@ -76,7 +76,7 @@ export function FindATradePanel({
       });
       setResult(out);
     } catch (e: any) {
-      setError(e?.message || 'Find a Trade failed');
+      setError(e?.message || 'Find Trades failed');
     } finally {
       setScanning(false);
     }
@@ -85,7 +85,7 @@ export function FindATradePanel({
   return (
     <GlassCard className={cn('space-y-3', className)}>
       <SectionLabel icon={<Rocket className="w-3.5 h-3.5 text-emerald-400" />}>
-        Find a Trade · {horizonLabel}
+        Find Trades · {horizonLabel}
       </SectionLabel>
 
       <p className="text-[11px] text-gray-400 leading-relaxed">
@@ -100,7 +100,7 @@ export function FindATradePanel({
         onChange={(e) => setListText(e.target.value)}
         rows={compact ? 2 : 3}
         placeholder="AAPL, NVDA, MSFT, 0700.HK"
-        className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-[12px] font-mono text-gray-200 placeholder:text-gray-600 focus:outline-none focus:border-emerald-500/40 resize-y min-h-[56px]"
+        className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-3 text-base sm:text-[13px] font-mono text-gray-200 placeholder:text-gray-600 focus:outline-none focus:border-emerald-500/40 resize-y min-h-[64px]"
       />
 
       <div className="flex flex-wrap items-center gap-2 justify-between">
@@ -115,14 +115,14 @@ export function FindATradePanel({
           disabled={scanning || parsed.length === 0}
           onClick={() => void runScout()}
           className={cn(
-            'inline-flex items-center gap-2 rounded-full px-4 py-2 text-[11px] font-bold uppercase tracking-wider transition-all cursor-pointer',
+            'touch-manipulation inline-flex items-center justify-center gap-2 rounded-full min-h-11 px-5 py-2.5 text-[12px] font-bold uppercase tracking-wider transition-all cursor-pointer',
             scanning || parsed.length === 0
               ? 'bg-white/5 text-gray-500 border border-white/10'
               : 'bg-emerald-500 text-black border border-emerald-400 shadow-[0_0_18px_rgba(16,185,129,0.35)] hover:bg-emerald-400'
           )}
         >
           {scanning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Crosshair className="w-3.5 h-3.5" />}
-          Find a Trade
+          Find Trades
         </button>
       </div>
 
@@ -141,19 +141,23 @@ export function FindATradePanel({
             exit={{ opacity: 0 }}
             className="space-y-3"
           >
+            <p className="text-[11px] text-gray-400 leading-relaxed">{result.message}</p>
+
             {result.topPick ? (
               <TopPickCard pick={result.topPick} onOpen={onOpenTicker} />
             ) : (
               <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 px-3 py-3">
-                <p className="text-[12px] text-amber-100 font-semibold">No trade found</p>
-                <p className="mt-1 text-[11px] text-gray-400 leading-relaxed">{result.message}</p>
+                <p className="text-[12px] text-amber-100 font-semibold">No BUY trade found</p>
+                <p className="mt-1 text-[11px] text-gray-400 leading-relaxed">
+                  None of the {result.scannedCount} tickers cleared BUY gates on this scout.
+                </p>
               </div>
             )}
 
             {result.buyCandidates.length > 1 && (
               <div>
                 <p className="text-[10px] font-mono uppercase tracking-wider text-gray-500 mb-2">
-                  Other BUY candidates
+                  Other BUY candidates ({result.buyCandidates.length - 1})
                 </p>
                 <div className="space-y-1.5">
                   {result.buyCandidates.slice(1, 5).map((c) => (
@@ -163,10 +167,23 @@ export function FindATradePanel({
               </div>
             )}
 
+            {result.watchlistCandidates?.length > 0 && (
+              <div>
+                <p className="text-[10px] font-mono uppercase tracking-wider text-amber-200/80 mb-2">
+                  Near-miss watchlist (did not clear BUY)
+                </p>
+                <div className="space-y-1.5">
+                  {result.watchlistCandidates.map((c) => (
+                    <CandidateRow key={`w-${c.ticker}`} c={c} onOpen={onOpenTicker} />
+                  ))}
+                </div>
+              </div>
+            )}
+
             {result.scanned.some((c) => !c.isBuyCandidate) && (
               <details className="rounded-xl border border-white/8 bg-black/25 px-3 py-2">
                 <summary className="text-[10px] font-mono uppercase tracking-wider text-gray-500 cursor-pointer">
-                  Full scout log ({result.scanned.length})
+                  Full scout log ({result.scanned.length}) · {result.buyCleared} BUY cleared
                 </summary>
                 <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
                   {result.scanned.map((c) => (
@@ -225,7 +242,7 @@ function TopPickCard({
       <button
         type="button"
         onClick={() => onOpen(pick.ticker)}
-        className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-white text-black py-2 text-[11px] font-bold uppercase tracking-wider hover:bg-emerald-100 transition-colors cursor-pointer"
+        className="touch-manipulation w-full inline-flex items-center justify-center gap-2 rounded-xl bg-white text-black min-h-11 py-2.5 text-[12px] font-bold uppercase tracking-wider hover:bg-emerald-100 transition-colors cursor-pointer"
       >
         <Search className="w-3.5 h-3.5" />
         Open full analysis
@@ -245,7 +262,7 @@ function CandidateRow({
     <button
       type="button"
       onClick={() => onOpen(c.ticker)}
-      className="w-full flex items-center justify-between gap-2 rounded-xl border border-white/8 bg-black/30 px-3 py-2 text-left hover:border-emerald-500/30 transition-colors cursor-pointer"
+      className="touch-manipulation w-full flex items-center justify-between gap-2 rounded-xl border border-white/8 bg-black/30 px-3 py-3 min-h-12 text-left hover:border-emerald-500/30 transition-colors cursor-pointer"
     >
       <div className="min-w-0">
         <p className="text-[12px] font-bold text-white">{c.ticker}</p>

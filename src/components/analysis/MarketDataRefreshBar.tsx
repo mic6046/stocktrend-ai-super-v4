@@ -34,8 +34,8 @@ export function MarketDataRefreshBar({
   const busy = disabled || status === 'loading';
 
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-white/10 bg-[#0D0D10]/90 px-3 py-2.5 text-[10px] font-mono">
-      <div className="flex flex-col gap-0.5 min-w-[7.5rem]">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-white/10 bg-[#0D0D10]/90 px-3 py-2.5 text-[10px] sm:text-[11px] font-mono">
+      <div className="flex flex-col gap-0.5 min-w-0 flex-1 sm:min-w-[7.5rem] sm:flex-none">
         <span className="uppercase tracking-wider text-gray-500">Market Data Refresh</span>
         <span className="text-gray-400">
           Last Updated:{' '}
@@ -61,7 +61,7 @@ export function MarketDataRefreshBar({
         disabled={busy}
         onClick={onRefresh}
         className={cn(
-          'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 font-bold uppercase tracking-wider transition-colors cursor-pointer',
+          'touch-manipulation inline-flex items-center justify-center gap-1.5 rounded-full border min-h-11 px-4 py-2 font-bold uppercase tracking-wider transition-colors cursor-pointer',
           busy
             ? 'border-white/10 text-gray-600'
             : 'border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10'
@@ -104,7 +104,7 @@ export function MarketDataRefreshBar({
           <select
             value={intervalSec}
             onChange={(e) => onIntervalChange(Number(e.target.value) as AutoRefreshIntervalSec)}
-            className="rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-gray-200 focus:outline-none focus:border-amber-500/40"
+            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2.5 min-h-11 text-base sm:text-[13px] text-gray-200 focus:outline-none focus:border-amber-500/40"
             title="Auto refresh interval"
           >
             {AUTO_REFRESH_OPTIONS.map((o) => (

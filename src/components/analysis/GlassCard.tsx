@@ -28,7 +28,7 @@ export function GlassCard({
       className={cn(
         'glass-panel rounded-2xl border border-white/10 bg-[#121214]/85 backdrop-blur-xl',
         'shadow-[0_8px_40px_rgba(0,0,0,0.35)]',
-        hover && 'transition-all duration-300 hover:border-white/15 hover:-translate-y-0.5 hover:shadow-[0_12px_48px_rgba(0,0,0,0.45)]',
+        hover && 'transition-all duration-300 lg:hover:border-white/15 lg:hover:-translate-y-0.5 lg:hover:shadow-[0_12px_48px_rgba(0,0,0,0.45)]',
         glow && 'neon-glow',
         padMap[padding],
         className
