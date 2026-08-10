@@ -7558,25 +7558,22 @@ export default function App() {
         </div>
       )}
 
-      {/* Market Pulse Bar */}
-      <div className="relative z-10 bg-[#0A0A0C] border-b border-white/5 py-1.5 sm:py-2.5 overflow-hidden flex whitespace-nowrap">
-        <motion.div 
-          animate={{ x: [0, -1000] }}
-          transition={{ duration: 30, repeat: Infinity, ease: "linear" }}
-          className="flex gap-8 sm:gap-12 px-4 sm:px-6 items-center"
-        >
-          {indices.length > 0 ? indices.concat(indices).map((idx, i) => (
-            <div key={`${idx.symbol}-${i}`} className="flex gap-2 sm:gap-2.5 items-center font-mono text-[11px] sm:text-[13px] tracking-tight">
-              <span className="text-gray-400">{idx.shortName || idx.symbol}:</span>
+      {/* Market pulse — centered wrap, no sideways marquee scroll */}
+      <div className="relative z-10 bg-[#0A0A0C] border-b border-white/5 py-1.5 sm:py-2 overflow-x-hidden">
+        <div className="mx-auto max-w-[1400px] px-3 sm:px-6 flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 sm:gap-x-6">
+          {indices.length > 0 ? indices.map((idx, i) => (
+            <div key={`${idx.symbol}-${i}`} className="flex gap-1.5 sm:gap-2 items-center font-mono text-[10px] sm:text-[12px] tracking-tight shrink-0">
+              <span className="text-gray-500">{idx.shortName || idx.symbol}</span>
               <span className="text-white font-semibold">${idx.regularMarketPrice?.toFixed(2) || '---'}</span>
               <span className={(idx.regularMarketChange || 0) >= 0 ? "text-emerald-400 font-semibold" : "text-rose-400 font-semibold"}>
+                {(idx.regularMarketChangePercent || 0) >= 0 ? '+' : ''}
                 {idx.regularMarketChangePercent?.toFixed(2) || '0.00'}%
               </span>
             </div>
           )) : (
             <div className="text-[11px] text-gray-600 animate-pulse font-sans">Awaiting global exchange feed…</div>
           )}
-        </motion.div>
+        </div>
       </div>
 
       <main className="relative z-10 max-w-[1400px] mx-auto px-3 py-4 sm:p-6 md:p-10 pb-28 lg:pb-10">
@@ -13059,7 +13056,7 @@ export default function App() {
           <span className="hidden md:inline">Region: <span className="text-blue-400/80 font-mono">US_EAST_01</span></span>
         </div>
         <div className="flex flex-col md:items-end gap-2 text-center md:text-right">
-          <span className="text-gray-500">Quantum Node · Powered by Google Gemini</span>
+          <span className="text-gray-500">Quantum Node · Powered by Google Gemini · <span className="font-mono text-gray-600">ui-b95e5e5+</span></span>
           <LegalLinks className="justify-center md:justify-end" />
         </div>
       </footer>
