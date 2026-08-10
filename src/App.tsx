@@ -7346,18 +7346,19 @@ export default function App() {
       <div className="fixed top-[-100px] left-[-100px] w-[500px] h-[500px] bg-emerald-500/10 rounded-full blur-[120px] pointer-events-none" />
       <div className="fixed bottom-[-100px] right-[-100px] w-[600px] h-[600px] bg-blue-600/10 rounded-full blur-[150px] pointer-events-none" />
 
-      {/* Centered header: brand + search + Find/Suggest/Day Trade + icons */}
-      <nav className="relative z-10 border-b border-white/5 backdrop-blur-md sticky top-0 px-3 sm:px-5 py-2.5">
-        <div className="mx-auto flex w-full max-w-[1400px] flex-col items-center gap-2.5">
-          <div className="flex w-full flex-wrap items-center justify-center gap-x-3 gap-y-2">
-            <div className="flex items-center gap-2 shrink-0">
-              <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center shadow-[0_0_18px_rgba(16,185,129,0.45)] shrink-0">
-                <Activity className="w-4 h-4 text-black" />
+      {/* Responsive centered header — compact on phone, full controls on web */}
+      <nav className="relative z-10 border-b border-white/5 backdrop-blur-md sticky top-0 pt-[env(safe-area-inset-top)] px-3 sm:px-5 py-2 sm:py-2.5 bg-[#050505]/85">
+        <div className="mx-auto flex w-full max-w-[1400px] flex-col items-center gap-2">
+          {/* Row 1: brand · search · refresh/account — always centered */}
+          <div className="flex w-full items-center justify-center gap-2 sm:gap-3">
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+              <div className="w-7 h-7 sm:w-8 sm:h-8 bg-emerald-500 rounded-lg flex items-center justify-center shadow-[0_0_18px_rgba(16,185,129,0.45)] shrink-0">
+                <Activity className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-black" />
               </div>
-              <h1 className="text-sm sm:text-base font-sans font-extrabold tracking-tight uppercase whitespace-nowrap leading-none">
+              <h1 className="text-xs sm:text-sm md:text-base font-sans font-extrabold tracking-tight uppercase whitespace-nowrap leading-none">
                 QUANTUM<span className="text-emerald-500">NODE</span>
               </h1>
-              <div className="hidden lg:flex items-center gap-0.5 ml-1 border-l border-white/10 pl-2">
+              <div className="hidden xl:flex items-center gap-0.5 ml-1 border-l border-white/10 pl-2">
                 <button
                   type="button"
                   onClick={() => setActivePage('DASHBOARD')}
@@ -7399,7 +7400,7 @@ export default function App() {
 
             <form
               onSubmit={handleSubmit}
-              className="w-full max-w-sm min-w-[12rem] flex-1 group sm:max-w-md"
+              className="min-w-0 flex-1 max-w-[13rem] sm:max-w-xs md:max-w-sm lg:max-w-md group"
               autoComplete="off"
             >
               <div className="relative w-full min-w-0">
@@ -7423,16 +7424,16 @@ export default function App() {
                   inputMode="search"
                   name={`qn-ticker-${searchInputKey}`}
                   id={`qn-ticker-${searchInputKey}`}
-                  placeholder="Ticker then Enter (e.g. AAPL)"
+                  placeholder="Ticker"
                   title="Press Enter to search"
-                  className="w-full h-9 bg-[#111113] border border-white/10 rounded-full pl-9 pr-8 text-sm focus:outline-none focus:border-emerald-500/50 transition-all placeholder:text-gray-600 font-mono tracking-wide"
+                  className="w-full h-8 sm:h-9 bg-[#111113] border border-white/10 rounded-full pl-8 sm:pl-9 pr-7 sm:pr-8 text-[13px] sm:text-sm focus:outline-none focus:border-emerald-500/50 transition-all placeholder:text-gray-600 font-mono tracking-wide"
                 />
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500 group-focus-within:text-emerald-500 transition-colors pointer-events-none" />
-                {loading && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-emerald-500" />}
+                <Search className="absolute left-2.5 sm:left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500 group-focus-within:text-emerald-500 transition-colors pointer-events-none" />
+                {loading && <Loader2 className="absolute right-2.5 sm:right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-emerald-500" />}
               </div>
             </form>
 
-            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
               <MarketDataRefreshBar
                 variant="inline"
                 lastUpdatedAt={lastMarketUpdatedAt}
@@ -7452,7 +7453,7 @@ export default function App() {
               />
 
               {user && (
-                <div className="hidden md:block max-w-[200px] xl:max-w-[240px] overflow-hidden">
+                <div className="hidden lg:block max-w-[200px] xl:max-w-[240px] overflow-hidden">
                   <UsageQuotaBar usage={usage} email={user.email} onRefresh={refreshUsage} compact />
                 </div>
               )}
@@ -7462,16 +7463,16 @@ export default function App() {
                   type="button"
                   onClick={() => setShowAuthModal(true)}
                   disabled={authLoading}
-                  className="inline-flex items-center justify-center gap-1.5 h-8 rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-2.5 font-sans font-bold text-[10px] text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50 shrink-0"
+                  className="inline-flex items-center justify-center gap-1 h-8 rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-2 sm:px-2.5 font-sans font-bold text-[10px] text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50 shrink-0"
                 >
                   <Shield className="h-3.5 w-3.5" />
-                  Sign in
+                  <span className="hidden sm:inline">Sign in</span>
                 </button>
               ) : (
                 <button
                   type="button"
                   onClick={() => signOut()}
-                  className="inline-flex items-center justify-center h-8 rounded-lg border border-white/10 px-2.5 text-[10px] font-sans font-semibold text-gray-300 hover:bg-white/5 hover:text-white shrink-0"
+                  className="inline-flex items-center justify-center h-8 rounded-lg border border-white/10 px-2 sm:px-2.5 text-[10px] font-sans font-semibold text-gray-300 hover:bg-white/5 hover:text-white shrink-0"
                 >
                   Out
                 </button>
@@ -7479,7 +7480,8 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center justify-center gap-2">
+          {/* Row 2: Find / Suggest / Day Trade — equal centered strip */}
+          <div className="grid w-full max-w-lg grid-cols-3 gap-1.5 sm:gap-2 sm:max-w-xl md:max-w-2xl">
             <button
               type="button"
               onClick={() => {
@@ -7491,16 +7493,15 @@ export default function App() {
                 }
               }}
               className={cn(
-                'shrink-0 inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
+                'inline-flex items-center justify-center gap-1 sm:gap-1.5 rounded-full px-1.5 sm:px-3 py-2 text-[9px] sm:text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
                 showFindATrade
                   ? 'bg-emerald-500 text-black border-emerald-400 shadow-[0_0_16px_rgba(16,185,129,0.35)]'
                   : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/25'
               )}
               title="Find Trades — paste tickers or fill from market/theme lists"
             >
-              <Rocket className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Find Trades</span>
-              <span className="sm:hidden">Find</span>
+              <Rocket className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">Find Trades</span>
             </button>
             <button
               type="button"
@@ -7512,16 +7513,15 @@ export default function App() {
                 setSuggestRunToken((n) => n + 1);
               }}
               className={cn(
-                'shrink-0 inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
+                'inline-flex items-center justify-center gap-1 sm:gap-1.5 rounded-full px-1.5 sm:px-3 py-2 text-[9px] sm:text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
                 showSuggestATrade
                   ? 'bg-sky-500 text-black border-sky-400 shadow-[0_0_16px_rgba(56,189,248,0.35)]'
                   : 'bg-sky-500/15 text-sky-300 border-sky-500/40 hover:bg-sky-500/25'
               )}
               title="New Suggest Trades search from popular US / HK / Japan / Europe markets"
             >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Suggest Trades</span>
-              <span className="sm:hidden">Suggest</span>
+              <Sparkles className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">Suggest Trades</span>
             </button>
             <button
               type="button"
@@ -7533,16 +7533,15 @@ export default function App() {
                 setDayTradeRunToken((n) => n + 1);
               }}
               className={cn(
-                'shrink-0 inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
+                'inline-flex items-center justify-center gap-1 sm:gap-1.5 rounded-full px-1.5 sm:px-3 py-2 text-[9px] sm:text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
                 showDayTrade
                   ? 'bg-orange-500 text-black border-orange-400 shadow-[0_0_16px_rgba(249,115,22,0.35)]'
                   : 'bg-orange-500/15 text-orange-300 border-orange-500/40 hover:bg-orange-500/25'
               )}
               title="Scout popular stocks that clear day-trade liquidity / range / bias gates"
             >
-              <Flame className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Day Trade</span>
-              <span className="sm:hidden">Day</span>
+              <Flame className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">Day Trade</span>
             </button>
           </div>
         </div>
@@ -7560,14 +7559,14 @@ export default function App() {
       )}
 
       {/* Market Pulse Bar */}
-      <div className="relative z-10 bg-[#0A0A0C] border-b border-white/5 py-2.5 overflow-hidden flex whitespace-nowrap">
+      <div className="relative z-10 bg-[#0A0A0C] border-b border-white/5 py-1.5 sm:py-2.5 overflow-hidden flex whitespace-nowrap">
         <motion.div 
           animate={{ x: [0, -1000] }}
           transition={{ duration: 30, repeat: Infinity, ease: "linear" }}
-          className="flex gap-12 px-6 items-center"
+          className="flex gap-8 sm:gap-12 px-4 sm:px-6 items-center"
         >
           {indices.length > 0 ? indices.concat(indices).map((idx, i) => (
-            <div key={`${idx.symbol}-${i}`} className="flex gap-2.5 items-center font-mono text-[13px] tracking-tight">
+            <div key={`${idx.symbol}-${i}`} className="flex gap-2 sm:gap-2.5 items-center font-mono text-[11px] sm:text-[13px] tracking-tight">
               <span className="text-gray-400">{idx.shortName || idx.symbol}:</span>
               <span className="text-white font-semibold">${idx.regularMarketPrice?.toFixed(2) || '---'}</span>
               <span className={(idx.regularMarketChange || 0) >= 0 ? "text-emerald-400 font-semibold" : "text-rose-400 font-semibold"}>
@@ -7580,7 +7579,7 @@ export default function App() {
         </motion.div>
       </div>
 
-      <main className="relative z-10 max-w-[1400px] mx-auto p-6 md:p-10 pb-28 lg:pb-10">
+      <main className="relative z-10 max-w-[1400px] mx-auto px-3 py-4 sm:p-6 md:p-10 pb-28 lg:pb-10">
         {/* Desktop-only spacer; mobile uses bottom nav */}
         <div className="hidden" />
 
@@ -12975,10 +12974,10 @@ export default function App() {
               </div>
             </div>
           ) : (
-            <div className="col-span-12 py-10 sm:py-16 flex flex-col items-center justify-center text-center px-6 gap-6">
+            <div className="col-span-12 py-8 sm:py-16 flex flex-col items-center justify-center text-center px-3 sm:px-6 gap-4 sm:gap-6">
               <div>
-                <Search className="w-10 h-10 text-emerald-500/50 mb-4 mx-auto" />
-                <h2 className="text-xl font-sans font-bold text-white mb-2">Search a ticker to begin</h2>
+                <Search className="w-9 h-9 sm:w-10 sm:h-10 text-emerald-500/50 mb-3 sm:mb-4 mx-auto" />
+                <h2 className="text-lg sm:text-xl font-sans font-bold text-white mb-2">Search a ticker to begin</h2>
                 <p className="text-sm text-gray-500 max-w-md mx-auto">
                   Press <span className="text-emerald-400 font-mono">Enter</span> in the search bar, or open{' '}
                   <span className="text-emerald-400 font-semibold">Find Trades</span> /{' '}
@@ -12986,7 +12985,7 @@ export default function App() {
                   <span className="text-orange-400 font-semibold">Day Trade</span>.
                 </p>
               </div>
-              <div className="w-full max-w-xl space-y-3">
+              <div className="w-full max-w-xl space-y-2.5 sm:space-y-3">
                 {!showFindATrade && (
                   <button
                     type="button"
@@ -13053,7 +13052,7 @@ export default function App() {
       </main>
 
       {/* Footer */}
-      <footer className="mt-12 py-8 px-6 sm:px-10 border-t border-white/5 flex flex-col md:flex-row items-center justify-between text-[11px] font-sans text-gray-500 gap-4 relative z-10 mb-16 lg:mb-0">
+      <footer className="mt-8 sm:mt-12 py-6 sm:py-8 px-4 sm:px-10 border-t border-white/5 flex flex-col md:flex-row items-center justify-between text-[11px] font-sans text-gray-500 gap-3 sm:gap-4 relative z-10 mb-20 lg:mb-0">
         <div className="flex flex-wrap justify-center gap-x-6 gap-y-2">
           <span className="font-mono text-gray-400">Session: {sessionId}</span>
           <span className="hidden md:inline">Latency: <span className="text-emerald-400/80 font-mono">12.4ms</span></span>
@@ -13066,13 +13065,13 @@ export default function App() {
       </footer>
 
       {/* Mobile bottom navigation */}
-      <nav className="lg:hidden fixed bottom-0 inset-x-0 z-50 border-t border-white/10 bg-[#0a0a0c]/95 backdrop-blur-xl pb-[env(safe-area-inset-bottom)]">
-        <div className="grid grid-cols-3 gap-1 px-2 py-2">
+      <nav className="lg:hidden fixed bottom-0 inset-x-0 z-50 border-t border-white/10 bg-[#0a0a0c]/95 backdrop-blur-xl pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+        <div className="grid grid-cols-3 gap-1 px-2 pt-1.5">
           <button
             type="button"
             onClick={() => setActivePage('DASHBOARD')}
             className={cn(
-              "flex flex-col items-center gap-1 rounded-xl px-2 py-2.5 text-[11px] font-sans font-semibold transition-all cursor-pointer",
+              "flex flex-col items-center gap-0.5 rounded-xl px-2 py-2 text-[10px] sm:text-[11px] font-sans font-semibold transition-all cursor-pointer min-h-[44px]",
               activePage === 'DASHBOARD'
                 ? "bg-emerald-500 text-black shadow-[0_0_18px_rgba(16,185,129,0.35)]"
                 : "text-gray-400 hover:text-white hover:bg-white/[0.04]"
@@ -13085,7 +13084,7 @@ export default function App() {
             type="button"
             onClick={() => setActivePage('NEWS_CENTER')}
             className={cn(
-              "flex flex-col items-center gap-1 rounded-xl px-2 py-2.5 text-[11px] font-sans font-semibold transition-all cursor-pointer",
+              "flex flex-col items-center gap-0.5 rounded-xl px-2 py-2 text-[10px] sm:text-[11px] font-sans font-semibold transition-all cursor-pointer min-h-[44px]",
               activePage === 'NEWS_CENTER'
                 ? "bg-blue-500 text-white shadow-[0_0_18px_rgba(59,130,246,0.3)]"
                 : "text-gray-400 hover:text-white hover:bg-white/[0.04]"
@@ -13098,7 +13097,7 @@ export default function App() {
             type="button"
             onClick={() => setActivePage('SELF_LEARNING')}
             className={cn(
-              "flex flex-col items-center gap-1 rounded-xl px-2 py-2.5 text-[11px] font-sans font-semibold transition-all cursor-pointer",
+              "flex flex-col items-center gap-0.5 rounded-xl px-2 py-2 text-[10px] sm:text-[11px] font-sans font-semibold transition-all cursor-pointer min-h-[44px]",
               activePage === 'SELF_LEARNING'
                 ? "bg-indigo-500 text-white shadow-[0_0_18px_rgba(99,102,241,0.3)]"
                 : "text-gray-400 hover:text-white hover:bg-white/[0.04]"
@@ -13111,7 +13110,7 @@ export default function App() {
       </nav>
 
       {/* Floating Price Alerts Toasts Viewport */}
-      <div className="fixed bottom-24 lg:bottom-6 right-4 sm:right-6 z-[999] flex flex-col gap-3 max-w-sm w-full pointer-events-none">
+      <div className="fixed bottom-24 lg:bottom-6 right-3 sm:right-6 z-[999] flex flex-col gap-3 max-w-[calc(100vw-1.5rem)] sm:max-w-sm w-full pointer-events-none">
         <AnimatePresence>
           {toasts.map(toast => (
             <motion.div

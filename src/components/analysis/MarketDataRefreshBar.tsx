@@ -38,28 +38,29 @@ export function MarketDataRefreshBar({
 
   if (variant === 'inline') {
     return (
-      <div className="flex items-center gap-1.5 shrink-0 text-[10px] font-mono min-w-0">
+      <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 text-[10px] font-mono min-w-0">
         <button
           type="button"
           disabled={busy}
           onClick={onRefresh}
           className={cn(
-            'inline-flex items-center justify-center gap-1 h-8 rounded-full border px-2.5 font-bold uppercase tracking-wider transition-colors cursor-pointer',
+            'inline-flex items-center justify-center gap-1 h-8 w-8 sm:w-auto sm:px-2.5 rounded-full border font-bold uppercase tracking-wider transition-colors cursor-pointer',
             busy
               ? 'border-white/10 text-gray-600'
               : 'border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10'
           )}
           title={`Refresh market data · last ${formatLastUpdated(lastUpdatedAt)} · ${statusLabel(status)}`}
+          aria-label="Refresh market data"
         >
           {status === 'loading' ? (
             <Loader2 className="w-3.5 h-3.5 animate-spin" />
           ) : (
             <RefreshCw className="w-3.5 h-3.5" />
           )}
-          <span className="hidden xl:inline">Refresh</span>
+          <span className="hidden lg:inline">Refresh</span>
         </button>
 
-        <div className="flex items-center gap-0.5 h-8 rounded-full border border-white/10 bg-black/30 p-0.5">
+        <div className="hidden sm:flex items-center gap-0.5 h-8 rounded-full border border-white/10 bg-black/30 p-0.5">
           <button
             type="button"
             onClick={() => onModeChange('manual')}
@@ -92,7 +93,7 @@ export function MarketDataRefreshBar({
           <select
             value={intervalSec}
             onChange={(e) => onIntervalChange(Number(e.target.value) as AutoRefreshIntervalSec)}
-            className="h-8 rounded-full border border-white/10 bg-black/40 px-2 text-gray-200 focus:outline-none focus:border-amber-500/40 max-w-[4.75rem]"
+            className="hidden sm:block h-8 rounded-full border border-white/10 bg-black/40 px-2 text-gray-200 focus:outline-none focus:border-amber-500/40 max-w-[4.75rem]"
             title="Auto refresh interval"
           >
             {AUTO_REFRESH_OPTIONS.map((o) => (
