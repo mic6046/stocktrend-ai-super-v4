@@ -20,13 +20,14 @@ if (typeof window !== 'undefined' && window.performance && typeof window.perform
   };
 }
 
-import {StrictMode} from 'react';
+import {StrictMode, lazy, Suspense} from 'react';
 import {createRoot} from 'react-dom/client';
-import App from './App.tsx';
 import { AuthProvider } from './lib/auth';
 import { SubscriptionGate } from './components/SubscriptionGate';
 import { LegalHost } from './components/LegalDocs';
 import './index.css';
+
+const App = lazy(() => import('./App.tsx'));
 
 if (typeof document !== 'undefined') {
   document.title = 'Quantum Node';
@@ -37,10 +38,17 @@ createRoot(document.getElementById('root')!).render(
     <AuthProvider>
       <LegalHost>
         <SubscriptionGate>
-          <App />
+          <Suspense
+            fallback={
+              <div className="min-h-screen bg-[#050505] flex items-center justify-center text-gray-400">
+                <div className="h-6 w-6 animate-spin rounded-full border-2 border-emerald-400 border-t-transparent" />
+              </div>
+            }
+          >
+            <App />
+          </Suspense>
         </SubscriptionGate>
       </LegalHost>
     </AuthProvider>
   </StrictMode>,
 );
-

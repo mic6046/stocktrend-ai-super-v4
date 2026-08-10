@@ -1,12 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { Search, TrendingUp, TrendingDown, Info, Loader2, Sparkles, LineChart as ChartIcon, Activity, Globe, Newspaper, ExternalLink, MousePointer, Trash2, Tag, Gauge, Check, Zap, Bell, BellRing, Plus, Volume2, History, Flame, ShieldAlert, X, Coins, Briefcase, Shield, Layers, Settings, Rocket, HelpCircle, ArrowRight, ChevronDown, ChevronUp, Download, Share2, ZoomIn, ZoomOut, Sliders, Brain, Percent, Trophy, Target, Gem } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import html2canvas from 'html2canvas';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { computeTechnicalIndicators, calculateRSISeries, detectRSIDivergence } from './lib/technical';
-import { AiStockScoreCard } from './components/AiStockScoreCard';
-import { HistoricalValuationDashboard } from './components/HistoricalValuationDashboard';
 import {
   AnalysisHeroCard,
   AiInsightsStrip,
@@ -15,7 +10,6 @@ import {
   MetricRadialRow,
   DecisionBriefPanel,
   RecommendationChangeLogPanel,
-  FindATradePanel,
   MarketDataRefreshBar,
   type HorizonKey,
 } from './components/analysis';
@@ -31,7 +25,6 @@ import {
   toStockRecommendation,
 } from './lib/recommendation';
 import { TruncatedText } from './components/TruncatedText';
-import { AuthModal } from './components/AuthModal';
 import { UsageQuotaBar, QuotaExhaustedBanner } from './components/UsageQuotaBar';
 import { LegalLinks } from './components/LegalDocs';
 import { useAuth } from './lib/auth';
@@ -48,7 +41,6 @@ import {
 } from './lib/marketDataRefresh';
 import { fetchUsage, type UsageSnapshot } from './lib/usageApi';
 import { buildInstitutionalFlowNarrative, formatSignedMillions } from './lib/institutionalFlow';
-import { generateStockReportPDF } from './utils/pdfGenerator';
 import { getRecommendationTheme } from './utils/recommendationTheme';
 import { 
   AreaChart, 
@@ -76,6 +68,33 @@ import {
 import { format, isValid } from 'date-fns';
 import { cn } from './lib/utils';
 
+const AuthModal = lazy(() =>
+  import('./components/AuthModal').then((m) => ({ default: m.AuthModal }))
+);
+const FindATradePanel = lazy(() =>
+  import('./components/analysis/FindATradePanel').then((m) => ({ default: m.FindATradePanel }))
+);
+const AiStockScoreCard = lazy(() =>
+  import('./components/AiStockScoreCard').then((m) => ({ default: m.AiStockScoreCard }))
+);
+const HistoricalValuationDashboard = lazy(() =>
+  import('./components/HistoricalValuationDashboard').then((m) => ({
+    default: m.HistoricalValuationDashboard,
+  }))
+);
+
+function PanelChunkFallback({ className }: { className?: string }) {
+  return (
+    <div
+      className={cn(
+        'flex min-h-[120px] items-center justify-center rounded-2xl border border-white/5 bg-white/[0.02] text-gray-500',
+        className
+      )}
+    >
+      <Loader2 className="h-5 w-5 animate-spin text-emerald-400" />
+    </div>
+  );
+}
 interface StockData {
   ticker: string;
   quote: any;
@@ -1737,6 +1756,7 @@ export default function App() {
         console.warn("Failed to patch getComputedStyle on main window", e);
       }
 
+      const { default: html2canvas } = await import('html2canvas');
       const canvas = await html2canvas(element, {
         backgroundColor: '#111113', // Matches Card background color
         scale: 2,
@@ -2048,6 +2068,7 @@ export default function App() {
         console.warn("Failed to patch getComputedStyle on main window", e);
       }
 
+      const { default: html2canvas } = await import('html2canvas');
       const canvas = await html2canvas(element, {
         backgroundColor: '#111113', // Matches Card background color
         scale: 2,
@@ -7251,7 +7272,7 @@ export default function App() {
     runTickerSearch(typed);
   };
 
-  const handleExportPDF = () => {
+  const handleExportPDF = async () => {
     if (!data) return;
     setExportingPdf(true);
     
@@ -7267,6 +7288,7 @@ export default function App() {
     }
 
     try {
+      const { generateStockReportPDF } = await import('./utils/pdfGenerator');
       generateStockReportPDF({
         ticker: data.ticker,
         name: data.quote?.longName || data.quote?.shortName || data.quote?.symbol || 'Quantitative Equity Asset',
@@ -7297,13 +7319,17 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#050505] text-[#e0e0e0] font-sans selection:bg-emerald-500 selection:text-black overflow-x-hidden relative">
-      <AuthModal
-        open={showAuthModal}
-        onClose={() => setShowAuthModal(false)}
-        onSuccess={(state) => {
-          if (state === 'active') setActivePage('DASHBOARD');
-        }}
-      />
+      {showAuthModal && (
+        <Suspense fallback={null}>
+          <AuthModal
+            open={showAuthModal}
+            onClose={() => setShowAuthModal(false)}
+            onSuccess={(state) => {
+              if (state === 'active') setActivePage('DASHBOARD');
+            }}
+          />
+        </Suspense>
+      )}
       {/* Atmosphere Blobs */}
       <div className="fixed top-[-100px] left-[-100px] w-[500px] h-[500px] bg-emerald-500/10 rounded-full blur-[120px] pointer-events-none" />
       <div className="fixed bottom-[-100px] right-[-100px] w-[600px] h-[600px] bg-blue-600/10 rounded-full blur-[150px] pointer-events-none" />
@@ -7559,14 +7585,16 @@ export default function App() {
               exit={{ opacity: 0, y: -6 }}
               className="mb-6"
             >
-              <FindATradePanel
-                horizon={analysisHorizon}
-                onOpenTicker={(sym) => {
-                  if (!assertAnalysisCredits()) return;
-                  setShowFindATrade(false);
-                  runTickerSearch(sym);
-                }}
-              />
+              <Suspense fallback={<PanelChunkFallback className="min-h-[220px]" />}>
+                <FindATradePanel
+                  horizon={analysisHorizon}
+                  onOpenTicker={(sym) => {
+                    if (!assertAnalysisCredits()) return;
+                    setShowFindATrade(false);
+                    runTickerSearch(sym);
+                  }}
+                />
+              </Suspense>
             </motion.div>
           )}
         </AnimatePresence>
@@ -8058,7 +8086,7 @@ export default function App() {
                 </div>
 
                 {/* Recharts Container */}
-                <div className="h-[280px] w-full mt-4">
+                <div className="h-[220px] sm:h-[280px] w-full mt-4">
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart 
                       data={activeEquityCurveData}
@@ -9547,7 +9575,7 @@ export default function App() {
                   </div>
 
                    {/* Chart Visualization */}
-                  <div id="quantum-price-chart-only" className={cn("w-full mt-1 relative transition-all duration-300 rounded-2xl border border-white/10 bg-[#0c0c0e]/60 glass-panel p-1 sm:p-1.5", chartViewMode === 'comparison' ? "min-h-[460px] pb-4" : "h-80")}>
+                  <div id="quantum-price-chart-only" className={cn("w-full mt-1 relative transition-all duration-300 rounded-2xl border border-white/10 bg-[#0c0c0e]/60 glass-panel p-1 sm:p-1.5", chartViewMode === 'comparison' ? "min-h-[320px] sm:min-h-[400px] md:min-h-[460px] pb-4" : "h-56 sm:h-72 md:h-80")}>
                     {/* Persistent signal color legend on chart */}
                     <div className="absolute top-2 left-2 z-20 flex items-center gap-2 rounded-md border border-white/10 bg-[#0a0a0c]/85 px-2 py-1 backdrop-blur-sm pointer-events-none">
                       <span className="inline-flex items-center gap-1 text-[9px] font-mono font-bold uppercase tracking-wider text-[#22c55e]">
@@ -11848,49 +11876,51 @@ export default function App() {
                 animate={{ opacity: 1, x: 0 }}
                 className="col-span-12 lg:col-span-5 space-y-6"
               >
-                <AiStockScoreCard
-                  scoreData={
-                    aiStockScore
-                      ? {
-                          ...aiStockScore,
-                          totalScore: horizonView.score,
-                          rating: horizonView.ratingLabel,
-                          overallExplanation: horizonView.summaryLead,
-                        }
-                      : {
-                          totalScore: horizonView.score,
-                          rating: horizonView.ratingLabel,
-                          components: {},
-                          overallExplanation: horizonView.summaryLead,
-                        }
-                  }
-                  ticker={data.ticker}
-                  stockName={data.quote?.shortName || data.quote?.longName || ''}
-                  currentPrice={
-                    Number(
-                      data.quote?.regularMarketPrice ||
-                        data.quote?.price ||
-                        projectionMeta.lastClose ||
-                        parseFloat(String(financials?.currentPrice || '').replace(/[$,]/g, '')) ||
-                        0
-                    ) || null
-                  }
-                  currency={data.quote?.currency}
-                  isLoading={predicting || (loading && !aiStockScore)}
-                  projectionTrend={
-                    horizonView.chartStance === 'bull'
-                      ? 'up'
-                      : horizonView.chartStance === 'bear'
-                        ? 'down'
-                        : 'flat'
-                  }
-                  projectionHorizonDays={
-                    analysisHorizon === '1W' ? 5 : analysisHorizon === '1M' ? 21 : analysisHorizon === '3M' ? 63 : 252
-                  }
-                  shortTermConfidence={horizonView.confidence}
-                  mediumTermConfidence={horizonView.confidence}
-                  variant="compact"
-                />
+                <Suspense fallback={<PanelChunkFallback className="min-h-[200px]" />}>
+                  <AiStockScoreCard
+                    scoreData={
+                      aiStockScore
+                        ? {
+                            ...aiStockScore,
+                            totalScore: horizonView.score,
+                            rating: horizonView.ratingLabel,
+                            overallExplanation: horizonView.summaryLead,
+                          }
+                        : {
+                            totalScore: horizonView.score,
+                            rating: horizonView.ratingLabel,
+                            components: {},
+                            overallExplanation: horizonView.summaryLead,
+                          }
+                    }
+                    ticker={data.ticker}
+                    stockName={data.quote?.shortName || data.quote?.longName || ''}
+                    currentPrice={
+                      Number(
+                        data.quote?.regularMarketPrice ||
+                          data.quote?.price ||
+                          projectionMeta.lastClose ||
+                          parseFloat(String(financials?.currentPrice || '').replace(/[$,]/g, '')) ||
+                          0
+                      ) || null
+                    }
+                    currency={data.quote?.currency}
+                    isLoading={predicting || (loading && !aiStockScore)}
+                    projectionTrend={
+                      horizonView.chartStance === 'bull'
+                        ? 'up'
+                        : horizonView.chartStance === 'bear'
+                          ? 'down'
+                          : 'flat'
+                    }
+                    projectionHorizonDays={
+                      analysisHorizon === '1W' ? 5 : analysisHorizon === '1M' ? 21 : analysisHorizon === '3M' ? 63 : 252
+                    }
+                    shortTermConfidence={horizonView.confidence}
+                    mediumTermConfidence={horizonView.confidence}
+                    variant="compact"
+                  />
+                </Suspense>
 
                 {/* AI Advisory System Card */}
                 <div className="bg-[#111113] border border-white/5 rounded-2xl p-4 sm:p-5 flex flex-col space-y-6">
@@ -12825,26 +12855,28 @@ export default function App() {
               {/* Full-width PE valuation — not trapped in the left 7/12 column */}
               {data && (
                 <div className="col-span-12 space-y-4">
-                  <HistoricalValuationDashboard
-                    data={historicalPEData}
-                    ticker={data.ticker}
-                    stockName={data.quote?.shortName || data.quote?.longName || ''}
-                    currentPe={getStockPE(data.ticker, data.quote).pe}
-                    currentPrice={
-                      Number(
-                        data.quote?.regularMarketPrice ||
-                          data.quote?.price ||
-                          (historicalPEData.length
-                            ? historicalPEData[historicalPEData.length - 1].price
-                            : 0)
-                      ) || 0
-                    }
-                    currency={data.quote?.currency || 'USD'}
-                    eps={getStockPE(data.ticker, data.quote).eps}
-                    masterRecommendation={horizonView.ratingLabel}
-                    masterExpectedReturn={horizonView.expectedReturn}
-                    masterHorizonLabel={horizonView.horizonLabel}
-                  />
+                  <Suspense fallback={<PanelChunkFallback className="min-h-[280px]" />}>
+                    <HistoricalValuationDashboard
+                      data={historicalPEData}
+                      ticker={data.ticker}
+                      stockName={data.quote?.shortName || data.quote?.longName || ''}
+                      currentPe={getStockPE(data.ticker, data.quote).pe}
+                      currentPrice={
+                        Number(
+                          data.quote?.regularMarketPrice ||
+                            data.quote?.price ||
+                            (historicalPEData.length
+                              ? historicalPEData[historicalPEData.length - 1].price
+                              : 0)
+                        ) || 0
+                      }
+                      currency={data.quote?.currency || 'USD'}
+                      eps={getStockPE(data.ticker, data.quote).eps}
+                      masterRecommendation={horizonView.ratingLabel}
+                      masterExpectedReturn={horizonView.expectedReturn}
+                      masterHorizonLabel={horizonView.horizonLabel}
+                    />
+                  </Suspense>
                 </div>
               )}
 

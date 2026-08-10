@@ -1,11 +1,18 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, lazy, Suspense } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { apiUrl, loggedFetch } from '../lib/api';
 import { syncStripeSubscription } from '../lib/subscription';
-import { LandingPage } from './LandingPage';
-import { PricingPage } from './PricingPage';
-import { SubscriptionExpiredPage } from './SubscriptionExpiredPage';
+
+const LandingPage = lazy(() =>
+  import('./LandingPage').then((m) => ({ default: m.LandingPage }))
+);
+const PricingPage = lazy(() =>
+  import('./PricingPage').then((m) => ({ default: m.PricingPage }))
+);
+const SubscriptionExpiredPage = lazy(() =>
+  import('./SubscriptionExpiredPage').then((m) => ({ default: m.SubscriptionExpiredPage }))
+);
 
 interface SubscriptionGateProps {
   children: React.ReactNode;
@@ -13,6 +20,14 @@ interface SubscriptionGateProps {
   onActive?: () => void;
   /** Called after a successful overage/pack purchase is confirmed. */
   onOverageSuccess?: () => void;
+}
+
+function GateFallback() {
+  return (
+    <div className="min-h-screen bg-[#050505] flex items-center justify-center text-gray-400">
+      <Loader2 className="h-6 w-6 animate-spin text-emerald-400" />
+    </div>
+  );
 }
 
 /**
@@ -94,16 +109,16 @@ export function SubscriptionGate({ children, onActive, onOverageSuccess }: Subsc
   }, [accessState, onActive]);
 
   if (loading || accessState === 'loading') {
-    return (
-      <div className="min-h-screen bg-[#050505] flex items-center justify-center text-gray-400">
-        <Loader2 className="h-6 w-6 animate-spin text-emerald-400" />
-      </div>
-    );
+    return <GateFallback />;
   }
 
   // Front page only — dashboard never mounts here
   if (!user || accessState === 'signed_out') {
-    return <LandingPage />;
+    return (
+      <Suspense fallback={<GateFallback />}>
+        <LandingPage />
+      </Suspense>
+    );
   }
 
   if (accessState === 'active') {
@@ -111,14 +126,20 @@ export function SubscriptionGate({ children, onActive, onOverageSuccess }: Subsc
   }
 
   if (accessState === 'expired') {
-    return <SubscriptionExpiredPage />;
+    return (
+      <Suspense fallback={<GateFallback />}>
+        <SubscriptionExpiredPage />
+      </Suspense>
+    );
   }
 
   // inactive / none → pricing (user must accept legal terms before Stripe)
   return (
-    <PricingPage
-      title="Quantum Node pricing"
-      subtitle="Choose Basic or Pro to unlock the dashboard."
-    />
+    <Suspense fallback={<GateFallback />}>
+      <PricingPage
+        title="Quantum Node pricing"
+        subtitle="Choose Basic or Pro to unlock the dashboard."
+      />
+    </Suspense>
   );
 }
