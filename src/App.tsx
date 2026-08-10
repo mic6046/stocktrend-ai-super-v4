@@ -74,6 +74,12 @@ const AuthModal = lazy(() =>
 const FindATradePanel = lazy(() =>
   import('./components/analysis/FindATradePanel').then((m) => ({ default: m.FindATradePanel }))
 );
+const SuggestATradePanel = lazy(() =>
+  import('./components/analysis/SuggestATradePanel').then((m) => ({ default: m.SuggestATradePanel }))
+);
+const DayTradePanel = lazy(() =>
+  import('./components/analysis/DayTradePanel').then((m) => ({ default: m.DayTradePanel }))
+);
 const AiStockScoreCard = lazy(() =>
   import('./components/AiStockScoreCard').then((m) => ({ default: m.AiStockScoreCard }))
 );
@@ -1243,6 +1249,12 @@ export default function App() {
   const [analysisHorizon, setAnalysisHorizon] = useState<HorizonKey>('1M');
   const [userHasPosition, setUserHasPosition] = useState(false);
   const [showFindATrade, setShowFindATrade] = useState(false);
+  const [showSuggestATrade, setShowSuggestATrade] = useState(false);
+  const [showDayTrade, setShowDayTrade] = useState(false);
+  /** Bumped on every Suggest header/empty-state press → panel starts a new search. */
+  const [suggestRunToken, setSuggestRunToken] = useState(0);
+  /** Bumped on every Day Trade header press → panel starts a new scout. */
+  const [dayTradeRunToken, setDayTradeRunToken] = useState(0);
   const [refreshMode, setRefreshMode] = useState<RefreshMode>(() => loadRefreshMode());
   const [autoRefreshIntervalSec, setAutoRefreshIntervalSec] = useState<AutoRefreshIntervalSec>(
     () => loadAutoRefreshIntervalSec()
@@ -7334,60 +7346,60 @@ export default function App() {
       <div className="fixed top-[-100px] left-[-100px] w-[500px] h-[500px] bg-emerald-500/10 rounded-full blur-[120px] pointer-events-none" />
       <div className="fixed bottom-[-100px] right-[-100px] w-[600px] h-[600px] bg-blue-600/10 rounded-full blur-[150px] pointer-events-none" />
 
-      {/* One centered header cluster — brand, search, actions together in the middle */}
-      <nav className="relative z-10 border-b border-white/5 backdrop-blur-md sticky top-0 min-h-14 px-3 sm:px-5 py-2">
-        <div className="mx-auto flex w-full max-w-[1400px] flex-wrap items-center justify-center gap-x-3 gap-y-2">
-          <div className="flex items-center gap-2 shrink-0">
-            <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center shadow-[0_0_18px_rgba(16,185,129,0.45)] shrink-0">
-              <Activity className="w-4 h-4 text-black" />
+      {/* Centered header: brand + search + Find/Suggest/Day Trade + icons */}
+      <nav className="relative z-10 border-b border-white/5 backdrop-blur-md sticky top-0 px-3 sm:px-5 py-2.5">
+        <div className="mx-auto flex w-full max-w-[1400px] flex-col items-center gap-2.5">
+          <div className="flex w-full flex-wrap items-center justify-center gap-x-3 gap-y-2">
+            <div className="flex items-center gap-2 shrink-0">
+              <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center shadow-[0_0_18px_rgba(16,185,129,0.45)] shrink-0">
+                <Activity className="w-4 h-4 text-black" />
+              </div>
+              <h1 className="text-sm sm:text-base font-sans font-extrabold tracking-tight uppercase whitespace-nowrap leading-none">
+                QUANTUM<span className="text-emerald-500">NODE</span>
+              </h1>
+              <div className="hidden lg:flex items-center gap-0.5 ml-1 border-l border-white/10 pl-2">
+                <button
+                  type="button"
+                  onClick={() => setActivePage('DASHBOARD')}
+                  className={cn(
+                    "h-8 px-2.5 rounded-lg text-[10px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer inline-flex items-center",
+                    activePage === 'DASHBOARD'
+                      ? "bg-emerald-500 text-black border-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.35)]"
+                      : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
+                  )}
+                >
+                  Dashboard
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActivePage('NEWS_CENTER')}
+                  className={cn(
+                    "h-8 px-2.5 rounded-lg text-[10px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer inline-flex items-center",
+                    activePage === 'NEWS_CENTER'
+                      ? "bg-blue-500 text-white border-blue-400 shadow-[0_0_18px_rgba(59,130,246,0.3)]"
+                      : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
+                  )}
+                >
+                  News
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActivePage('SELF_LEARNING')}
+                  className={cn(
+                    "h-8 px-2.5 rounded-lg text-[10px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer inline-flex items-center",
+                    activePage === 'SELF_LEARNING'
+                      ? "bg-indigo-500 text-white border-indigo-400 shadow-[0_0_18px_rgba(99,102,241,0.3)]"
+                      : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
+                  )}
+                >
+                  Learn
+                </button>
+              </div>
             </div>
-            <h1 className="text-sm sm:text-base font-sans font-extrabold tracking-tight uppercase whitespace-nowrap leading-none">
-              QUANTUM<span className="text-emerald-500">NODE</span>
-            </h1>
-            <div className="hidden lg:flex items-center gap-0.5 ml-1 border-l border-white/10 pl-2">
-              <button
-                type="button"
-                onClick={() => setActivePage('DASHBOARD')}
-                className={cn(
-                  "h-8 px-2.5 rounded-lg text-[10px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer inline-flex items-center",
-                  activePage === 'DASHBOARD'
-                    ? "bg-emerald-500 text-black border-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.35)]"
-                    : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
-                )}
-              >
-                Dashboard
-              </button>
-              <button
-                type="button"
-                onClick={() => setActivePage('NEWS_CENTER')}
-                className={cn(
-                  "h-8 px-2.5 rounded-lg text-[10px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer inline-flex items-center",
-                  activePage === 'NEWS_CENTER'
-                    ? "bg-blue-500 text-white border-blue-400 shadow-[0_0_18px_rgba(59,130,246,0.3)]"
-                    : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
-                )}
-              >
-                News
-              </button>
-              <button
-                type="button"
-                onClick={() => setActivePage('SELF_LEARNING')}
-                className={cn(
-                  "h-8 px-2.5 rounded-lg text-[10px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer inline-flex items-center",
-                  activePage === 'SELF_LEARNING'
-                    ? "bg-indigo-500 text-white border-indigo-400 shadow-[0_0_18px_rgba(99,102,241,0.3)]"
-                    : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
-                )}
-              >
-                Learn
-              </button>
-            </div>
-          </div>
 
-          <div className="flex w-full max-w-md items-center gap-2 sm:w-[22rem] md:w-[26rem]">
             <form
               onSubmit={handleSubmit}
-              className="flex-1 min-w-0 group"
+              className="w-full max-w-sm min-w-[12rem] flex-1 group sm:max-w-md"
               autoComplete="off"
             >
               <div className="relative w-full min-w-0">
@@ -7411,7 +7423,7 @@ export default function App() {
                   inputMode="search"
                   name={`qn-ticker-${searchInputKey}`}
                   id={`qn-ticker-${searchInputKey}`}
-                  placeholder="Ticker then Enter"
+                  placeholder="Ticker then Enter (e.g. AAPL)"
                   title="Press Enter to search"
                   className="w-full h-9 bg-[#111113] border border-white/10 rounded-full pl-9 pr-8 text-sm focus:outline-none focus:border-emerald-500/50 transition-all placeholder:text-gray-600 font-mono tracking-wide"
                 />
@@ -7419,69 +7431,119 @@ export default function App() {
                 {loading && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-emerald-500" />}
               </div>
             </form>
+
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+              <MarketDataRefreshBar
+                variant="inline"
+                lastUpdatedAt={lastMarketUpdatedAt}
+                status={marketDataStatus}
+                mode={refreshMode}
+                intervalSec={autoRefreshIntervalSec}
+                onModeChange={(mode) => {
+                  setRefreshMode(mode);
+                  saveRefreshMode(mode);
+                }}
+                onIntervalChange={(sec) => {
+                  setAutoRefreshIntervalSec(sec);
+                  saveAutoRefreshIntervalSec(sec);
+                }}
+                onRefresh={() => void handleMarketDataRefresh()}
+                disabled={loading || marketDataStatus === 'loading'}
+              />
+
+              {user && (
+                <div className="hidden md:block max-w-[200px] xl:max-w-[240px] overflow-hidden">
+                  <UsageQuotaBar usage={usage} email={user.email} onRefresh={refreshUsage} compact />
+                </div>
+              )}
+
+              {!user ? (
+                <button
+                  type="button"
+                  onClick={() => setShowAuthModal(true)}
+                  disabled={authLoading}
+                  className="inline-flex items-center justify-center gap-1.5 h-8 rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-2.5 font-sans font-bold text-[10px] text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50 shrink-0"
+                >
+                  <Shield className="h-3.5 w-3.5" />
+                  Sign in
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => signOut()}
+                  className="inline-flex items-center justify-center h-8 rounded-lg border border-white/10 px-2.5 text-[10px] font-sans font-semibold text-gray-300 hover:bg-white/5 hover:text-white shrink-0"
+                >
+                  Out
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-center gap-2">
             <button
               type="button"
               onClick={() => {
                 setActivePage('DASHBOARD');
                 setShowFindATrade((v) => !v);
+                if (!showFindATrade) {
+                  setShowSuggestATrade(false);
+                  setShowDayTrade(false);
+                }
               }}
               className={cn(
-                'shrink-0 inline-flex items-center justify-center gap-1.5 h-9 rounded-full px-3 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
+                'shrink-0 inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
                 showFindATrade
                   ? 'bg-emerald-500 text-black border-emerald-400 shadow-[0_0_16px_rgba(16,185,129,0.35)]'
                   : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/25'
               )}
-              title="Find a Trade + — markets, themes, and memorized ticker lists"
+              title="Find Trades — paste tickers or fill from market/theme lists"
             >
               <Rocket className="w-3.5 h-3.5" />
-              Find+
+              <span className="hidden sm:inline">Find Trades</span>
+              <span className="sm:hidden">Find</span>
             </button>
-          </div>
-
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            <MarketDataRefreshBar
-              variant="inline"
-              lastUpdatedAt={lastMarketUpdatedAt}
-              status={marketDataStatus}
-              mode={refreshMode}
-              intervalSec={autoRefreshIntervalSec}
-              onModeChange={(mode) => {
-                setRefreshMode(mode);
-                saveRefreshMode(mode);
+            <button
+              type="button"
+              onClick={() => {
+                setActivePage('DASHBOARD');
+                setShowFindATrade(false);
+                setShowDayTrade(false);
+                setShowSuggestATrade(true);
+                setSuggestRunToken((n) => n + 1);
               }}
-              onIntervalChange={(sec) => {
-                setAutoRefreshIntervalSec(sec);
-                saveAutoRefreshIntervalSec(sec);
+              className={cn(
+                'shrink-0 inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
+                showSuggestATrade
+                  ? 'bg-sky-500 text-black border-sky-400 shadow-[0_0_16px_rgba(56,189,248,0.35)]'
+                  : 'bg-sky-500/15 text-sky-300 border-sky-500/40 hover:bg-sky-500/25'
+              )}
+              title="New Suggest Trades search from popular US / HK / Japan / Europe markets"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Suggest Trades</span>
+              <span className="sm:hidden">Suggest</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActivePage('DASHBOARD');
+                setShowFindATrade(false);
+                setShowSuggestATrade(false);
+                setShowDayTrade(true);
+                setDayTradeRunToken((n) => n + 1);
               }}
-              onRefresh={() => void handleMarketDataRefresh()}
-              disabled={loading || marketDataStatus === 'loading'}
-            />
-
-            {user && (
-              <div className="hidden md:block max-w-[200px] xl:max-w-[240px] overflow-hidden">
-                <UsageQuotaBar usage={usage} email={user.email} onRefresh={refreshUsage} compact />
-              </div>
-            )}
-
-            {!user ? (
-              <button
-                type="button"
-                onClick={() => setShowAuthModal(true)}
-                disabled={authLoading}
-                className="inline-flex items-center justify-center gap-1.5 h-8 rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-2.5 font-sans font-bold text-[10px] text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50 shrink-0"
-              >
-                <Shield className="h-3.5 w-3.5" />
-                Sign in
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => signOut()}
-                className="inline-flex items-center justify-center h-8 rounded-lg border border-white/10 px-2.5 text-[10px] font-sans font-semibold text-gray-300 hover:bg-white/5 hover:text-white shrink-0"
-              >
-                Out
-              </button>
-            )}
+              className={cn(
+                'shrink-0 inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
+                showDayTrade
+                  ? 'bg-orange-500 text-black border-orange-400 shadow-[0_0_16px_rgba(249,115,22,0.35)]'
+                  : 'bg-orange-500/15 text-orange-300 border-orange-500/40 hover:bg-orange-500/25'
+              )}
+              title="Scout popular stocks that clear day-trade liquidity / range / bias gates"
+            >
+              <Flame className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Day Trade</span>
+              <span className="sm:hidden">Day</span>
+            </button>
           </div>
         </div>
       </nav>
@@ -7537,6 +7599,47 @@ export default function App() {
                   onOpenTicker={(sym) => {
                     if (!assertAnalysisCredits()) return;
                     setShowFindATrade(false);
+                    runTickerSearch(sym);
+                  }}
+                />
+              </Suspense>
+            </motion.div>
+          )}
+          {showSuggestATrade && (
+            <motion.div
+              key="suggest-a-trade-dock"
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              className="mb-6"
+            >
+              <Suspense fallback={<PanelChunkFallback className="min-h-[220px]" />}>
+                <SuggestATradePanel
+                  horizon={analysisHorizon}
+                  runToken={suggestRunToken}
+                  onOpenTicker={(sym) => {
+                    if (!assertAnalysisCredits()) return;
+                    setShowSuggestATrade(false);
+                    runTickerSearch(sym);
+                  }}
+                />
+              </Suspense>
+            </motion.div>
+          )}
+          {showDayTrade && (
+            <motion.div
+              key="day-trade-dock"
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              className="mb-6"
+            >
+              <Suspense fallback={<PanelChunkFallback className="min-h-[220px]" />}>
+                <DayTradePanel
+                  runToken={dayTradeRunToken}
+                  onOpenTicker={(sym) => {
+                    if (!assertAnalysisCredits()) return;
+                    setShowDayTrade(false);
                     runTickerSearch(sym);
                   }}
                 />
@@ -12878,23 +12981,69 @@ export default function App() {
                 <h2 className="text-xl font-sans font-bold text-white mb-2">Search a ticker to begin</h2>
                 <p className="text-sm text-gray-500 max-w-md mx-auto">
                   Press <span className="text-emerald-400 font-mono">Enter</span> in the search bar, or open{' '}
-                  <span className="text-emerald-400 font-semibold">Find a Trade +</span>.
+                  <span className="text-emerald-400 font-semibold">Find Trades</span> /{' '}
+                  <span className="text-sky-400 font-semibold">Suggest Trades</span> /{' '}
+                  <span className="text-orange-400 font-semibold">Day Trade</span>.
                 </p>
               </div>
               <div className="w-full max-w-xl space-y-3">
                 {!showFindATrade && (
                   <button
                     type="button"
-                    onClick={() => setShowFindATrade(true)}
+                    onClick={() => {
+                      setShowFindATrade(true);
+                      setShowSuggestATrade(false);
+                      setShowDayTrade(false);
+                    }}
                     className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-emerald-500 text-black py-2.5 text-[12px] font-bold uppercase tracking-wider hover:bg-emerald-400 transition-colors cursor-pointer"
                   >
                     <Rocket className="w-4 h-4" />
-                    Open Find a Trade +
+                    Open Find Trades
                   </button>
                 )}
                 {showFindATrade && (
                   <p className="text-[11px] text-emerald-300/80 font-mono text-center">
-                    Find a Trade + is open above — pick market/theme, paste tickers, and scan.
+                    Find Trades panel is open above — paste tickers and scan.
+                  </p>
+                )}
+                {!showSuggestATrade && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowSuggestATrade(true);
+                      setShowFindATrade(false);
+                      setShowDayTrade(false);
+                      setSuggestRunToken((n) => n + 1);
+                    }}
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-sky-500 text-black py-2.5 text-[12px] font-bold uppercase tracking-wider hover:bg-sky-400 transition-colors cursor-pointer"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    Open Suggest Trades
+                  </button>
+                )}
+                {showSuggestATrade && (
+                  <p className="text-[11px] text-sky-300/80 font-mono text-center">
+                    Suggest Trades is searching above — press Suggest again for a new search.
+                  </p>
+                )}
+                {!showDayTrade && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowDayTrade(true);
+                      setShowFindATrade(false);
+                      setShowSuggestATrade(false);
+                      setDayTradeRunToken((n) => n + 1);
+                    }}
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-orange-500 text-black py-2.5 text-[12px] font-bold uppercase tracking-wider hover:bg-orange-400 transition-colors cursor-pointer"
+                  >
+                    <Flame className="w-4 h-4" />
+                    Open Day Trade
+                  </button>
+                )}
+                {showDayTrade && (
+                  <p className="text-[11px] text-orange-300/80 font-mono text-center">
+                    Day Trade scout is running above — press Day Trade again for a new search.
                   </p>
                 )}
               </div>
