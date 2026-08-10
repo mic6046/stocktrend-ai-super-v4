@@ -38,61 +38,46 @@ export function MarketDataRefreshBar({
 
   if (variant === 'inline') {
     return (
-      <div className="hidden md:flex items-center gap-2 shrink-0 text-[10px] font-mono min-w-0">
-        <span className="hidden lg:inline text-gray-500 whitespace-nowrap">
-          Updated{' '}
-          <span className="text-gray-300 tabular-nums">{formatLastUpdated(lastUpdatedAt)}</span>
-        </span>
-        <span
-          className={cn(
-            'hidden xl:inline font-semibold whitespace-nowrap',
-            status === 'loading' && 'text-amber-300',
-            status === 'updated' && 'text-emerald-300',
-            status === 'idle' && 'text-gray-400'
-          )}
-        >
-          {statusLabel(status)}
-        </span>
-
+      <div className="flex items-center gap-1.5 shrink-0 text-[10px] font-mono min-w-0">
         <button
           type="button"
           disabled={busy}
           onClick={onRefresh}
           className={cn(
-            'inline-flex items-center gap-1 rounded-full border px-2.5 py-1.5 font-bold uppercase tracking-wider transition-colors cursor-pointer',
+            'inline-flex items-center justify-center gap-1 h-8 rounded-full border px-2.5 font-bold uppercase tracking-wider transition-colors cursor-pointer',
             busy
               ? 'border-white/10 text-gray-600'
               : 'border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10'
           )}
-          title="Manually refresh market data (uses API credits)"
+          title={`Refresh market data · last ${formatLastUpdated(lastUpdatedAt)} · ${statusLabel(status)}`}
         >
           {status === 'loading' ? (
             <Loader2 className="w-3.5 h-3.5 animate-spin" />
           ) : (
             <RefreshCw className="w-3.5 h-3.5" />
           )}
-          <span className="hidden lg:inline">Refresh</span>
+          <span className="hidden xl:inline">Refresh</span>
         </button>
 
-        <div className="flex items-center gap-1 rounded-full border border-white/10 bg-black/30 p-0.5">
+        <div className="flex items-center gap-0.5 h-8 rounded-full border border-white/10 bg-black/30 p-0.5">
           <button
             type="button"
             onClick={() => onModeChange('manual')}
             className={cn(
-              'rounded-full px-2 py-1 font-bold uppercase tracking-wider transition-colors cursor-pointer',
+              'h-full rounded-full px-2 font-bold uppercase tracking-wider transition-colors cursor-pointer',
               mode === 'manual'
                 ? 'bg-emerald-500/20 text-emerald-300'
                 : 'text-gray-500 hover:text-gray-300'
             )}
             title="Manual refresh — credits only on demand"
           >
-            Manual
+            Man
           </button>
           <button
             type="button"
             onClick={() => onModeChange('auto')}
             className={cn(
-              'rounded-full px-2 py-1 font-bold uppercase tracking-wider transition-colors cursor-pointer',
+              'h-full rounded-full px-2 font-bold uppercase tracking-wider transition-colors cursor-pointer',
               mode === 'auto'
                 ? 'bg-amber-500/20 text-amber-300'
                 : 'text-gray-500 hover:text-gray-300'
@@ -107,7 +92,7 @@ export function MarketDataRefreshBar({
           <select
             value={intervalSec}
             onChange={(e) => onIntervalChange(Number(e.target.value) as AutoRefreshIntervalSec)}
-            className="rounded-lg border border-white/10 bg-black/40 px-1.5 py-1 text-gray-200 focus:outline-none focus:border-amber-500/40 max-w-[5.5rem]"
+            className="h-8 rounded-full border border-white/10 bg-black/40 px-2 text-gray-200 focus:outline-none focus:border-amber-500/40 max-w-[4.75rem]"
             title="Auto refresh interval"
           >
             {AUTO_REFRESH_OPTIONS.map((o) => (

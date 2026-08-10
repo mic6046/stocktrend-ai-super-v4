@@ -7334,21 +7334,21 @@ export default function App() {
       <div className="fixed top-[-100px] left-[-100px] w-[500px] h-[500px] bg-emerald-500/10 rounded-full blur-[120px] pointer-events-none" />
       <div className="fixed bottom-[-100px] right-[-100px] w-[600px] h-[600px] bg-blue-600/10 rounded-full blur-[150px] pointer-events-none" />
 
-      {/* Navigation — single row on web; refresh lives inline to avoid a second header band */}
-      <nav className="relative z-10 border-b border-white/5 backdrop-blur-md sticky top-0 px-3 sm:px-5 py-2.5 sm:py-3 flex flex-wrap md:flex-nowrap items-center gap-x-2 sm:gap-x-3 gap-y-2">
-        <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 shrink-0">
-          <div className="w-8 h-8 sm:w-9 sm:h-9 bg-emerald-500 rounded-lg flex items-center justify-center shadow-[0_0_18px_rgba(16,185,129,0.45)] shrink-0">
-            <Activity className="w-4 h-4 sm:w-5 sm:h-5 text-black" />
+      {/* Single-row centered header: left brand | center search | right actions */}
+      <nav className="relative z-10 border-b border-white/5 backdrop-blur-md sticky top-0 h-14 px-3 sm:px-5 grid grid-cols-[minmax(0,1fr)_minmax(10rem,28rem)_minmax(0,1fr)] items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-2 min-w-0 justify-self-start">
+          <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center shadow-[0_0_18px_rgba(16,185,129,0.45)] shrink-0">
+            <Activity className="w-4 h-4 text-black" />
           </div>
-          <h1 className="text-base sm:text-lg font-sans font-extrabold tracking-tight uppercase whitespace-nowrap">
+          <h1 className="text-sm sm:text-base font-sans font-extrabold tracking-tight uppercase whitespace-nowrap leading-none">
             QUANTUM<span className="text-emerald-500">NODE</span>
           </h1>
-          <div className="hidden lg:flex items-center gap-0.5 ml-3 border-l border-white/10 pl-3">
+          <div className="hidden xl:flex items-center gap-0.5 ml-2 border-l border-white/10 pl-2">
             <button
               type="button"
               onClick={() => setActivePage('DASHBOARD')}
               className={cn(
-                "px-2.5 py-2 rounded-xl text-[11px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer",
+                "h-8 px-2.5 rounded-lg text-[10px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer inline-flex items-center",
                 activePage === 'DASHBOARD'
                   ? "bg-emerald-500 text-black border-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.35)]"
                   : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
@@ -7360,30 +7360,30 @@ export default function App() {
               type="button"
               onClick={() => setActivePage('NEWS_CENTER')}
               className={cn(
-                "px-2.5 py-2 rounded-xl text-[11px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer",
+                "h-8 px-2.5 rounded-lg text-[10px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer inline-flex items-center",
                 activePage === 'NEWS_CENTER'
                   ? "bg-blue-500 text-white border-blue-400 shadow-[0_0_18px_rgba(59,130,246,0.3)]"
                   : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
               )}
             >
-              News Center
+              News
             </button>
             <button
               type="button"
               onClick={() => setActivePage('SELF_LEARNING')}
               className={cn(
-                "px-2.5 py-2 rounded-xl text-[11px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer",
+                "h-8 px-2.5 rounded-lg text-[10px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer inline-flex items-center",
                 activePage === 'SELF_LEARNING'
                   ? "bg-indigo-500 text-white border-indigo-400 shadow-[0_0_18px_rgba(99,102,241,0.3)]"
                   : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
               )}
             >
-              Self-Learning
+              Learn
             </button>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 flex-1 min-w-0 max-w-xl basis-full md:basis-auto order-last md:order-none">
+        <div className="flex items-center gap-2 w-full min-w-0 justify-self-center">
           <form
             onSubmit={handleSubmit}
             className="flex-1 min-w-0 group"
@@ -7410,12 +7410,12 @@ export default function App() {
                 inputMode="search"
                 name={`qn-ticker-${searchInputKey}`}
                 id={`qn-ticker-${searchInputKey}`}
-                placeholder="Ticker then Enter (e.g. AAPL)"
+                placeholder="Ticker then Enter"
                 title="Press Enter to search"
-                className="w-full bg-[#111113] border border-white/10 rounded-full pl-10 pr-9 py-2 text-sm focus:outline-none focus:border-emerald-500/50 transition-all placeholder:text-gray-600 font-mono tracking-wide"
+                className="w-full h-9 bg-[#111113] border border-white/10 rounded-full pl-9 pr-8 text-sm focus:outline-none focus:border-emerald-500/50 transition-all placeholder:text-gray-600 font-mono tracking-wide"
               />
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500 group-focus-within:text-emerald-500 transition-colors pointer-events-none" />
-              {loading && <Loader2 className="absolute right-3.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-emerald-500" />}
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500 group-focus-within:text-emerald-500 transition-colors pointer-events-none" />
+              {loading && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-emerald-500" />}
             </div>
           </form>
           <button
@@ -7425,7 +7425,7 @@ export default function App() {
               setShowFindATrade((v) => !v);
             }}
             className={cn(
-              'shrink-0 inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
+              'shrink-0 inline-flex items-center justify-center gap-1.5 h-9 rounded-full px-2.5 sm:px-3 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
               showFindATrade
                 ? 'bg-emerald-500 text-black border-emerald-400 shadow-[0_0_16px_rgba(16,185,129,0.35)]'
                 : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/25'
@@ -7433,115 +7433,56 @@ export default function App() {
             title="Find a Trade + — markets, themes, and memorized ticker lists"
           >
             <Rocket className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Find a Trade +</span>
-            <span className="sm:hidden">Find+</span>
+            <span className="hidden sm:inline">Find+</span>
           </button>
         </div>
 
-        <MarketDataRefreshBar
-          variant="inline"
-          lastUpdatedAt={lastMarketUpdatedAt}
-          status={marketDataStatus}
-          mode={refreshMode}
-          intervalSec={autoRefreshIntervalSec}
-          onModeChange={(mode) => {
-            setRefreshMode(mode);
-            saveRefreshMode(mode);
-          }}
-          onIntervalChange={(sec) => {
-            setAutoRefreshIntervalSec(sec);
-            saveAutoRefreshIntervalSec(sec);
-          }}
-          onRefresh={() => void handleMarketDataRefresh()}
-          disabled={loading || marketDataStatus === 'loading'}
-        />
+        <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 justify-self-end">
+          <MarketDataRefreshBar
+            variant="inline"
+            lastUpdatedAt={lastMarketUpdatedAt}
+            status={marketDataStatus}
+            mode={refreshMode}
+            intervalSec={autoRefreshIntervalSec}
+            onModeChange={(mode) => {
+              setRefreshMode(mode);
+              saveRefreshMode(mode);
+            }}
+            onIntervalChange={(sec) => {
+              setAutoRefreshIntervalSec(sec);
+              saveAutoRefreshIntervalSec(sec);
+            }}
+            onRefresh={() => void handleMarketDataRefresh()}
+            disabled={loading || marketDataStatus === 'loading'}
+          />
 
-        {user && (
-          <UsageQuotaBar usage={usage} email={user.email} onRefresh={refreshUsage} compact />
-        )}
-
-        <div className="hidden 2xl:flex gap-3 items-center text-[11px] tracking-wide uppercase shrink-0">
-          <div className="flex flex-col items-end font-sans opacity-70">
-            <span className="text-[10px] text-gray-500 normal-case tracking-normal">Cloud</span>
-            <span className={cn(
-              "font-semibold text-[10px]",
-              cloudSyncStatus === 'synced' ? 'text-emerald-400' :
-              cloudSyncStatus === 'loading' ? 'text-amber-400' :
-              cloudSyncStatus === 'error' ? 'text-red-400' : 'text-gray-500'
-            )}>
-              {user
-                ? (accessState === 'active'
-                    ? (cloudSyncStatus === 'loading' ? 'SYNCING' : cloudSyncStatus === 'error' ? 'ERROR' : 'ACTIVE')
-                    : String(accessState).toUpperCase())
-                : 'LOCAL'}
-            </span>
-          </div>
           {user && (
-            <>
-              <div className="w-[1px] h-6 bg-white/10" />
-              <div className="flex items-center gap-2">
-                <div className="flex flex-col items-end max-w-[140px] font-sans">
-                  <span className="text-[10px] text-gray-500 normal-case tracking-normal">Account</span>
-                  <span className="text-blue-400 truncate text-[10px] font-mono" title={user.email || user.uid}>
-                    {user.displayName || user.email || 'Signed in'}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => signOut()}
-                  className="rounded-lg border border-white/10 px-2.5 py-1.5 text-[10px] font-sans font-semibold text-gray-300 hover:bg-white/5 hover:text-white normal-case tracking-normal"
-                >
-                  Sign out
-                </button>
-              </div>
-            </>
+            <div className="hidden lg:block max-w-[220px] xl:max-w-none overflow-hidden">
+              <UsageQuotaBar usage={usage} email={user.email} onRefresh={refreshUsage} compact />
+            </div>
           )}
-        </div>
 
-        {!user && (
-          <button
-            type="button"
-            onClick={() => setShowAuthModal(true)}
-            disabled={authLoading}
-            className="ml-auto md:ml-0 flex items-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-3.5 py-2 font-sans font-bold text-[11px] text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50 shrink-0"
-          >
-            <Shield className="h-3.5 w-3.5" />
-            Sign in
-          </button>
-        )}
-
-        {user && (
-          <div className="flex 2xl:hidden items-center gap-2 shrink-0 ml-auto md:ml-0">
+          {!user ? (
+            <button
+              type="button"
+              onClick={() => setShowAuthModal(true)}
+              disabled={authLoading}
+              className="inline-flex items-center justify-center gap-1.5 h-8 rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-2.5 font-sans font-bold text-[10px] text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50 shrink-0"
+            >
+              <Shield className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Sign in</span>
+            </button>
+          ) : (
             <button
               type="button"
               onClick={() => signOut()}
-              className="rounded-lg border border-white/10 px-2.5 py-1.5 text-[10px] font-sans font-semibold text-gray-300 hover:bg-white/5 hover:text-white normal-case tracking-normal"
+              className="inline-flex items-center justify-center h-8 rounded-lg border border-white/10 px-2.5 text-[10px] font-sans font-semibold text-gray-300 hover:bg-white/5 hover:text-white shrink-0"
             >
-              Sign out
+              Out
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </nav>
-
-      {/* Mobile-only refresh panel — desktop uses the inline header controls */}
-      <div className="relative z-10 px-4 sm:px-6 py-2 border-b border-white/5 bg-[#08080A]/90 md:hidden">
-        <MarketDataRefreshBar
-          lastUpdatedAt={lastMarketUpdatedAt}
-          status={marketDataStatus}
-          mode={refreshMode}
-          intervalSec={autoRefreshIntervalSec}
-          onModeChange={(mode) => {
-            setRefreshMode(mode);
-            saveRefreshMode(mode);
-          }}
-          onIntervalChange={(sec) => {
-            setAutoRefreshIntervalSec(sec);
-            saveAutoRefreshIntervalSec(sec);
-          }}
-          onRefresh={() => void handleMarketDataRefresh()}
-          disabled={loading || marketDataStatus === 'loading'}
-        />
-      </div>
 
       {quotaBanner && (
         <div className="relative z-10 px-4 sm:px-6 pt-3">
