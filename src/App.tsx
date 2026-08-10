@@ -13056,7 +13056,7 @@ export default function App() {
           <span className="hidden md:inline">Region: <span className="text-blue-400/80 font-mono">US_EAST_01</span></span>
         </div>
         <div className="flex flex-col md:items-end gap-2 text-center md:text-right">
-          <span className="text-gray-500">Quantum Node · Powered by Google Gemini · <span className="font-mono text-gray-600">ui-b95e5e5+</span></span>
+          <span className="text-gray-500">Quantum Node · Powered by Google Gemini · <span className="font-mono text-gray-600">ui-1a53c4a</span></span>
           <LegalLinks className="justify-center md:justify-end" />
         </div>
       </footer>
