@@ -7334,153 +7334,157 @@ export default function App() {
       <div className="fixed top-[-100px] left-[-100px] w-[500px] h-[500px] bg-emerald-500/10 rounded-full blur-[120px] pointer-events-none" />
       <div className="fixed bottom-[-100px] right-[-100px] w-[600px] h-[600px] bg-blue-600/10 rounded-full blur-[150px] pointer-events-none" />
 
-      {/* Single-row centered header: left brand | center search | right actions */}
-      <nav className="relative z-10 border-b border-white/5 backdrop-blur-md sticky top-0 h-14 px-3 sm:px-5 grid grid-cols-[minmax(0,1fr)_minmax(10rem,28rem)_minmax(0,1fr)] items-center gap-2 sm:gap-3">
-        <div className="flex items-center gap-2 min-w-0 justify-self-start">
-          <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center shadow-[0_0_18px_rgba(16,185,129,0.45)] shrink-0">
-            <Activity className="w-4 h-4 text-black" />
+      {/* Single-row header — search geometrically centered; side clusters balanced */}
+      <nav className="relative z-10 border-b border-white/5 backdrop-blur-md sticky top-0 h-14 px-3 sm:px-5">
+        <div className="relative h-full w-full max-w-[1400px] mx-auto flex items-center justify-between gap-3">
+          <div className="relative z-10 flex items-center gap-2 min-w-0 shrink-0">
+            <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center shadow-[0_0_18px_rgba(16,185,129,0.45)] shrink-0">
+              <Activity className="w-4 h-4 text-black" />
+            </div>
+            <h1 className="text-sm sm:text-base font-sans font-extrabold tracking-tight uppercase whitespace-nowrap leading-none">
+              QUANTUM<span className="text-emerald-500">NODE</span>
+            </h1>
+            <div className="hidden xl:flex items-center gap-0.5 ml-2 border-l border-white/10 pl-2">
+              <button
+                type="button"
+                onClick={() => setActivePage('DASHBOARD')}
+                className={cn(
+                  "h-8 px-2.5 rounded-lg text-[10px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer inline-flex items-center",
+                  activePage === 'DASHBOARD'
+                    ? "bg-emerald-500 text-black border-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.35)]"
+                    : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
+                )}
+              >
+                Dashboard
+              </button>
+              <button
+                type="button"
+                onClick={() => setActivePage('NEWS_CENTER')}
+                className={cn(
+                  "h-8 px-2.5 rounded-lg text-[10px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer inline-flex items-center",
+                  activePage === 'NEWS_CENTER'
+                    ? "bg-blue-500 text-white border-blue-400 shadow-[0_0_18px_rgba(59,130,246,0.3)]"
+                    : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
+                )}
+              >
+                News
+              </button>
+              <button
+                type="button"
+                onClick={() => setActivePage('SELF_LEARNING')}
+                className={cn(
+                  "h-8 px-2.5 rounded-lg text-[10px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer inline-flex items-center",
+                  activePage === 'SELF_LEARNING'
+                    ? "bg-indigo-500 text-white border-indigo-400 shadow-[0_0_18px_rgba(99,102,241,0.3)]"
+                    : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
+                )}
+              >
+                Learn
+              </button>
+            </div>
           </div>
-          <h1 className="text-sm sm:text-base font-sans font-extrabold tracking-tight uppercase whitespace-nowrap leading-none">
-            QUANTUM<span className="text-emerald-500">NODE</span>
-          </h1>
-          <div className="hidden xl:flex items-center gap-0.5 ml-2 border-l border-white/10 pl-2">
-            <button
-              type="button"
-              onClick={() => setActivePage('DASHBOARD')}
-              className={cn(
-                "h-8 px-2.5 rounded-lg text-[10px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer inline-flex items-center",
-                activePage === 'DASHBOARD'
-                  ? "bg-emerald-500 text-black border-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.35)]"
-                  : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
-              )}
-            >
-              Dashboard
-            </button>
-            <button
-              type="button"
-              onClick={() => setActivePage('NEWS_CENTER')}
-              className={cn(
-                "h-8 px-2.5 rounded-lg text-[10px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer inline-flex items-center",
-                activePage === 'NEWS_CENTER'
-                  ? "bg-blue-500 text-white border-blue-400 shadow-[0_0_18px_rgba(59,130,246,0.3)]"
-                  : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
-              )}
-            >
-              News
-            </button>
-            <button
-              type="button"
-              onClick={() => setActivePage('SELF_LEARNING')}
-              className={cn(
-                "h-8 px-2.5 rounded-lg text-[10px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer inline-flex items-center",
-                activePage === 'SELF_LEARNING'
-                  ? "bg-indigo-500 text-white border-indigo-400 shadow-[0_0_18px_rgba(99,102,241,0.3)]"
-                  : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
-              )}
-            >
-              Learn
-            </button>
-          </div>
-        </div>
 
-        <div className="flex items-center gap-2 w-full min-w-0 justify-self-center">
-          <form
-            onSubmit={handleSubmit}
-            className="flex-1 min-w-0 group"
-            autoComplete="off"
-          >
-            <div className="relative w-full min-w-0">
-              <input
-                key={searchInputKey}
-                ref={searchInputRef}
-                type="search"
-                value={searchQuery}
-                onChange={(e) => {
-                  setSearchQuery(e.target.value);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
-                  e.preventDefault();
-                  runTickerSearch((e.target as HTMLInputElement).value);
-                }}
+          <div className="pointer-events-none absolute inset-y-0 left-1/2 z-[5] flex w-[min(36rem,calc(100%-12rem))] -translate-x-1/2 items-center px-1 sm:w-[min(28rem,calc(100%-22rem))] lg:w-[min(32rem,calc(100%-28rem))]">
+            <div className="pointer-events-auto flex w-full items-center gap-2">
+              <form
+                onSubmit={handleSubmit}
+                className="flex-1 min-w-0 group"
                 autoComplete="off"
-                autoCorrect="off"
-                autoCapitalize="off"
-                spellCheck={false}
-                inputMode="search"
-                name={`qn-ticker-${searchInputKey}`}
-                id={`qn-ticker-${searchInputKey}`}
-                placeholder="Ticker then Enter"
-                title="Press Enter to search"
-                className="w-full h-9 bg-[#111113] border border-white/10 rounded-full pl-9 pr-8 text-sm focus:outline-none focus:border-emerald-500/50 transition-all placeholder:text-gray-600 font-mono tracking-wide"
-              />
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500 group-focus-within:text-emerald-500 transition-colors pointer-events-none" />
-              {loading && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-emerald-500" />}
+              >
+                <div className="relative w-full min-w-0">
+                  <input
+                    key={searchInputKey}
+                    ref={searchInputRef}
+                    type="search"
+                    value={searchQuery}
+                    onChange={(e) => {
+                      setSearchQuery(e.target.value);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
+                      e.preventDefault();
+                      runTickerSearch((e.target as HTMLInputElement).value);
+                    }}
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
+                    inputMode="search"
+                    name={`qn-ticker-${searchInputKey}`}
+                    id={`qn-ticker-${searchInputKey}`}
+                    placeholder="Ticker then Enter"
+                    title="Press Enter to search"
+                    className="w-full h-9 bg-[#111113] border border-white/10 rounded-full pl-9 pr-8 text-sm focus:outline-none focus:border-emerald-500/50 transition-all placeholder:text-gray-600 font-mono tracking-wide"
+                  />
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500 group-focus-within:text-emerald-500 transition-colors pointer-events-none" />
+                  {loading && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-emerald-500" />}
+                </div>
+              </form>
+              <button
+                type="button"
+                onClick={() => {
+                  setActivePage('DASHBOARD');
+                  setShowFindATrade((v) => !v);
+                }}
+                className={cn(
+                  'shrink-0 inline-flex items-center justify-center gap-1.5 h-9 rounded-full px-2.5 sm:px-3 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
+                  showFindATrade
+                    ? 'bg-emerald-500 text-black border-emerald-400 shadow-[0_0_16px_rgba(16,185,129,0.35)]'
+                    : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/25'
+                )}
+                title="Find a Trade + — markets, themes, and memorized ticker lists"
+              >
+                <Rocket className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Find+</span>
+              </button>
             </div>
-          </form>
-          <button
-            type="button"
-            onClick={() => {
-              setActivePage('DASHBOARD');
-              setShowFindATrade((v) => !v);
-            }}
-            className={cn(
-              'shrink-0 inline-flex items-center justify-center gap-1.5 h-9 rounded-full px-2.5 sm:px-3 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
-              showFindATrade
-                ? 'bg-emerald-500 text-black border-emerald-400 shadow-[0_0_16px_rgba(16,185,129,0.35)]'
-                : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/25'
+          </div>
+
+          <div className="relative z-10 flex items-center gap-1.5 sm:gap-2 min-w-0 shrink-0">
+            <MarketDataRefreshBar
+              variant="inline"
+              lastUpdatedAt={lastMarketUpdatedAt}
+              status={marketDataStatus}
+              mode={refreshMode}
+              intervalSec={autoRefreshIntervalSec}
+              onModeChange={(mode) => {
+                setRefreshMode(mode);
+                saveRefreshMode(mode);
+              }}
+              onIntervalChange={(sec) => {
+                setAutoRefreshIntervalSec(sec);
+                saveAutoRefreshIntervalSec(sec);
+              }}
+              onRefresh={() => void handleMarketDataRefresh()}
+              disabled={loading || marketDataStatus === 'loading'}
+            />
+
+            {user && (
+              <div className="hidden lg:block max-w-[200px] xl:max-w-[260px] overflow-hidden">
+                <UsageQuotaBar usage={usage} email={user.email} onRefresh={refreshUsage} compact />
+              </div>
             )}
-            title="Find a Trade + — markets, themes, and memorized ticker lists"
-          >
-            <Rocket className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Find+</span>
-          </button>
-        </div>
 
-        <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 justify-self-end">
-          <MarketDataRefreshBar
-            variant="inline"
-            lastUpdatedAt={lastMarketUpdatedAt}
-            status={marketDataStatus}
-            mode={refreshMode}
-            intervalSec={autoRefreshIntervalSec}
-            onModeChange={(mode) => {
-              setRefreshMode(mode);
-              saveRefreshMode(mode);
-            }}
-            onIntervalChange={(sec) => {
-              setAutoRefreshIntervalSec(sec);
-              saveAutoRefreshIntervalSec(sec);
-            }}
-            onRefresh={() => void handleMarketDataRefresh()}
-            disabled={loading || marketDataStatus === 'loading'}
-          />
-
-          {user && (
-            <div className="hidden lg:block max-w-[220px] xl:max-w-none overflow-hidden">
-              <UsageQuotaBar usage={usage} email={user.email} onRefresh={refreshUsage} compact />
-            </div>
-          )}
-
-          {!user ? (
-            <button
-              type="button"
-              onClick={() => setShowAuthModal(true)}
-              disabled={authLoading}
-              className="inline-flex items-center justify-center gap-1.5 h-8 rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-2.5 font-sans font-bold text-[10px] text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50 shrink-0"
-            >
-              <Shield className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Sign in</span>
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => signOut()}
-              className="inline-flex items-center justify-center h-8 rounded-lg border border-white/10 px-2.5 text-[10px] font-sans font-semibold text-gray-300 hover:bg-white/5 hover:text-white shrink-0"
-            >
-              Out
-            </button>
-          )}
+            {!user ? (
+              <button
+                type="button"
+                onClick={() => setShowAuthModal(true)}
+                disabled={authLoading}
+                className="inline-flex items-center justify-center gap-1.5 h-8 rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-2.5 font-sans font-bold text-[10px] text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50 shrink-0"
+              >
+                <Shield className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Sign in</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => signOut()}
+                className="inline-flex items-center justify-center h-8 rounded-lg border border-white/10 px-2.5 text-[10px] font-sans font-semibold text-gray-300 hover:bg-white/5 hover:text-white shrink-0"
+              >
+                Out
+              </button>
+            )}
+          </div>
         </div>
       </nav>
 
