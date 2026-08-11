@@ -5,6 +5,7 @@ import { cn } from '../../lib/utils';
 import { GlassCard, SectionLabel } from './GlassCard';
 import { formatMoney, type HorizonKey } from './analysisTheme';
 import type { LiveActionBrief, QuantumEngineOutput } from '../../lib/quantumRecommendationEngine';
+import { inBand } from '../../lib/buyZoneDecision';
 
 type Levels = {
   s1?: number;
@@ -14,6 +15,15 @@ type Levels = {
 } | null;
 
 type ZoneBand = { lo: number; hi: number };
+
+type BuyZoneBand = {
+  level: 1 | 2 | 3;
+  label: string;
+  lo: number;
+  hi: number;
+  sizePct?: number;
+  anchor?: string;
+};
 
 type TradeZonesPanelProps = {
   lastClose: number;
@@ -39,6 +49,8 @@ type TradeZonesPanelProps = {
     exitZone?: ZoneBand;
     stopLoss: number;
   } | null;
+  /** SSOT Buy Zone 1/2/3 from quantum engine — never recalculate independently */
+  buyZones?: BuyZoneBand[] | null;
 };
 
 function scaleFromSpot(px: number, level: number, scale: number) {
@@ -85,6 +97,7 @@ export function TradeZonesPanel({
   horizon = '1M',
   horizonLabel = '1 Month',
   engineZones = null,
+  buyZones = null,
   userHasPosition = false,
   onUserHasPositionChange,
   currentAction = null,
@@ -134,7 +147,6 @@ export function TradeZonesPanel({
             : s2 * 0.98;
 
       const eps = Math.max(px * 0.0008, 0.01);
-      // Fallback: narrow accumulation near s1 (≈3–8%), stop below — not s2→s1 full span
       const atrGuess = px * 0.02;
       let buyHi = Math.min(Math.max(s1, px - atrGuess * 0.6), px * 0.992);
       let buyLo = Math.max(buyHi - clamp(atrGuess * 1.5, px * 0.03, px * 0.08), px * 0.9);
@@ -151,44 +163,120 @@ export function TradeZonesPanel({
       exit = { lo: reduce.hi + eps, hi: reduce.hi + eps + px * 0.012 };
     }
 
-    const warnings: string[] = [];
-    const ordered = [
-      { key: 'BUY', band: buy },
-      { key: 'ADD', band: add },
-      { key: 'HOLD', band: hold },
-      { key: 'TAKE PROFIT', band: takeProfit },
-      { key: 'REDUCE', band: reduce },
-      { key: 'EXIT', band: exit },
-    ] as const;
+    const ssotBuyZones = (buyZones && buyZones.length >= 1 ? [...buyZones] : []).sort(
+      (a, b) => a.level - b.level
+    );
 
-    for (const z of ordered) {
-      if (!(z.band.lo < z.band.hi)) warnings.push(`${z.key} zone has an inverted price range.`);
-    }
-    for (let i = 0; i < ordered.length; i++) {
-      for (let j = i + 1; j < ordered.length; j++) {
-        if (overlaps(ordered[i].band, ordered[j].band)) {
-          warnings.push(`${ordered[i].key} and ${ordered[j].key} ranges overlap.`);
+    const warnings: string[] = [];
+    if (!userHasPosition && ssotBuyZones.length >= 2) {
+      for (let i = 0; i < ssotBuyZones.length - 1; i++) {
+        const upper = ssotBuyZones[i];
+        const lower = ssotBuyZones[i + 1];
+        if (overlaps(upper, lower)) {
+          warnings.push(`${upper.label} and ${lower.label} ranges overlap.`);
         }
       }
-      if (i > 0 && !(ordered[i - 1].band.hi < ordered[i].band.lo)) {
-        warnings.push(`Zone order broken: ${ordered[i - 1].key}.max must be < ${ordered[i].key}.min`);
+    } else {
+      const ordered = [
+        { key: 'BUY', band: buy },
+        { key: 'ADD', band: add },
+        { key: 'HOLD', band: hold },
+        { key: 'TAKE PROFIT', band: takeProfit },
+        { key: 'REDUCE', band: reduce },
+        { key: 'EXIT', band: exit },
+      ] as const;
+      for (const z of ordered) {
+        if (!(z.band.lo < z.band.hi)) warnings.push(`${z.key} zone has an inverted price range.`);
+      }
+      for (let i = 0; i < ordered.length; i++) {
+        for (let j = i + 1; j < ordered.length; j++) {
+          if (overlaps(ordered[i].band, ordered[j].band)) {
+            warnings.push(`${ordered[i].key} and ${ordered[j].key} ranges overlap.`);
+          }
+        }
       }
     }
-    if (!(sl < buy.lo)) warnings.push('Stop Loss must sit strictly under the BUY zone.');
+    const stopFloor =
+      ssotBuyZones.length > 0
+        ? Math.min(...ssotBuyZones.map((z) => Math.min(z.lo, z.hi)))
+        : buy.lo;
+    if (!(sl < stopFloor)) warnings.push('Stop Loss must sit strictly under the deepest Buy Zone.');
 
-    const allCards = [
+    type JourneyCard = {
+      key: string;
+      emoji: string;
+      title: string;
+      subtitle: string;
+      detail: string | null;
+      price: string;
+      className: string;
+      titleClass: string;
+      active: boolean;
+      zoneKeyMatch?: string;
+    };
+
+    const buyZoneCards: JourneyCard[] = ssotBuyZones.map((z) => {
+      const active = px > 0 && inBand(px, z);
+      const tone =
+        z.level === 1
+          ? {
+              className: 'border-emerald-500/35 bg-emerald-500/10',
+              titleClass: 'text-emerald-300',
+              emoji: '🟢',
+            }
+          : z.level === 2
+            ? {
+                className: 'border-teal-500/35 bg-teal-500/10',
+                titleClass: 'text-teal-300',
+                emoji: '🟢',
+              }
+            : {
+                className: 'border-lime-500/30 bg-lime-500/10',
+                titleClass: 'text-lime-300',
+                emoji: '🟢',
+              };
+      return {
+        key: `buy${z.level}`,
+        emoji: tone.emoji,
+        title: z.label.toUpperCase(),
+        subtitle:
+          z.level === 1
+            ? 'Preferred entry pocket'
+            : z.level === 2
+              ? 'Core scale-in entry'
+              : 'Deep value accumulation',
+        detail: z.anchor
+          ? `${z.sizePct != null ? `${z.sizePct}% size · ` : ''}${z.anchor}`
+          : z.sizePct != null
+            ? `Suggested size ${z.sizePct}%`
+            : null,
+        price: formatRange(z.lo, z.hi, currency),
+        className: tone.className,
+        titleClass: tone.titleClass,
+        active,
+        zoneKeyMatch: 'buy',
+      };
+    });
+
+    const allCards: JourneyCard[] = [
+      ...(buyZoneCards.length
+        ? buyZoneCards
+        : [
+            {
+              key: 'buy',
+              emoji: '🟢',
+              title: 'BUY ZONE',
+              subtitle: 'Optimal accumulation pocket (support + ATR)',
+              detail: 'High-probability entry — not every price below spot.',
+              price: formatRange(buy.lo, buy.hi, currency),
+              className: 'border-emerald-500/35 bg-emerald-500/10',
+              titleClass: 'text-emerald-300',
+              active: px > 0 && inBand(px, buy),
+              zoneKeyMatch: 'buy',
+            },
+          ]),
       {
-        key: 'buy' as const,
-        emoji: '🟢',
-        title: 'BUY ZONE',
-        subtitle: 'Optimal accumulation pocket (support + ATR)',
-        detail: 'High-probability entry — not every price below spot.',
-        price: formatRange(buy.lo, buy.hi, currency),
-        className: 'border-emerald-500/35 bg-emerald-500/10',
-        titleClass: 'text-emerald-300',
-      },
-      {
-        key: 'add' as const,
+        key: 'add',
         emoji: '🔵',
         title: 'ADD POSITION',
         subtitle: 'Scale in if already holding and thesis intact',
@@ -196,21 +284,27 @@ export function TradeZonesPanel({
         price: formatRange(add.lo, add.hi, currency),
         className: 'border-sky-500/35 bg-sky-500/10',
         titleClass: 'text-sky-300',
+        active: false,
+        zoneKeyMatch: 'add',
       },
       {
-        key: 'hold' as const,
+        key: 'hold',
         emoji: '🟡',
-        title: userHasPosition ? 'HOLD' : 'WAIT',
-        subtitle: userHasPosition ? 'No action required.' : 'Above Buy Zone — wait for the accumulation pocket.',
+        title: userHasPosition ? 'HOLD' : 'ABOVE BUY ZONES',
+        subtitle: userHasPosition
+          ? 'No action required.'
+          : 'Price above Buy Zones — wait for pullback (do not chase).',
         detail: userHasPosition
           ? 'Continue holding existing position.'
-          : 'Do not chase. Prefer a dip into BUY ZONE before opening.',
+          : 'WAIT — PRICE ABOVE BUY ZONES when live price sits here.',
         price: formatRange(hold.lo, hold.hi, currency),
         className: 'border-amber-500/35 bg-amber-500/10',
         titleClass: 'text-amber-300',
+        active: false,
+        zoneKeyMatch: 'hold',
       },
       {
-        key: 'takeProfit' as const,
+        key: 'takeProfit',
         emoji: '🟣',
         title: 'TAKE PROFIT',
         subtitle: 'Consider taking partial profits.',
@@ -218,9 +312,11 @@ export function TradeZonesPanel({
         price: formatRange(takeProfit.lo, takeProfit.hi, currency),
         className: 'border-violet-500/35 bg-violet-500/10',
         titleClass: 'text-violet-300',
+        active: false,
+        zoneKeyMatch: 'takeProfit',
       },
       {
-        key: 'reduce' as const,
+        key: 'reduce',
         emoji: '🟠',
         title: 'REDUCE',
         subtitle: 'Trim remaining exposure after extension.',
@@ -228,9 +324,11 @@ export function TradeZonesPanel({
         price: formatRange(reduce.lo, reduce.hi, currency),
         className: 'border-orange-500/35 bg-orange-500/10',
         titleClass: 'text-orange-300',
+        active: false,
+        zoneKeyMatch: 'reduce',
       },
       {
-        key: 'exit' as const,
+        key: 'exit',
         emoji: '🔴',
         title: 'EXIT',
         subtitle: 'Close remaining position.',
@@ -238,6 +336,8 @@ export function TradeZonesPanel({
         price: formatRange(exit.lo, exit.hi, currency),
         className: 'border-rose-500/35 bg-rose-500/10',
         titleClass: 'text-rose-300',
+        active: false,
+        zoneKeyMatch: 'exit',
       },
     ];
 
@@ -247,13 +347,33 @@ export function TradeZonesPanel({
         ? (['add', 'hold', 'takeProfit', 'reduce', 'exit', 'stop'] as const)
         : (['buy', 'hold', 'stop'] as const));
 
-    const journey = allCards.filter((c) => keys.includes(c.key));
+    const journey = allCards.filter((c) => {
+      if (c.key.startsWith('buy') && keys.includes('buy')) return true;
+      return keys.includes(c.zoneKeyMatch as (typeof keys)[number]);
+    });
+
+    const priceLocationLabel =
+      currentAction?.priceLocation === 'INSIDE_ZONE_1'
+        ? 'Inside Buy Zone 1'
+        : currentAction?.priceLocation === 'INSIDE_ZONE_2'
+          ? 'Inside Buy Zone 2'
+          : currentAction?.priceLocation === 'INSIDE_ZONE_3'
+            ? 'Inside Buy Zone 3'
+            : currentAction?.priceLocation === 'ABOVE_ALL'
+              ? 'Above all Buy Zones'
+              : currentAction?.priceLocation === 'BELOW_ALL'
+                ? 'Below all Buy Zones'
+                : currentAction?.priceLocation === 'BETWEEN_ZONES'
+                  ? 'Between Buy Zones'
+                  : null;
 
     return {
       journey,
       stop: { price: formatMoney(sl, currency), raw: sl },
       showStop: keys.includes('stop'),
       warnings: [...new Set(warnings)],
+      priceLocationLabel,
+      confirmationStatus: currentAction?.confirmationStatus ?? null,
     };
   }, [
     lastClose,
@@ -264,9 +384,13 @@ export function TradeZonesPanel({
     currency,
     zoneScale,
     engineZones,
+    buyZones,
     userHasPosition,
     visibleZoneKeys,
+    currentAction,
   ]);
+
+  const actionBadge = currentAction?.displayLabel || currentAction?.action;
 
   return (
     <GlassCard className="h-full">
@@ -276,7 +400,7 @@ export function TradeZonesPanel({
 
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <p className="text-[10px] text-gray-500 leading-relaxed font-mono uppercase tracking-wider">
-          {horizonLabel} · {userHasPosition ? 'owned: ADD only' : 'flat: BUY only'} · never both
+          {horizonLabel} · {userHasPosition ? 'owned: ADD only' : 'flat: Buy Zone 1–3'} · never both
         </p>
         <label className="inline-flex items-center gap-2 cursor-pointer select-none">
           <span className="text-[10px] font-mono text-gray-400 uppercase tracking-wider">I own this stock</span>
@@ -312,17 +436,31 @@ export function TradeZonesPanel({
                 </span>
               )}
             </p>
-            {currentAction && (
+            {actionBadge && (
               <span className="text-[11px] font-black tracking-wider uppercase text-white bg-white/10 border border-white/15 px-2 py-0.5 rounded">
-                {currentAction.action}
+                {actionBadge}
               </span>
             )}
           </div>
+          {(model.priceLocationLabel || model.confirmationStatus) && (
+            <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+              {model.priceLocationLabel && (
+                <p className="text-[10px] font-mono text-gray-400">
+                  PRICE LOCATION · <span className="text-cyan-200">{model.priceLocationLabel}</span>
+                </p>
+              )}
+              {model.confirmationStatus && (
+                <p className="text-[10px] font-mono text-gray-400">
+                  CONFIRMATION · <span className="text-amber-200">{model.confirmationStatus}</span>
+                </p>
+              )}
+            </div>
+          )}
           {currentAction && (
             <>
               <p className="mt-1.5 text-[11px] text-gray-300 leading-relaxed">{currentAction.reason}</p>
               <p className="mt-1 text-[10px] font-mono text-gray-500">
-                Confidence {currentAction.confidence}% · exactly one live action
+                Confidence {currentAction.confidence}% · location → confirmation → action
               </p>
             </>
           )}
@@ -347,7 +485,11 @@ export function TradeZonesPanel({
                 className={cn(
                   'rounded-xl border px-3 py-2.5 min-w-0 transition-transform duration-200 hover:scale-[1.01]',
                   z.className,
-                  currentAction?.zoneKey === z.key && 'ring-1 ring-cyan-400/40'
+                  (z.active ||
+                    currentAction?.zoneKey === z.zoneKeyMatch ||
+                    (currentAction?.activeBuyZoneLevel != null &&
+                      z.key === `buy${currentAction.activeBuyZoneLevel}`)) &&
+                    'ring-1 ring-cyan-400/40'
                 )}
               >
                 <div className="flex items-start justify-between gap-3 min-w-0">
@@ -357,6 +499,11 @@ export function TradeZonesPanel({
                         {z.emoji}
                       </span>
                       {z.title}
+                      {z.active && (
+                        <span className="ml-2 text-[9px] font-mono normal-case tracking-normal text-cyan-300">
+                          ← live price
+                        </span>
+                      )}
                     </p>
                     <p className="mt-1 text-[11px] text-gray-300 leading-snug">{z.subtitle}</p>
                     {z.detail && (

@@ -201,5 +201,6 @@ export function buildQuantumInputFromMarketData(opts: {
       (Number.isFinite(stopFromTech) && stopFromTech > 0 ? stopFromTech : null),
     ticker: opts.ticker,
     userHasPosition: Boolean(opts.userHasPosition),
+    technicalBreakdown: tech ?? null,
   };
 }

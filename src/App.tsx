@@ -7072,7 +7072,8 @@ export default function App() {
         score: horizonView.score,
         confidence: horizonView.confidence,
         expectedReturn: horizonView.expectedReturn,
-        currentAction: horizonView.currentAction.action,
+        currentAction:
+          horizonView.currentAction.displayLabel || horizonView.currentAction.action,
         explanation: horizonView.whyWins || horizonView.explanation,
       },
       'App.IndividualAnalysis'
@@ -8713,17 +8714,14 @@ export default function App() {
                     onHorizonChange={setAnalysisHorizon}
                     horizonExplanation={`${horizonView.explanation} ${horizonView.validationStatus}`}
                     isLoading={predicting || (loading && !aiStockScore && !prediction)}
-                    currentAction={masterRecommendation?.currentAction ?? horizonView.currentAction.action}
+                    currentAction={
+                      masterRecommendation?.engine?.currentAction?.displayLabel ||
+                      masterRecommendation?.currentAction ||
+                      horizonView.currentAction.displayLabel ||
+                      horizonView.currentAction.action
+                    }
                     currentActionReason={
-                      masterRecommendation
-                        ? masterRecommendation.currentAction === 'WAIT' ||
-                          masterRecommendation.currentAction === 'HOLD'
-                          ? masterRecommendation.recommendation === 'BUY' ||
-                            masterRecommendation.recommendation === 'STRONG BUY'
-                            ? 'BUY - WAIT for a better entry price.'
-                            : masterRecommendation.currentActionReason
-                          : masterRecommendation.currentActionReason
-                        : horizonView.currentAction.reason
+                      masterRecommendation?.currentActionReason ?? horizonView.currentAction.reason
                     }
                     userHasPosition={userHasPosition}
                   />
@@ -8789,6 +8787,7 @@ export default function App() {
                       onUserHasPositionChange={handleUserHasPositionChange}
                       currentAction={horizonView.currentAction}
                       visibleZoneKeys={horizonView.visibleZoneKeys}
+                      buyZones={horizonView.buyZones}
                       engineZones={{
                         buyZone: horizonView.buyZone,
                         addZone: horizonView.addZone,

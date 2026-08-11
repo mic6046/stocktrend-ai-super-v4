@@ -6,6 +6,14 @@
 
 import type { HorizonKey } from '../components/analysis/analysisTheme';
 import { HORIZON_OPTIONS } from '../components/analysis/analysisTheme';
+import {
+  resolveBuyZoneDecision,
+  sanitizeBuyZoneCopy,
+  splitBuyEnvelope,
+  type BuyBand,
+} from './buyZoneDecision';
+import { buildRealisticSuggestEntry } from './suggestTradeEngine';
+import type { TechnicalBreakdown } from './technical';
 
 export type RecommendationLabel =
   | 'STRONG BUY'
@@ -86,6 +94,11 @@ export type LiveActionBrief = {
   reason: string;
   confidence: number;
   zoneKey: string;
+  /** Precise status e.g. BUY NOW — BUY ZONE 1 (preferred for UI) */
+  displayLabel?: string;
+  priceLocation?: import('./buyZoneDecision').PriceLocation;
+  confirmationStatus?: import('./buyZoneDecision').ConfirmationStatus;
+  activeBuyZoneLevel?: 1 | 2 | 3 | null;
 };
 
 export type ComponentScores = {
@@ -151,6 +164,8 @@ export type QuantumEngineInput = {
   ticker?: string;
   /** Whether the user already owns the name — changes displayed actions */
   userHasPosition?: boolean;
+  /** Full technical breakdown for Buy Zone 1/2/3 SSOT (optional). */
+  technicalBreakdown?: import('./technical').TechnicalBreakdown | null;
 };
 
 export type QuantumEngineOutput = {
@@ -175,6 +190,15 @@ export type QuantumEngineOutput = {
   takeProfitZone: EngineZoneBand;
   reduceZone: EngineZoneBand;
   exitZone: EngineZoneBand;
+  /** Scale-in Buy Zone 1/2/3 — SSOT for location + live action messaging */
+  buyZones: Array<{
+    level: 1 | 2 | 3;
+    label: string;
+    lo: number;
+    hi: number;
+    sizePct?: number;
+    anchor?: string;
+  }>;
   stopLoss: number;
   takeProfit: number;
   bullCase: number;
@@ -1174,14 +1198,22 @@ function inBand(px: number, band: EngineZoneBand): boolean {
 
 /**
  * STEP 9–10: Map live price to exactly ONE action, position-aware.
- * BUY and ADD POSITION are mutually exclusive by ownership — never both active.
+ * Flat accounts: PRICE LOCATION (Buy Zone 1–3) → CONFIRMATION → FINAL ACTION.
+ * Never claim "outside BUY zone" when price is inside any Buy Zone.
  */
 function resolveLiveAction(
   px: number,
   zones: ReturnType<typeof buildZones>,
+  buyZones: BuyBand[],
   rec: RecommendationLabel,
   userHasPosition: boolean,
-  confidence: number
+  confidence: number,
+  confirmationExtras?: {
+    score?: number | null;
+    rsi?: number | null;
+    macdBullish?: boolean | null;
+    trend?: string | null;
+  }
 ): LiveActionBrief {
   const conf = Math.round(clamp(confidence, 40, 94));
 
@@ -1192,6 +1224,7 @@ function resolveLiveAction(
         reason: `Live price is at/below stop ${zones.stopLoss.toFixed(2)} — capital protection exit.`,
         confidence: conf,
         zoneKey: 'stop',
+        displayLabel: 'STOP LOSS',
       };
     }
     return {
@@ -1199,122 +1232,124 @@ function resolveLiveAction(
       reason: `Live price is below the entry structure/stop — do not open a new long here.`,
       confidence: conf,
       zoneKey: 'stop',
+      displayLabel: 'AVOID NEW POSITION',
     };
   }
 
-  if (inBand(px, zones.exitZone) || px > zones.exitZone.hi) {
-    if (userHasPosition) {
+  if (userHasPosition) {
+    // Owned: keep ladder management actions (ADD / HOLD / TP / …)
+    if (inBand(px, zones.exitZone) || px > zones.exitZone.hi) {
       return {
         action: 'EXIT',
         reason: 'Price is in/above the EXIT zone — close remaining exposure.',
         confidence: conf,
         zoneKey: 'exit',
+        displayLabel: 'EXIT',
       };
     }
-    return {
-      action: 'AVOID NEW POSITION',
-      reason: 'Price is extended into EXIT territory — not a fresh entry.',
-      confidence: conf,
-      zoneKey: 'exit',
-    };
-  }
-
-  if (inBand(px, zones.reduceZone)) {
-    if (userHasPosition) {
+    if (inBand(px, zones.reduceZone)) {
       return {
         action: 'REDUCE',
         reason: 'Price is in the REDUCE zone — trim exposure after take-profit stretch.',
         confidence: conf,
         zoneKey: 'reduce',
+        displayLabel: 'REDUCE',
       };
     }
-    return {
-      action: 'AVOID NEW POSITION',
-      reason: 'Price is above take-profit into REDUCE — wait for a pullback to BUY zone.',
-      confidence: conf,
-      zoneKey: 'reduce',
-    };
-  }
-
-  if (inBand(px, zones.takeProfitZone)) {
-    if (userHasPosition) {
+    if (inBand(px, zones.takeProfitZone)) {
       return {
         action: 'TAKE PROFIT',
         reason: 'Price is in TAKE PROFIT — consider partial profits; keep core if thesis intact.',
         confidence: conf,
         zoneKey: 'takeProfit',
+        displayLabel: 'TAKE PROFIT',
       };
     }
-    return {
-      action: 'WAIT',
-      reason: 'Price is already in TAKE PROFIT territory — wait for a better entry rather than chase.',
-      confidence: conf,
-      zoneKey: 'hold',
-    };
-  }
-
-  if (inBand(px, zones.holdZone)) {
-    if (userHasPosition) {
+    if (inBand(px, zones.addZone) || inBand(px, zones.buyZone)) {
+      return {
+        action: 'ADD POSITION',
+        reason: 'Price is in the entry/scale-in structure — ADD POSITION because you already own the stock.',
+        confidence: conf,
+        zoneKey: 'add',
+        displayLabel: 'ADD POSITION',
+      };
+    }
+    if (inBand(px, zones.holdZone)) {
       return {
         action: 'HOLD',
         reason: 'Price is above Add zone and below Take Profit — risk/reward balanced; no action required.',
         confidence: conf,
         zoneKey: 'hold',
+        displayLabel: 'HOLD',
       };
     }
-    return {
-      action: 'WAIT',
-      reason: 'Price is above the BUY zone and below Take Profit — wait for a dip into entry rather than chase.',
-      confidence: conf,
-      zoneKey: 'hold',
-    };
-  }
-
-  // Entry structure (buy + add ladder bands): ownership decides BUY vs ADD — never both
-  const inEntry =
-    inBand(px, zones.buyZone) ||
-    inBand(px, zones.addZone) ||
-    (px > zones.stopLoss && px < zones.addZone.hi);
-
-  if (inEntry) {
-    if (userHasPosition) {
-      return {
-        action: 'ADD POSITION',
-        reason: 'Price is in the entry/scale-in structure — BUY is replaced by ADD POSITION because you already own the stock.',
-        confidence: conf,
-        zoneKey: 'add',
-      };
-    }
-    if (rec === 'AVOID NEW POSITION' || rec === 'SELL') {
-      return {
-        action: 'AVOID NEW POSITION',
-        reason: 'Even near support, committee validation rejected a new long.',
-        confidence: conf,
-        zoneKey: 'buy',
-      };
-    }
-    return {
-      action: 'BUY',
-      reason: 'Price is in the BUY zone — optimal accumulation pocket for a new position. ADD POSITION is hidden because you do not own the stock.',
-      confidence: conf,
-      zoneKey: 'buy',
-    };
-  }
-
-  if (userHasPosition) {
     return {
       action: 'HOLD',
       reason: 'Price sits between defined management bands — maintain position until a zone is reached.',
       confidence: Math.max(40, conf - 6),
       zoneKey: 'hold',
+      displayLabel: 'HOLD',
     };
   }
+
+  // Flat: Buy Zone 1/2/3 location SSOT first — never contradict displayed bands
+  const decision = sanitizeBuyZoneCopy(
+    resolveBuyZoneDecision({
+      currentPrice: px,
+      buyZones,
+      baseConfidence: conf,
+      confirmation: {
+        recommendation: rec,
+        confidence: conf,
+        score: confirmationExtras?.score,
+        rsi: confirmationExtras?.rsi,
+        macdBullish: confirmationExtras?.macdBullish,
+        trend: confirmationExtras?.trend,
+        userHasPosition: false,
+      },
+    })
+  );
+
   return {
-    action: 'WAIT',
-    reason: 'Price is outside the preferred BUY zone — wait for a cleaner entry.',
-    confidence: Math.max(40, conf - 6),
-    zoneKey: 'hold',
+    action: decision.action,
+    reason: decision.reason,
+    confidence: decision.confidence,
+    zoneKey: decision.zoneKey,
+    displayLabel: decision.displayLabel,
+    priceLocation: decision.priceLocation,
+    confirmationStatus: decision.confirmationStatus,
+    activeBuyZoneLevel: decision.activeBuyZoneLevel,
   };
+}
+
+function buildBuyZones123(
+  px: number,
+  buyZone: EngineZoneBand,
+  technicalBreakdown?: TechnicalBreakdown | null,
+  targetHint?: number | null
+): BuyBand[] {
+  if (technicalBreakdown && px > 0) {
+    try {
+      const entry = buildRealisticSuggestEntry({
+        technical: technicalBreakdown,
+        price: px,
+        targetHint: targetHint ?? null,
+      });
+      if (entry?.buyZones?.length >= 3) {
+        return entry.buyZones.map((z) => ({
+          level: z.level,
+          label: z.label,
+          lo: z.lo,
+          hi: z.hi,
+          sizePct: z.sizePct,
+          anchor: z.anchor,
+        }));
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+  return splitBuyEnvelope(buyZone, px);
 }
 
 function visibleZonesFor(userHasPosition: boolean): QuantumEngineOutput['visibleZoneKeys'] {
@@ -1625,6 +1660,7 @@ function emptyOutput(horizon: HorizonKey, horizonLabel: string, input: QuantumEn
     takeProfitZone: { lo: 0, hi: 0 },
     reduceZone: { lo: 0, hi: 0 },
     exitZone: { lo: 0, hi: 0 },
+    buyZones: [],
     stopLoss: 0,
     takeProfit: 0,
     bullCase: 0,
@@ -1787,10 +1823,41 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
         vol: (vol ?? 22) * widen,
       });
     }
+    const buyZones = buildBuyZones123(
+      px,
+      zones.buyZone,
+      input.technicalBreakdown,
+      target
+    );
+    // Preferred envelope = Buy Zone 1; HOLD starts above all BZ1–3 (no chase)
+    const z1 = buyZones.find((z) => z.level === 1) ?? buyZones[0];
+    const envelopeHi = Math.max(...buyZones.map((z) => Math.max(z.lo, z.hi)));
+    const envelopeLo = Math.min(...buyZones.map((z) => Math.min(z.lo, z.hi)));
+    const eps = Math.max(px * 0.0008, 0.01);
+    if (z1 && buyZones.length >= 1) {
+      const holdLo = envelopeHi + eps;
+      zones = {
+        ...zones,
+        buyZone: { lo: z1.lo, hi: z1.hi },
+        holdZone: {
+          lo: round2(holdLo),
+          hi: round2(Math.max(holdLo + px * 0.012, zones.holdZone.hi, zones.takeProfitZone.lo - eps)),
+        },
+        stopLoss:
+          zones.stopLoss < envelopeLo - eps * 0.5
+            ? zones.stopLoss
+            : round2(envelopeLo - Math.max(eps, px * 0.01)),
+      };
+    }
     const zonesConsistent = zonesAreConsistent(zones);
     const targets = buildTargets(px, target, rec, input.levels);
     const userHasPosition = !!input.userHasPosition;
-    const currentAction = resolveLiveAction(px, zones, rec, userHasPosition, confidence);
+    const currentAction = resolveLiveAction(px, zones, buyZones, rec, userHasPosition, confidence, {
+      score: evidence.scores.overall,
+      rsi: input.technical?.rsi ?? null,
+      macdBullish: input.technical?.macdBullish ?? null,
+      trend: input.technical?.trend ?? null,
+    });
     const visibleZoneKeys = visibleZonesFor(userHasPosition);
 
     const topFactors =
@@ -1811,7 +1878,8 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
     const suggestedAction = positionAwareSuggestedAction(rec, currentAction, userHasPosition, evidence);
     const note = consensusNote(evidence.committee, rec);
     const explainedSignals = positionAwareSignals(evidence.explainedSignals, userHasPosition);
-    const summaryLead = `Horizon recommendation: ${rec} (${confidence}% confidence). Do now: ${currentAction.action}. Expected return ${expectedReturn >= 0 ? '+' : ''}${expectedReturn.toFixed(1)}%. ${whyWins}`;
+    const actionLabel = currentAction.displayLabel || currentAction.action;
+    const summaryLead = `Horizon recommendation: ${rec} (${confidence}% confidence). Do now: ${actionLabel}. Expected return ${expectedReturn >= 0 ? '+' : ''}${expectedReturn.toFixed(1)}%. ${whyWins}`;
 
     const drawdown = round2(-Math.max(2, Math.abs(expectedReturn) * 0.55 + (vol ?? 20) * 0.12));
     const sharpe =
@@ -1850,6 +1918,7 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
       takeProfitZone: zones.takeProfitZone,
       reduceZone: zones.reduceZone,
       exitZone: zones.exitZone,
+      buyZones,
       stopLoss: zones.stopLoss,
       takeProfit: zones.takeProfit,
       bullCase: zones.takeProfit,
@@ -1861,7 +1930,7 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
       zonesConsistent,
       keyReasons,
       summaryLead,
-      explanation: `Consensus process for ${horizonLabel}: committee votes weighed, conflicts shown, gates enforced, zones non-overlapping. Live action = ${currentAction.action}. ${note}`,
+      explanation: `Consensus process for ${horizonLabel}: committee votes weighed, conflicts shown, gates enforced, zones non-overlapping. Live action = ${actionLabel}. ${note}`,
       chartStance: chartStanceFromRecommendation(rec),
       finalVerdict: rec,
       validationStatus: '✗ Recalculate',

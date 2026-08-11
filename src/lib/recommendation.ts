@@ -59,20 +59,24 @@ export function isQuantumBuy(rec: RecommendationLabel): boolean {
 
 /**
  * User-facing stance line.
- * If Quantum says BUY but live action is WAIT/HOLD (no fresh entry),
- * display: "BUY - WAIT for a better entry price."
+ * Prefer precise buy-zone displayLabel when live action is WAIT/HOLD —
+ * never invent "outside BUY zone" copy that contradicts location SSOT.
  */
 export function formatRecommendationDisplay(rec: StockRecommendation): string {
   const label = rec.recommendation;
+  const display = rec.engine?.currentAction?.displayLabel;
   if (isQuantumBuy(label) && (rec.currentAction === 'WAIT' || rec.currentAction === 'HOLD')) {
-    return `${label} - WAIT for a better entry price.`;
+    if (display) return `${label} · ${display}`;
+    return `${label} · WAIT — WAIT FOR BUY ZONE`;
   }
   return label;
 }
 
 export function formatActionNote(rec: StockRecommendation): string {
+  const display = rec.engine?.currentAction?.displayLabel;
+  if (display) return display;
   if (isQuantumBuy(rec.recommendation) && (rec.currentAction === 'WAIT' || rec.currentAction === 'HOLD')) {
-    return 'BUY - WAIT for a better entry price.';
+    return 'WAIT — WAIT FOR BUY ZONE';
   }
   return `Do now: ${rec.currentAction}`;
 }

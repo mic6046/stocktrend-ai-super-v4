@@ -40,7 +40,7 @@ export function DecisionBriefPanel({ decision }: DecisionBriefPanelProps) {
           tone={decision.expectedReturn >= 0 ? 'bull' : 'bear'}
         />
         <Metric label="Risk Level" value={decision.riskLevel} />
-        <Metric label="Do Now (Current Action)" value={decision.currentAction.action} tone={decision.chartStance} />
+        <Metric label="Do Now (Current Action)" value={decision.currentAction.displayLabel || decision.currentAction.action} tone={decision.chartStance} />
         <Metric label="Suggested Action" value={decision.suggestedAction} tone={decision.chartStance} />
       </div>
 
@@ -54,10 +54,25 @@ export function DecisionBriefPanel({ decision }: DecisionBriefPanelProps) {
         <p className="text-[8px] uppercase tracking-wider text-cyan-300/80">
           Live Price Engine · {decision.userHasPosition ? 'Position held' : 'No position'}
         </p>
-        <p className="mt-1 text-[13px] font-bold text-white">{decision.currentAction.action}</p>
+        <p className="mt-1 text-[13px] font-bold text-white">
+          {decision.currentAction.displayLabel || decision.currentAction.action}
+        </p>
+        {(decision.currentAction.priceLocation || decision.currentAction.confirmationStatus) && (
+          <p className="mt-1 text-[10px] font-mono text-gray-500">
+            {decision.currentAction.priceLocation
+              ? `LOCATION ${decision.currentAction.priceLocation.replace(/_/g, ' ')}`
+              : ''}
+            {decision.currentAction.priceLocation && decision.currentAction.confirmationStatus
+              ? ' · '
+              : ''}
+            {decision.currentAction.confirmationStatus
+              ? `CONFIRMATION ${decision.currentAction.confirmationStatus}`
+              : ''}
+          </p>
+        )}
         <p className="mt-1 text-[11px] text-gray-300 leading-relaxed">{decision.currentAction.reason}</p>
         <p className="mt-1 text-[10px] font-mono text-gray-500">
-          Confidence {decision.currentAction.confidence}% · answers: what now / why / when it changes
+          Confidence {decision.currentAction.confidence}% · location → confirmation → action
         </p>
       </div>
 
