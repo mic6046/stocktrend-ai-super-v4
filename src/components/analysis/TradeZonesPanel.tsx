@@ -23,6 +23,7 @@ type BuyZoneBand = {
   hi: number;
   sizePct?: number;
   anchor?: string;
+  status?: string;
 };
 
 type TradeZonesPanelProps = {
@@ -217,6 +218,12 @@ export function TradeZonesPanel({
 
     const buyZoneCards: JourneyCard[] = ssotBuyZones.map((z) => {
       const active = px > 0 && inBand(px, z);
+      const statusLabel =
+        z.status === 'ACTIVE_ENTRY'
+          ? 'ACTIVE ENTRY'
+          : z.status === 'FUTURE_REENTRY_ZONE'
+            ? 'FUTURE RE-ENTRY ZONE'
+            : 'FUTURE ENTRY ZONE';
       const tone =
         z.level === 1
           ? {
@@ -239,17 +246,19 @@ export function TradeZonesPanel({
         key: `buy${z.level}`,
         emoji: tone.emoji,
         title: z.label.toUpperCase(),
-        subtitle:
+        subtitle: statusLabel,
+        detail: [
           z.level === 1
             ? 'Preferred entry pocket'
             : z.level === 2
               ? 'Core scale-in entry'
               : 'Deep value accumulation',
-        detail: z.anchor
-          ? `${z.sizePct != null ? `${z.sizePct}% size · ` : ''}${z.anchor}`
-          : z.sizePct != null
-            ? `Suggested size ${z.sizePct}%`
-            : null,
+          z.anchor ? z.anchor : null,
+          z.sizePct != null ? `${z.sizePct}% size` : null,
+          'Not a current BUY unless Primary Action says so',
+        ]
+          .filter(Boolean)
+          .join(' · '),
         price: formatRange(z.lo, z.hi, currency),
         className: tone.className,
         titleClass: tone.titleClass,
@@ -359,13 +368,19 @@ export function TradeZonesPanel({
           ? 'Inside Buy Zone 2'
           : currentAction?.priceLocation === 'INSIDE_ZONE_3'
             ? 'Inside Buy Zone 3'
-            : currentAction?.priceLocation === 'ABOVE_ALL'
-              ? 'Above all Buy Zones'
-              : currentAction?.priceLocation === 'BELOW_ALL'
-                ? 'Below all Buy Zones'
-                : currentAction?.priceLocation === 'BETWEEN_ZONES'
-                  ? 'Between Buy Zones'
-                  : null;
+            : currentAction?.priceLocation === 'INSIDE_TAKE_PROFIT'
+              ? 'Inside Take-Profit Zone'
+              : currentAction?.priceLocation === 'ABOVE_ALL'
+                ? 'Above all Buy Zones'
+                : currentAction?.priceLocation === 'BELOW_ALL'
+                  ? 'Below all Buy Zones'
+                  : currentAction?.priceLocation === 'BETWEEN_ZONES'
+                    ? 'Between Buy Zones'
+                    : currentAction?.priceLocation === 'AT_STOP'
+                      ? 'At/below stop'
+                      : currentAction?.priceLocation === 'NORMAL_HOLD'
+                        ? 'Normal holding range'
+                        : null;
 
     return {
       journey,
@@ -456,13 +471,48 @@ export function TradeZonesPanel({
               )}
             </div>
           )}
-          {currentAction && (
-            <>
-              <p className="mt-1.5 text-[11px] text-gray-300 leading-relaxed">{currentAction.reason}</p>
-              <p className="mt-1 text-[10px] font-mono text-gray-500">
-                Confidence {currentAction.confidence}% · location → confirmation → action
+          {currentAction?.why && (
+            <p className="mt-1.5 text-[11px] text-gray-300 leading-relaxed">
+              <span className="text-gray-500 font-mono text-[9px] uppercase tracking-wider">Why · </span>
+              {currentAction.why}
+            </p>
+          )}
+          {currentAction && !currentAction.why && (
+            <p className="mt-1.5 text-[11px] text-gray-300 leading-relaxed">{currentAction.reason}</p>
+          )}
+          {currentAction?.conflictingFactors && currentAction.conflictingFactors.length > 0 && (
+            <div className="mt-1.5">
+              <p className="text-[9px] font-mono uppercase tracking-wider text-rose-300/80">
+                What is conflicting
               </p>
-            </>
+              <ul className="mt-0.5 space-y-0.5">
+                {currentAction.conflictingFactors.slice(0, 4).map((f) => (
+                  <li key={f} className="text-[10px] text-rose-100/80 leading-snug">
+                    · {f}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {(currentAction?.whatToWatch || currentAction?.nextOpportunity) && (
+            <p className="mt-1 text-[11px] text-amber-200/90 leading-relaxed">
+              <span className="text-gray-500 font-mono text-[9px] uppercase tracking-wider">
+                {currentAction.whatToWatch ? 'Watch · ' : 'Next · '}
+              </span>
+              {currentAction.whatToWatch || currentAction.nextOpportunity}
+            </p>
+          )}
+          {currentAction?.futureReEntryZone && currentAction.action !== 'INDECISION' && (
+            <p className="mt-1 text-[10px] font-mono text-emerald-300/90">
+              FUTURE RE-ENTRY · {formatRange(currentAction.futureReEntryZone.lo, currentAction.futureReEntryZone.hi, currency)}
+            </p>
+          )}
+          {currentAction && (
+            <p className="mt-1 text-[10px] font-mono text-gray-500">
+              Confidence {currentAction.confidence}%
+              {currentAction.confidenceBand ? ` · ${currentAction.confidenceBand}` : ''} · one primary
+              action only
+            </p>
           )}
         </div>
       )}

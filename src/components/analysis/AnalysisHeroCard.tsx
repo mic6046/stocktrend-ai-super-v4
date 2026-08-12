@@ -49,6 +49,12 @@ type AnalysisHeroCardProps = {
   /** Live do-now action (position + price) — distinct from horizon recommendation */
   currentAction?: string | null;
   currentActionReason?: string | null;
+  currentActionWhy?: string | null;
+  nextOpportunity?: string | null;
+  futureReEntryZone?: { lo: number; hi: number } | null;
+  conflictingFactors?: string[] | null;
+  whatToWatch?: string | null;
+  confidenceBand?: 'Low' | 'Moderate' | 'High' | null;
   userHasPosition?: boolean;
   /** @deprecated kept for compatibility — unused when target/return passed */
   projection?: HeroProjection;
@@ -136,6 +142,12 @@ export function AnalysisHeroCard({
   isLoading,
   currentAction,
   currentActionReason,
+  currentActionWhy,
+  nextOpportunity,
+  futureReEntryZone,
+  conflictingFactors,
+  whatToWatch,
+  confidenceBand,
   userHasPosition = false,
 }: AnalysisHeroCardProps) {
   const theme = useMemo(() => getRecommendationTheme(score), [score]);
@@ -243,14 +255,82 @@ export function AnalysisHeroCard({
             </AnimatePresence>
 
             {currentAction && (
-              <div className="mt-3 rounded-xl border border-cyan-500/25 bg-cyan-500/5 px-3 py-2">
-                <p className="text-[9px] uppercase tracking-wider text-cyan-300/80">
-                  Do now · Current Action · {userHasPosition ? 'Position held' : 'No position'}
-                </p>
-                <p className="mt-0.5 text-[15px] font-bold text-white tracking-wide">{currentAction}</p>
-                {currentActionReason && (
-                  <p className="mt-1 text-[10px] text-gray-400 leading-snug">{currentActionReason}</p>
+              <div className="mt-3 rounded-xl border border-cyan-500/25 bg-cyan-500/5 px-3 py-2.5 space-y-2">
+                <div>
+                  <p className="text-[9px] uppercase tracking-wider text-cyan-300/80">
+                    Primary Action · {userHasPosition ? 'Position held' : 'No position'}
+                  </p>
+                  <p className="mt-0.5 text-[16px] font-black text-white tracking-wide uppercase">
+                    {currentAction}
+                  </p>
+                  {confidenceBand && (
+                    <p className="mt-0.5 text-[10px] font-mono text-gray-400">
+                      CONFIDENCE ·{' '}
+                      <span
+                        className={
+                          confidenceBand === 'High'
+                            ? 'text-emerald-300'
+                            : confidenceBand === 'Moderate'
+                              ? 'text-amber-200'
+                              : 'text-rose-300'
+                        }
+                      >
+                        {confidenceBand}
+                      </span>
+                    </p>
+                  )}
+                </div>
+                {priceLabel && (
+                  <p className="text-[10px] font-mono text-gray-400">
+                    CURRENT PRICE · <span className="text-white font-bold">{priceLabel}</span>
+                  </p>
                 )}
+                {(currentActionWhy || currentActionReason) && (
+                  <div>
+                    <p className="text-[9px] uppercase tracking-wider text-gray-500">Why</p>
+                    <p className="mt-0.5 text-[10px] text-gray-300 leading-snug">
+                      {currentActionWhy || currentActionReason}
+                    </p>
+                  </div>
+                )}
+                {conflictingFactors && conflictingFactors.length > 0 && (
+                  <div>
+                    <p className="text-[9px] uppercase tracking-wider text-rose-300/80">
+                      What is conflicting
+                    </p>
+                    <ul className="mt-0.5 space-y-0.5">
+                      {conflictingFactors.slice(0, 4).map((f) => (
+                        <li key={f} className="text-[10px] text-rose-100/80 leading-snug">
+                          · {f}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {(whatToWatch || nextOpportunity) && (
+                  <div>
+                    <p className="text-[9px] uppercase tracking-wider text-gray-500">
+                      {whatToWatch ? 'What to watch' : 'Next opportunity'}
+                    </p>
+                    <p className="mt-0.5 text-[10px] text-amber-200/90 leading-snug">
+                      {whatToWatch || nextOpportunity}
+                    </p>
+                  </div>
+                )}
+                {futureReEntryZone &&
+                  Number.isFinite(futureReEntryZone.lo) &&
+                  Number.isFinite(futureReEntryZone.hi) &&
+                  String(currentAction).toUpperCase() !== 'INDECISION' && (
+                    <div>
+                      <p className="text-[9px] uppercase tracking-wider text-gray-500">
+                        Future re-entry zone · not a current buy
+                      </p>
+                      <p className="mt-0.5 text-[11px] font-mono font-bold text-emerald-300/90">
+                        {formatMoney(Math.min(futureReEntryZone.lo, futureReEntryZone.hi), currency)} –{' '}
+                        {formatMoney(Math.max(futureReEntryZone.lo, futureReEntryZone.hi), currency)}
+                      </p>
+                    </div>
+                  )}
               </div>
             )}
 

@@ -65,9 +65,26 @@ export function isQuantumBuy(rec: RecommendationLabel): boolean {
 export function formatRecommendationDisplay(rec: StockRecommendation): string {
   const label = rec.recommendation;
   const display = rec.engine?.currentAction?.displayLabel;
-  if (isQuantumBuy(label) && (rec.currentAction === 'WAIT' || rec.currentAction === 'HOLD')) {
+  const live = rec.currentAction;
+  if (display && live && live !== label) {
+    // Horizon thesis stays visible; primary action is explicit and separate
+    if (
+      live === 'TAKE PROFIT' ||
+      live === 'PARTIAL TAKE PROFIT' ||
+      live === 'WAIT' ||
+      live === 'REASSESS' ||
+      live === 'HOLD' ||
+      live === 'INDECISION'
+    ) {
+      return `${label} · ${display}`;
+    }
+  }
+  if (
+    isQuantumBuy(label) &&
+    (live === 'WAIT' || live === 'HOLD' || live === 'REASSESS' || live === 'INDECISION')
+  ) {
     if (display) return `${label} · ${display}`;
-    return `${label} · WAIT — WAIT FOR BUY ZONE`;
+    return live === 'INDECISION' ? `${label} · INDECISION` : `${label} · WAIT — DO NOT CHASE`;
   }
   return label;
 }

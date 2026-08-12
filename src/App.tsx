@@ -8723,6 +8723,37 @@ export default function App() {
                     currentActionReason={
                       masterRecommendation?.currentActionReason ?? horizonView.currentAction.reason
                     }
+                    currentActionWhy={
+                      masterRecommendation?.engine?.currentAction?.why ||
+                      horizonView.currentAction.why ||
+                      null
+                    }
+                    nextOpportunity={
+                      masterRecommendation?.engine?.currentAction?.nextOpportunity ||
+                      horizonView.currentAction.nextOpportunity ||
+                      null
+                    }
+                    futureReEntryZone={
+                      masterRecommendation?.engine?.currentAction?.futureReEntryZone ||
+                      horizonView.reEntryZone ||
+                      horizonView.currentAction.futureReEntryZone ||
+                      null
+                    }
+                    conflictingFactors={
+                      masterRecommendation?.engine?.currentAction?.conflictingFactors ||
+                      horizonView.currentAction.conflictingFactors ||
+                      null
+                    }
+                    whatToWatch={
+                      masterRecommendation?.engine?.currentAction?.whatToWatch ||
+                      horizonView.currentAction.whatToWatch ||
+                      null
+                    }
+                    confidenceBand={
+                      masterRecommendation?.engine?.currentAction?.confidenceBand ||
+                      horizonView.currentAction.confidenceBand ||
+                      null
+                    }
                     userHasPosition={userHasPosition}
                   />
                   <AiInsightsStrip

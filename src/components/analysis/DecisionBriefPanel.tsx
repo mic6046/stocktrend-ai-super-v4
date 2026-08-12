@@ -40,25 +40,28 @@ export function DecisionBriefPanel({ decision }: DecisionBriefPanelProps) {
           tone={decision.expectedReturn >= 0 ? 'bull' : 'bear'}
         />
         <Metric label="Risk Level" value={decision.riskLevel} />
-        <Metric label="Do Now (Current Action)" value={decision.currentAction.displayLabel || decision.currentAction.action} tone={decision.chartStance} />
+        <Metric label="Primary Action" value={decision.currentAction.displayLabel || decision.currentAction.action} tone={decision.chartStance} />
         <Metric label="Suggested Action" value={decision.suggestedAction} tone={decision.chartStance} />
       </div>
 
       <p className="text-[10px] text-gray-500 font-mono leading-relaxed">
-        Recommendation = horizon thesis · Current Action = what to do at this live price given{' '}
-        {decision.userHasPosition ? 'you own the stock' : 'you do not own the stock'}. BUY ZONE and ADD
-        POSITION never appear together.
+        One current price = one primary action. Horizon thesis ({decision.finalVerdict}) is separate from
+        live action. Buy Zones are future opportunities unless confirmation selects BUY/ADD.
       </p>
 
-      <div className="rounded-xl border border-cyan-500/25 bg-cyan-500/5 px-3 py-2.5">
+      <div className="rounded-xl border border-cyan-500/25 bg-cyan-500/5 px-3 py-2.5 space-y-2">
         <p className="text-[8px] uppercase tracking-wider text-cyan-300/80">
-          Live Price Engine · {decision.userHasPosition ? 'Position held' : 'No position'}
+          Primary Action · {decision.userHasPosition ? 'Position held' : 'No position'}
         </p>
-        <p className="mt-1 text-[13px] font-bold text-white">
+        <p className="text-[15px] font-black text-white uppercase tracking-wide">
           {decision.currentAction.displayLabel || decision.currentAction.action}
         </p>
+        <p className="text-[10px] font-mono text-gray-400">
+          CURRENT PRICE ·{' '}
+          <span className="text-white font-bold">{px(decision.currentPrice)}</span>
+        </p>
         {(decision.currentAction.priceLocation || decision.currentAction.confirmationStatus) && (
-          <p className="mt-1 text-[10px] font-mono text-gray-500">
+          <p className="text-[10px] font-mono text-gray-500">
             {decision.currentAction.priceLocation
               ? `LOCATION ${decision.currentAction.priceLocation.replace(/_/g, ' ')}`
               : ''}
@@ -70,9 +73,74 @@ export function DecisionBriefPanel({ decision }: DecisionBriefPanelProps) {
               : ''}
           </p>
         )}
-        <p className="mt-1 text-[11px] text-gray-300 leading-relaxed">{decision.currentAction.reason}</p>
-        <p className="mt-1 text-[10px] font-mono text-gray-500">
-          Confidence {decision.currentAction.confidence}% · location → confirmation → action
+        <div>
+          <p className="text-[8px] uppercase tracking-wider text-gray-500">Why</p>
+          <p className="mt-0.5 text-[11px] text-gray-300 leading-relaxed">
+            {decision.currentAction.why || decision.currentAction.reason}
+          </p>
+        </div>
+        {decision.currentAction.nextOpportunity && !decision.currentAction.whatToWatch && (
+          <div>
+            <p className="text-[8px] uppercase tracking-wider text-gray-500">Next opportunity</p>
+            <p className="mt-0.5 text-[11px] text-amber-200/90 leading-relaxed">
+              {decision.currentAction.nextOpportunity}
+            </p>
+          </div>
+        )}
+        {decision.currentAction.conflictingFactors &&
+          decision.currentAction.conflictingFactors.length > 0 && (
+            <div>
+              <p className="text-[8px] uppercase tracking-wider text-rose-300/80">
+                What is conflicting
+              </p>
+              <ul className="mt-0.5 space-y-0.5">
+                {decision.currentAction.conflictingFactors.slice(0, 4).map((f) => (
+                  <li key={f} className="text-[11px] text-rose-100/85 leading-relaxed">
+                    · {f}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        {decision.currentAction.whatToWatch && (
+          <div>
+            <p className="text-[8px] uppercase tracking-wider text-gray-500">What to watch</p>
+            <p className="mt-0.5 text-[11px] text-amber-200/90 leading-relaxed">
+              {decision.currentAction.whatToWatch}
+            </p>
+          </div>
+        )}
+        {decision.currentAction.confidenceBand && (
+          <p className="text-[10px] font-mono text-gray-400">
+            CONFIDENCE BAND · {decision.currentAction.confidenceBand}
+          </p>
+        )}
+        {(decision.reEntryZone || decision.currentAction.futureReEntryZone) &&
+          decision.currentAction.action !== 'INDECISION' && (
+          <div>
+            <p className="text-[8px] uppercase tracking-wider text-gray-500">
+              Future re-entry zone · not a current buy
+            </p>
+            <p className="mt-0.5 text-[12px] font-mono font-bold text-emerald-300">
+              {px(
+                Math.min(
+                  (decision.reEntryZone || decision.currentAction.futureReEntryZone)!.lo,
+                  (decision.reEntryZone || decision.currentAction.futureReEntryZone)!.hi
+                )
+              )}{' '}
+              –{' '}
+              {px(
+                Math.max(
+                  (decision.reEntryZone || decision.currentAction.futureReEntryZone)!.lo,
+                  (decision.reEntryZone || decision.currentAction.futureReEntryZone)!.hi
+                )
+              )}
+            </p>
+          </div>
+        )}
+        <p className="text-[10px] font-mono text-gray-500">
+          Confidence {decision.currentAction.confidence}% · zones → location → position → priority →
+          one action
         </p>
       </div>
 
