@@ -7,6 +7,11 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 body {
     margin: 0;
     background-color: #050505;
@@ -16,12 +21,31 @@ body {
     text-rendering: optimizeLegibility;
     overflow-x: hidden;
     overscroll-behavior-y: none;
+    touch-action: manipulation;
 }
 
 /* Prefer readable tap targets on touch devices without bloating desktop */
 @media (pointer: coarse) {
   button, [role="button"], a {
     -webkit-tap-highlight-color: transparent;
+  }
+}
+
+/* Hide scrollbars on horizontal swipe strips (market pulse, chip rows) */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* iOS: avoid auto-zoom on focused inputs (<16px) */
+@media (max-width: 1023px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
   }
 }
 

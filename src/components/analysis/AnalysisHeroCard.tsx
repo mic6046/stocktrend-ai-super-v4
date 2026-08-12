@@ -246,7 +246,7 @@ export function AnalysisHeroCard({
                 exit={{ opacity: 0, y: -4 }}
                 transition={{ duration: 0.35 }}
                 className={cn(
-                  'font-display font-black text-3xl sm:text-4xl tracking-tight leading-none uppercase',
+                  'font-display font-black text-2xl sm:text-3xl md:text-4xl tracking-tight leading-tight uppercase break-words',
                   tone.text
                 )}
               >
@@ -260,7 +260,7 @@ export function AnalysisHeroCard({
                   <p className="text-[9px] uppercase tracking-wider text-cyan-300/80">
                     Primary Action · {userHasPosition ? 'Position held' : 'No position'}
                   </p>
-                  <p className="mt-0.5 text-[16px] font-black text-white tracking-wide uppercase">
+                  <p className="mt-0.5 text-[15px] sm:text-[16px] font-black text-white tracking-wide uppercase break-words leading-snug">
                     {currentAction}
                   </p>
                   {confidenceBand && (

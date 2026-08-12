@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
-import { Search, TrendingUp, TrendingDown, Info, Loader2, Sparkles, LineChart as ChartIcon, Activity, Globe, Newspaper, ExternalLink, MousePointer, Trash2, Tag, Gauge, Check, Zap, Bell, BellRing, Plus, Volume2, History, Flame, ShieldAlert, X, Coins, Briefcase, Shield, Layers, Settings, Rocket, HelpCircle, ArrowRight, ChevronDown, ChevronUp, Download, Share2, ZoomIn, ZoomOut, Sliders, Brain, Percent, Trophy, Target, Gem } from 'lucide-react';
+import { Search, TrendingUp, TrendingDown, Info, Loader2, Sparkles, LineChart as ChartIcon, Activity, Globe, Newspaper, ExternalLink, MousePointer, Trash2, Tag, Gauge, Check, Zap, Bell, BellRing, Plus, Volume2, History, Flame, ShieldAlert, X, Coins, Briefcase, Shield, Layers, Settings, Rocket, HelpCircle, ArrowRight, ChevronDown, ChevronUp, Download, Share2, ZoomIn, ZoomOut, Sliders, Brain, Percent, Trophy, Target, Gem, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { computeTechnicalIndicators, calculateRSISeries, detectRSIDivergence } from './lib/technical';
 import {
@@ -7347,22 +7347,23 @@ export default function App() {
       <div className="fixed top-[-100px] left-[-100px] w-[500px] h-[500px] bg-emerald-500/10 rounded-full blur-[120px] pointer-events-none" />
       <div className="fixed bottom-[-100px] right-[-100px] w-[600px] h-[600px] bg-blue-600/10 rounded-full blur-[150px] pointer-events-none" />
 
-      {/* Single-row header — never wraps to a second bar */}
-      <nav className="relative z-10 border-b border-white/5 backdrop-blur-md sticky top-0 pt-[env(safe-area-inset-top)] px-2 sm:px-3 py-1.5 bg-[#050505]/90">
-        <div className="mx-auto flex w-full max-w-[1400px] flex-nowrap items-center justify-center gap-1 sm:gap-1.5 min-w-0 overflow-x-auto">
-          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 min-w-0">
-            <div className="w-7 h-7 sm:w-8 sm:h-8 bg-emerald-500 rounded-lg flex items-center justify-center shadow-[0_0_18px_rgba(16,185,129,0.45)] shrink-0">
-              <Activity className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-black" />
+      {/* Responsive header: one row on PC · stacked touch bands on phone/tablet */}
+      <nav className="relative z-10 border-b border-white/5 backdrop-blur-md sticky top-0 pt-[env(safe-area-inset-top)] bg-[#050505]/92">
+        {/* —— Desktop / large tablet: single row —— */}
+        <div className="hidden lg:flex mx-auto w-full max-w-[1400px] items-center justify-center gap-2 px-4 py-2 min-w-0">
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center shadow-[0_0_18px_rgba(16,185,129,0.45)] shrink-0">
+              <Activity className="w-4 h-4 text-black" />
             </div>
-            <h1 className="text-[11px] sm:text-sm font-sans font-extrabold tracking-tight uppercase whitespace-nowrap leading-none">
+            <h1 className="text-sm font-sans font-extrabold tracking-tight uppercase whitespace-nowrap leading-none">
               QUANTUM<span className="text-emerald-500">NODE</span>
             </h1>
-            <div className="hidden xl:flex items-center gap-0.5 ml-1 border-l border-white/10 pl-2">
+            <div className="flex items-center gap-0.5 ml-1 border-l border-white/10 pl-2">
               <button
                 type="button"
                 onClick={() => setActivePage('DASHBOARD')}
                 className={cn(
-                  "h-8 px-2.5 rounded-lg text-[10px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer inline-flex items-center",
+                  "h-9 px-3 rounded-lg text-[11px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer inline-flex items-center",
                   activePage === 'DASHBOARD'
                     ? "bg-emerald-500 text-black border-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.35)]"
                     : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
@@ -7374,7 +7375,7 @@ export default function App() {
                 type="button"
                 onClick={() => setActivePage('NEWS_CENTER')}
                 className={cn(
-                  "h-8 px-2.5 rounded-lg text-[10px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer inline-flex items-center",
+                  "h-9 px-3 rounded-lg text-[11px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer inline-flex items-center",
                   activePage === 'NEWS_CENTER'
                     ? "bg-blue-500 text-white border-blue-400 shadow-[0_0_18px_rgba(59,130,246,0.3)]"
                     : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
@@ -7386,7 +7387,7 @@ export default function App() {
                 type="button"
                 onClick={() => setActivePage('SELF_LEARNING')}
                 className={cn(
-                  "h-8 px-2.5 rounded-lg text-[10px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer inline-flex items-center",
+                  "h-9 px-3 rounded-lg text-[11px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer inline-flex items-center",
                   activePage === 'SELF_LEARNING'
                     ? "bg-indigo-500 text-white border-indigo-400 shadow-[0_0_18px_rgba(99,102,241,0.3)]"
                     : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
@@ -7399,18 +7400,16 @@ export default function App() {
 
           <form
             onSubmit={handleSubmit}
-            className="min-w-0 flex-1 max-w-[7.5rem] sm:max-w-[11rem] md:max-w-xs lg:max-w-sm group"
+            className="min-w-0 flex-1 max-w-md group"
             autoComplete="off"
           >
             <div className="relative w-full min-w-0">
               <input
-                key={searchInputKey}
+                key={`desk-${searchInputKey}`}
                 ref={searchInputRef}
                 type="search"
                 value={searchQuery}
-                onChange={(e) => {
-                  setSearchQuery(e.target.value);
-                }}
+                onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
                   e.preventDefault();
@@ -7421,18 +7420,18 @@ export default function App() {
                 autoCapitalize="off"
                 spellCheck={false}
                 inputMode="search"
-                name={`qn-ticker-${searchInputKey}`}
-                id={`qn-ticker-${searchInputKey}`}
-                placeholder="Ticker"
+                name={`qn-ticker-desk-${searchInputKey}`}
+                id={`qn-ticker-desk-${searchInputKey}`}
+                placeholder="Ticker then Enter"
                 title="Press Enter to search"
-                className="w-full h-8 sm:h-9 bg-[#111113] border border-white/10 rounded-full pl-7 sm:pl-9 pr-6 sm:pr-8 text-[12px] sm:text-sm focus:outline-none focus:border-emerald-500/50 transition-all placeholder:text-gray-600 font-mono tracking-wide"
+                className="w-full h-9 bg-[#111113] border border-white/10 rounded-full pl-9 pr-8 text-sm focus:outline-none focus:border-emerald-500/50 transition-all placeholder:text-gray-600 font-mono tracking-wide"
               />
-              <Search className="absolute left-2 sm:left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500 group-focus-within:text-emerald-500 transition-colors pointer-events-none" />
-              {loading && <Loader2 className="absolute right-2 sm:right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-emerald-500" />}
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500 group-focus-within:text-emerald-500 transition-colors pointer-events-none" />
+              {loading && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-emerald-500" />}
             </div>
           </form>
 
-          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
               onClick={() => {
@@ -7444,16 +7443,15 @@ export default function App() {
                 }
               }}
               className={cn(
-                'inline-flex items-center justify-center gap-1 h-8 rounded-full px-1.5 sm:px-2.5 text-[9px] sm:text-[10px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
+                'inline-flex items-center justify-center gap-1.5 h-9 rounded-full px-3 text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
                 showFindATrade
                   ? 'bg-emerald-500 text-black border-emerald-400 shadow-[0_0_16px_rgba(16,185,129,0.35)]'
                   : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/25'
               )}
-              title="Find Trades — paste tickers or fill from market/theme lists"
+              title="Find Trades"
             >
               <Rocket className="w-3.5 h-3.5 shrink-0" />
-              <span className="hidden md:inline">Find Trades</span>
-              <span className="md:hidden">Find</span>
+              Find Trades
             </button>
             <button
               type="button"
@@ -7465,16 +7463,15 @@ export default function App() {
                 setSuggestRunToken((n) => n + 1);
               }}
               className={cn(
-                'inline-flex items-center justify-center gap-1 h-8 rounded-full px-1.5 sm:px-2.5 text-[9px] sm:text-[10px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
+                'inline-flex items-center justify-center gap-1.5 h-9 rounded-full px-3 text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
                 showSuggestATrade
                   ? 'bg-sky-500 text-black border-sky-400 shadow-[0_0_16px_rgba(56,189,248,0.35)]'
                   : 'bg-sky-500/15 text-sky-300 border-sky-500/40 hover:bg-sky-500/25'
               )}
-              title="New Suggest Trades search from popular US / HK / Japan / Europe markets"
+              title="Suggest Trades"
             >
               <Sparkles className="w-3.5 h-3.5 shrink-0" />
-              <span className="hidden md:inline">Suggest Trades</span>
-              <span className="md:hidden">Suggest</span>
+              Suggest
             </button>
             <button
               type="button"
@@ -7486,20 +7483,19 @@ export default function App() {
                 setDayTradeRunToken((n) => n + 1);
               }}
               className={cn(
-                'inline-flex items-center justify-center gap-1 h-8 rounded-full px-1.5 sm:px-2.5 text-[9px] sm:text-[10px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
+                'inline-flex items-center justify-center gap-1.5 h-9 rounded-full px-3 text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
                 showDayTrade
                   ? 'bg-orange-500 text-black border-orange-400 shadow-[0_0_16px_rgba(249,115,22,0.35)]'
                   : 'bg-orange-500/15 text-orange-300 border-orange-500/40 hover:bg-orange-500/25'
               )}
-              title="Scout popular stocks that clear day-trade liquidity / range / bias gates"
+              title="Day Trade"
             >
               <Flame className="w-3.5 h-3.5 shrink-0" />
-              <span className="hidden md:inline">Day Trade</span>
-              <span className="md:hidden">Day</span>
+              Day Trade
             </button>
           </div>
 
-          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
             <MarketDataRefreshBar
               variant="inline"
               lastUpdatedAt={lastMarketUpdatedAt}
@@ -7517,32 +7513,168 @@ export default function App() {
               onRefresh={() => void handleMarketDataRefresh()}
               disabled={loading || marketDataStatus === 'loading'}
             />
-
             {user && (
-              <div className="hidden lg:block max-w-[200px] xl:max-w-[240px] overflow-hidden">
+              <div className="max-w-[220px] overflow-hidden">
                 <UsageQuotaBar usage={usage} email={user.email} onRefresh={refreshUsage} compact />
               </div>
             )}
+            {!user ? (
+              <button
+                type="button"
+                onClick={() => setShowAuthModal(true)}
+                disabled={authLoading}
+                className="inline-flex items-center justify-center gap-1.5 h-9 rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-3 font-sans font-bold text-[11px] text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50 shrink-0"
+              >
+                <Shield className="h-3.5 w-3.5" />
+                Sign in
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => signOut()}
+                className="inline-flex items-center justify-center h-9 rounded-lg border border-white/10 px-3 text-[11px] font-sans font-semibold text-gray-300 hover:bg-white/5 hover:text-white shrink-0"
+              >
+                Sign out
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* —— Phone / small tablet: brand+search, then equal trade actions —— */}
+        <div className="lg:hidden px-3 pb-2 space-y-2">
+          <div className="flex items-center gap-2 min-w-0 pt-1.5">
+            <div className="flex items-center gap-1.5 shrink-0">
+              <div className="w-9 h-9 bg-emerald-500 rounded-xl flex items-center justify-center shadow-[0_0_18px_rgba(16,185,129,0.4)]">
+                <Activity className="w-4 h-4 text-black" />
+              </div>
+              <h1 className="text-[12px] font-sans font-extrabold tracking-tight uppercase leading-none">
+                Q<span className="text-emerald-500">N</span>
+              </h1>
+            </div>
+
+            <form onSubmit={handleSubmit} className="min-w-0 flex-1 group" autoComplete="off">
+              <div className="relative w-full">
+                <input
+                  key={`mob-${searchInputKey}`}
+                  type="search"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
+                    e.preventDefault();
+                    runTickerSearch((e.target as HTMLInputElement).value);
+                  }}
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  inputMode="search"
+                  enterKeyHint="search"
+                  name={`qn-ticker-mob-${searchInputKey}`}
+                  id={`qn-ticker-mob-${searchInputKey}`}
+                  placeholder="Search ticker"
+                  className="w-full h-11 bg-[#111113] border border-white/10 rounded-full pl-10 pr-10 text-base focus:outline-none focus:border-emerald-500/50 transition-all placeholder:text-gray-600 font-mono tracking-wide"
+                />
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
+                {loading && <Loader2 className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 animate-spin text-emerald-500" />}
+              </div>
+            </form>
+
+            <button
+              type="button"
+              disabled={loading || marketDataStatus === 'loading'}
+              onClick={() => void handleMarketDataRefresh()}
+              className="inline-flex items-center justify-center h-11 w-11 rounded-full border border-emerald-500/40 text-emerald-300 shrink-0 active:bg-emerald-500/15"
+              aria-label="Refresh market data"
+              title="Refresh"
+            >
+              {marketDataStatus === 'loading' || loading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <RefreshCw className="w-4 h-4" />
+              )}
+            </button>
 
             {!user ? (
               <button
                 type="button"
                 onClick={() => setShowAuthModal(true)}
                 disabled={authLoading}
-                className="inline-flex items-center justify-center gap-1 h-8 rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-2 sm:px-2.5 font-sans font-bold text-[10px] text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50 shrink-0"
+                className="inline-flex items-center justify-center h-11 w-11 rounded-full border border-emerald-500/40 bg-emerald-500/15 text-emerald-300 shrink-0 disabled:opacity-50"
+                aria-label="Sign in"
               >
-                <Shield className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Sign in</span>
+                <Shield className="h-4 w-4" />
               </button>
             ) : (
               <button
                 type="button"
                 onClick={() => signOut()}
-                className="inline-flex items-center justify-center h-8 rounded-lg border border-white/10 px-2 sm:px-2.5 text-[10px] font-sans font-semibold text-gray-300 hover:bg-white/5 hover:text-white shrink-0"
+                className="inline-flex items-center justify-center h-11 px-3 rounded-full border border-white/10 text-[11px] font-semibold text-gray-300 shrink-0"
               >
                 Out
               </button>
             )}
+          </div>
+
+          <div className="grid grid-cols-3 gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setActivePage('DASHBOARD');
+                setShowFindATrade((v) => !v);
+                if (!showFindATrade) {
+                  setShowSuggestATrade(false);
+                  setShowDayTrade(false);
+                }
+              }}
+              className={cn(
+                'inline-flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 min-h-[48px] rounded-2xl px-1.5 text-[10px] font-bold uppercase tracking-wide border transition-all cursor-pointer',
+                showFindATrade
+                  ? 'bg-emerald-500 text-black border-emerald-400'
+                  : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 active:bg-emerald-500/25'
+              )}
+            >
+              <Rocket className="w-4 h-4 shrink-0" />
+              <span>Find</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActivePage('DASHBOARD');
+                setShowFindATrade(false);
+                setShowDayTrade(false);
+                setShowSuggestATrade(true);
+                setSuggestRunToken((n) => n + 1);
+              }}
+              className={cn(
+                'inline-flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 min-h-[48px] rounded-2xl px-1.5 text-[10px] font-bold uppercase tracking-wide border transition-all cursor-pointer',
+                showSuggestATrade
+                  ? 'bg-sky-500 text-black border-sky-400'
+                  : 'bg-sky-500/15 text-sky-300 border-sky-500/40 active:bg-sky-500/25'
+              )}
+            >
+              <Sparkles className="w-4 h-4 shrink-0" />
+              <span>Suggest</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActivePage('DASHBOARD');
+                setShowFindATrade(false);
+                setShowSuggestATrade(false);
+                setShowDayTrade(true);
+                setDayTradeRunToken((n) => n + 1);
+              }}
+              className={cn(
+                'inline-flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 min-h-[48px] rounded-2xl px-1.5 text-[10px] font-bold uppercase tracking-wide border transition-all cursor-pointer',
+                showDayTrade
+                  ? 'bg-orange-500 text-black border-orange-400'
+                  : 'bg-orange-500/15 text-orange-300 border-orange-500/40 active:bg-orange-500/25'
+              )}
+            >
+              <Flame className="w-4 h-4 shrink-0" />
+              <span>Day</span>
+            </button>
           </div>
         </div>
       </nav>
@@ -7558,9 +7690,9 @@ export default function App() {
         </div>
       )}
 
-      {/* Market pulse — centered wrap, no sideways marquee scroll */}
-      <div className="relative z-10 bg-[#0A0A0C] border-b border-white/5 py-1.5 sm:py-2 overflow-x-hidden">
-        <div className="mx-auto max-w-[1400px] px-3 sm:px-6 flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 sm:gap-x-6">
+      {/* Market pulse — swipe on phone, centered wrap on desktop */}
+      <div className="relative z-10 bg-[#0A0A0C] border-b border-white/5 py-1.5 sm:py-2">
+        <div className="mx-auto max-w-[1400px] px-3 sm:px-6 flex items-center gap-x-4 sm:gap-x-6 overflow-x-auto no-scrollbar lg:flex-wrap lg:justify-center lg:overflow-visible [-webkit-overflow-scrolling:touch]">
           {indices.length > 0 ? indices.map((idx, i) => (
             <div key={`${idx.symbol}-${i}`} className="flex gap-1.5 sm:gap-2 items-center font-mono text-[10px] sm:text-[12px] tracking-tight shrink-0">
               <span className="text-gray-500">{idx.shortName || idx.symbol}</span>
@@ -7576,9 +7708,7 @@ export default function App() {
         </div>
       </div>
 
-      <main className="relative z-10 max-w-[1400px] mx-auto px-3 py-4 sm:p-6 md:p-10 pb-28 lg:pb-10">
-        {/* Desktop-only spacer; mobile uses bottom nav */}
-        <div className="hidden" />
+      <main className="relative z-10 max-w-[1400px] mx-auto px-3 py-4 sm:p-6 md:p-10 pb-[calc(7rem+env(safe-area-inset-bottom))] lg:pb-10">
 
         <AnimatePresence>
           {showFindATrade && (
@@ -13020,7 +13150,7 @@ export default function App() {
                       setShowSuggestATrade(false);
                       setShowDayTrade(false);
                     }}
-                    className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-emerald-500 text-black py-2.5 text-[12px] font-bold uppercase tracking-wider hover:bg-emerald-400 transition-colors cursor-pointer"
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-emerald-500 text-black min-h-[48px] py-3 text-[12px] font-bold uppercase tracking-wider hover:bg-emerald-400 active:bg-emerald-600 transition-colors cursor-pointer"
                   >
                     <Rocket className="w-4 h-4" />
                     Open Find Trades
@@ -13040,7 +13170,7 @@ export default function App() {
                       setShowDayTrade(false);
                       setSuggestRunToken((n) => n + 1);
                     }}
-                    className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-sky-500 text-black py-2.5 text-[12px] font-bold uppercase tracking-wider hover:bg-sky-400 transition-colors cursor-pointer"
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-sky-500 text-black min-h-[48px] py-3 text-[12px] font-bold uppercase tracking-wider hover:bg-sky-400 active:bg-sky-600 transition-colors cursor-pointer"
                   >
                     <Sparkles className="w-4 h-4" />
                     Open Suggest Trades
@@ -13060,7 +13190,7 @@ export default function App() {
                       setShowSuggestATrade(false);
                       setDayTradeRunToken((n) => n + 1);
                     }}
-                    className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-orange-500 text-black py-2.5 text-[12px] font-bold uppercase tracking-wider hover:bg-orange-400 transition-colors cursor-pointer"
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-orange-500 text-black min-h-[48px] py-3 text-[12px] font-bold uppercase tracking-wider hover:bg-orange-400 active:bg-orange-600 transition-colors cursor-pointer"
                   >
                     <Flame className="w-4 h-4" />
                     Open Day Trade
@@ -13085,7 +13215,7 @@ export default function App() {
           <span className="hidden md:inline">Region: <span className="text-blue-400/80 font-mono">US_EAST_01</span></span>
         </div>
         <div className="flex flex-col md:items-end gap-2 text-center md:text-right">
-          <span className="text-gray-500">Quantum Node · Powered by Google Gemini · <span className="font-mono text-emerald-500/70">ui-onerow-0812</span></span>
+          <span className="text-gray-500">Quantum Node · Powered by Google Gemini · <span className="font-mono text-emerald-500/70">ui-responsive-0813</span></span>
           <LegalLinks className="justify-center md:justify-end" />
         </div>
       </footer>
