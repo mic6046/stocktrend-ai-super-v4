@@ -27,6 +27,20 @@ import {
 import { TruncatedText } from './components/TruncatedText';
 import { UsageQuotaBar, QuotaExhaustedBanner } from './components/UsageQuotaBar';
 import { LegalLinks } from './components/LegalDocs';
+import { AppShell } from './components/layout/AppShell';
+import {
+  loadSidebarCollapsed,
+  saveSidebarCollapsed,
+  type AppPage,
+} from './components/layout/navTypes';
+import { MarketCommandCenter } from './components/dashboard/MarketCommandCenter';
+import { FindTradesPage } from './components/pages/FindTradesPage';
+import { AiSignalsPage } from './components/pages/AiSignalsPage';
+import { WatchlistPage } from './components/pages/WatchlistPage';
+import { PortfolioPage } from './components/pages/PortfolioPage';
+import { SettingsPage } from './components/pages/SettingsPage';
+import { AlertsPage } from './components/pages/AlertsPage';
+import { loadSignalCache, mergeSignalCache, type CachedSignalRow } from './lib/signalCache';
 import { useAuth } from './lib/auth';
 import { loadUserData, saveUserData } from './lib/userData';
 import { apiUrl, assertJsonResponse, loggedFetch, withMarketRefreshLock } from './lib/api';
@@ -1137,8 +1151,14 @@ export default function App() {
   const [scanningStatus, setScanningStatus] = useState<'IDLE' | 'SCANNING' | 'COMPLETED' | 'ERROR'>('IDLE');
   const [scanResults, setScanResults] = useState<any[]>([]);
   
-  // === News Center Page States ===
-  const [activePage, setActivePage] = useState<'DASHBOARD' | 'NEWS_CENTER' | 'SELF_LEARNING'>('DASHBOARD');
+  // === App shell pages (sidebar navigation) ===
+  const [activePage, setActivePage] = useState<AppPage>('DASHBOARD');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => loadSidebarCollapsed());
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [signalCache, setSignalCache] = useState<CachedSignalRow[]>(() => loadSignalCache());
+  const [portfolioQuotes, setPortfolioQuotes] = useState<
+    Record<string, { price?: number; name?: string; signal?: string; risk?: string; changePct?: number; confidence?: number; trend?: string }>
+  >({});
 
   // === Self-Learning Engine v6 Model Weights & Calibration ===
   const [modelWeights, setModelWeights] = useState<{
@@ -5862,6 +5882,54 @@ export default function App() {
     }
   };
 
+  // Live market pulse + sentiment for Market Command Center
+  useEffect(() => {
+    void fetchMarkets(false);
+    void fetchSentiment(false);
+  }, []);
+
+  // Keep portfolio/watchlist quote map fresh from the active analysis ticker
+  useEffect(() => {
+    if (!data?.ticker || !data?.quote) return;
+    const t = String(data.ticker).toUpperCase();
+    const rec =
+      (data as any)?.quantum?.currentAction?.displayLabel ||
+      (data as any)?.quantum?.suggestedAction ||
+      recommendation ||
+      '—';
+    setPortfolioQuotes((prev) => ({
+      ...prev,
+      [t]: {
+        price: Number(data.quote?.regularMarketPrice) || prev[t]?.price,
+        changePct: Number(data.quote?.regularMarketChangePercent) || prev[t]?.changePct,
+        name: data.quote?.shortName || data.quote?.longName || prev[t]?.name,
+        signal: String(rec),
+        confidence: typeof confidence === 'number' ? confidence : prev[t]?.confidence,
+        trend: (data as any)?.quantum?.chartStance || prev[t]?.trend,
+        risk: (data as any)?.quantum?.riskLevel || prev[t]?.risk,
+      },
+    }));
+    setSignalCache(
+      mergeSignalCache([
+        {
+          ticker: t,
+          name: data.quote?.shortName || data.quote?.longName,
+          recommendation: String(rec),
+          confidence: typeof confidence === 'number' ? confidence : 55,
+          price: Number(data.quote?.regularMarketPrice) || undefined,
+          changePct: Number(data.quote?.regularMarketChangePercent) || undefined,
+          risk: (data as any)?.quantum?.riskLevel,
+          trend: (data as any)?.quantum?.chartStance,
+          bucket: /buy|add/i.test(String(rec))
+            ? 'opportunity'
+            : /sell/i.test(String(rec))
+              ? 'risk'
+              : 'watch',
+        },
+      ])
+    );
+  }, [data?.ticker, data?.quote?.regularMarketPrice, recommendation, confidence]);
+
   const fetchPicks = async (theme = picksTheme, risk = picksRisk, showLoading = true, bypassCache = false) => {
     if (showLoading) setLoadingPicks(true);
     try {
@@ -7259,6 +7327,7 @@ export default function App() {
     if (!cleanTicker) return;
     clearSearchField();
     setTicker(cleanTicker);
+    setActivePage('ANALYSIS');
     const tf = getActiveTimeframeParams();
     void fetchStock(cleanTicker, tf.range, tf.interval, true, false, true);
   };
@@ -7331,7 +7400,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#050505] text-[#e0e0e0] font-sans selection:bg-emerald-500 selection:text-black overflow-x-hidden relative">
+    <>
       {showAuthModal && (
         <Suspense fallback={null}>
           <AuthModal
@@ -7343,436 +7412,247 @@ export default function App() {
           />
         </Suspense>
       )}
-      {/* Atmosphere Blobs */}
-      <div className="fixed top-[-100px] left-[-100px] w-[500px] h-[500px] bg-emerald-500/10 rounded-full blur-[120px] pointer-events-none" />
-      <div className="fixed bottom-[-100px] right-[-100px] w-[600px] h-[600px] bg-blue-600/10 rounded-full blur-[150px] pointer-events-none" />
 
-      {/* Responsive header: one row on PC · stacked touch bands on phone/tablet */}
-      <nav className="relative z-10 border-b border-white/5 backdrop-blur-md sticky top-0 pt-[env(safe-area-inset-top)] bg-[#050505]/92">
-        {/* —— Desktop / large tablet: single row —— */}
-        <div className="hidden lg:flex mx-auto w-full max-w-[1400px] items-center justify-center gap-2 px-4 py-2 min-w-0">
-          <div className="flex items-center gap-2 shrink-0">
-            <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center shadow-[0_0_18px_rgba(16,185,129,0.45)] shrink-0">
-              <Activity className="w-4 h-4 text-black" />
+      <AppShell
+        activePage={activePage}
+        onNavigate={(page) => {
+          setActivePage(page);
+          if (page === 'ANALYSIS' && !data && searchInputRef.current) {
+            searchInputRef.current.focus();
+          }
+        }}
+        collapsed={sidebarCollapsed}
+        onCollapsedChange={(v) => {
+          setSidebarCollapsed(v);
+          saveSidebarCollapsed(v);
+        }}
+        mobileOpen={mobileSidebarOpen}
+        onMobileOpenChange={setMobileSidebarOpen}
+        alertCount={alerts.filter((a) => a.isTriggered).length}
+        indices={indices}
+        searchQuery={searchQuery}
+        onSearchQueryChange={setSearchQuery}
+        onSearchSubmit={(raw) => runTickerSearch(raw)}
+        searchInputKey={searchInputKey}
+        searchInputRef={searchInputRef}
+        loading={loading}
+        marketDataStatus={marketDataStatus}
+        lastUpdatedAt={lastMarketUpdatedAt}
+        onRefresh={() => void handleMarketDataRefresh()}
+        onSignIn={() => setShowAuthModal(true)}
+        onSignOut={() => signOut()}
+        authLoading={authLoading}
+        userEmail={user?.email}
+        usageSlot={
+          user ? <UsageQuotaBar usage={usage} email={user.email} onRefresh={refreshUsage} compact /> : null
+        }
+        footer={
+          <footer className="mt-4 py-6 px-4 sm:px-8 border-t border-white/5 flex flex-col md:flex-row items-center justify-between text-[11px] font-sans text-gray-500 gap-3 relative z-10">
+            <div className="flex flex-wrap justify-center gap-x-6 gap-y-2">
+              <span className="font-mono text-gray-400">Session: {sessionId}</span>
             </div>
-            <h1 className="text-sm font-sans font-extrabold tracking-tight uppercase whitespace-nowrap leading-none">
-              QUANTUM<span className="text-emerald-500">NODE</span>
-            </h1>
-            <div className="flex items-center gap-0.5 ml-1 border-l border-white/10 pl-2">
-              <button
-                type="button"
-                onClick={() => setActivePage('DASHBOARD')}
-                className={cn(
-                  "h-9 px-3 rounded-lg text-[11px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer inline-flex items-center",
-                  activePage === 'DASHBOARD'
-                    ? "bg-emerald-500 text-black border-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.35)]"
-                    : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
-                )}
-              >
-                Dashboard
-              </button>
-              <button
-                type="button"
-                onClick={() => setActivePage('NEWS_CENTER')}
-                className={cn(
-                  "h-9 px-3 rounded-lg text-[11px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer inline-flex items-center",
-                  activePage === 'NEWS_CENTER'
-                    ? "bg-blue-500 text-white border-blue-400 shadow-[0_0_18px_rgba(59,130,246,0.3)]"
-                    : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
-                )}
-              >
-                News
-              </button>
-              <button
-                type="button"
-                onClick={() => setActivePage('SELF_LEARNING')}
-                className={cn(
-                  "h-9 px-3 rounded-lg text-[11px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer inline-flex items-center",
-                  activePage === 'SELF_LEARNING'
-                    ? "bg-indigo-500 text-white border-indigo-400 shadow-[0_0_18px_rgba(99,102,241,0.3)]"
-                    : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
-                )}
-              >
-                Learn
-              </button>
-            </div>
-          </div>
-
-          <form
-            onSubmit={handleSubmit}
-            className="min-w-0 flex-1 max-w-md group"
-            autoComplete="off"
-          >
-            <div className="relative w-full min-w-0">
-              <input
-                key={`desk-${searchInputKey}`}
-                ref={searchInputRef}
-                type="search"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
-                  e.preventDefault();
-                  runTickerSearch((e.target as HTMLInputElement).value);
-                }}
-                autoComplete="off"
-                autoCorrect="off"
-                autoCapitalize="off"
-                spellCheck={false}
-                inputMode="search"
-                name={`qn-ticker-desk-${searchInputKey}`}
-                id={`qn-ticker-desk-${searchInputKey}`}
-                placeholder="Ticker then Enter"
-                title="Press Enter to search"
-                className="w-full h-9 bg-[#111113] border border-white/10 rounded-full pl-9 pr-8 text-sm focus:outline-none focus:border-emerald-500/50 transition-all placeholder:text-gray-600 font-mono tracking-wide"
-              />
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500 group-focus-within:text-emerald-500 transition-colors pointer-events-none" />
-              {loading && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-emerald-500" />}
-            </div>
-          </form>
-
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              type="button"
-              onClick={() => {
-                setActivePage('DASHBOARD');
-                setShowFindATrade((v) => !v);
-                if (!showFindATrade) {
-                  setShowSuggestATrade(false);
-                  setShowDayTrade(false);
-                }
-              }}
-              className={cn(
-                'inline-flex items-center justify-center gap-1.5 h-9 rounded-full px-3 text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
-                showFindATrade
-                  ? 'bg-emerald-500 text-black border-emerald-400 shadow-[0_0_16px_rgba(16,185,129,0.35)]'
-                  : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/25'
-              )}
-              title="Find Trades"
-            >
-              <Rocket className="w-3.5 h-3.5 shrink-0" />
-              Find Trades
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setActivePage('DASHBOARD');
-                setShowFindATrade(false);
-                setShowDayTrade(false);
-                setShowSuggestATrade(true);
-                setSuggestRunToken((n) => n + 1);
-              }}
-              className={cn(
-                'inline-flex items-center justify-center gap-1.5 h-9 rounded-full px-3 text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
-                showSuggestATrade
-                  ? 'bg-sky-500 text-black border-sky-400 shadow-[0_0_16px_rgba(56,189,248,0.35)]'
-                  : 'bg-sky-500/15 text-sky-300 border-sky-500/40 hover:bg-sky-500/25'
-              )}
-              title="Suggest Trades"
-            >
-              <Sparkles className="w-3.5 h-3.5 shrink-0" />
-              Suggest
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setActivePage('DASHBOARD');
-                setShowFindATrade(false);
-                setShowSuggestATrade(false);
-                setShowDayTrade(true);
-                setDayTradeRunToken((n) => n + 1);
-              }}
-              className={cn(
-                'inline-flex items-center justify-center gap-1.5 h-9 rounded-full px-3 text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
-                showDayTrade
-                  ? 'bg-orange-500 text-black border-orange-400 shadow-[0_0_16px_rgba(249,115,22,0.35)]'
-                  : 'bg-orange-500/15 text-orange-300 border-orange-500/40 hover:bg-orange-500/25'
-              )}
-              title="Day Trade"
-            >
-              <Flame className="w-3.5 h-3.5 shrink-0" />
-              Day Trade
-            </button>
-          </div>
-
-          <div className="flex items-center gap-1.5 shrink-0">
-            <MarketDataRefreshBar
-              variant="inline"
-              lastUpdatedAt={lastMarketUpdatedAt}
-              status={marketDataStatus}
-              mode={refreshMode}
-              intervalSec={autoRefreshIntervalSec}
-              onModeChange={(mode) => {
-                setRefreshMode(mode);
-                saveRefreshMode(mode);
-              }}
-              onIntervalChange={(sec) => {
-                setAutoRefreshIntervalSec(sec);
-                saveAutoRefreshIntervalSec(sec);
-              }}
-              onRefresh={() => void handleMarketDataRefresh()}
-              disabled={loading || marketDataStatus === 'loading'}
-            />
-            {user && (
-              <div className="max-w-[220px] overflow-hidden">
-                <UsageQuotaBar usage={usage} email={user.email} onRefresh={refreshUsage} compact />
-              </div>
-            )}
-            {!user ? (
-              <button
-                type="button"
-                onClick={() => setShowAuthModal(true)}
-                disabled={authLoading}
-                className="inline-flex items-center justify-center gap-1.5 h-9 rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-3 font-sans font-bold text-[11px] text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50 shrink-0"
-              >
-                <Shield className="h-3.5 w-3.5" />
-                Sign in
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => signOut()}
-                className="inline-flex items-center justify-center h-9 rounded-lg border border-white/10 px-3 text-[11px] font-sans font-semibold text-gray-300 hover:bg-white/5 hover:text-white shrink-0"
-              >
-                Sign out
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* —— Phone / small tablet: brand+search, then equal trade actions —— */}
-        <div className="lg:hidden px-3 pb-2 space-y-2">
-          <div className="flex items-center gap-2 min-w-0 pt-1.5">
-            <div className="flex items-center gap-1.5 shrink-0">
-              <div className="w-9 h-9 bg-emerald-500 rounded-xl flex items-center justify-center shadow-[0_0_18px_rgba(16,185,129,0.4)]">
-                <Activity className="w-4 h-4 text-black" />
-              </div>
-              <h1 className="text-[12px] font-sans font-extrabold tracking-tight uppercase leading-none">
-                Q<span className="text-emerald-500">N</span>
-              </h1>
-            </div>
-
-            <form onSubmit={handleSubmit} className="min-w-0 flex-1 group" autoComplete="off">
-              <div className="relative w-full">
-                <input
-                  key={`mob-${searchInputKey}`}
-                  type="search"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
-                    e.preventDefault();
-                    runTickerSearch((e.target as HTMLInputElement).value);
-                  }}
-                  autoComplete="off"
-                  autoCorrect="off"
-                  autoCapitalize="off"
-                  spellCheck={false}
-                  inputMode="search"
-                  enterKeyHint="search"
-                  name={`qn-ticker-mob-${searchInputKey}`}
-                  id={`qn-ticker-mob-${searchInputKey}`}
-                  placeholder="Search ticker"
-                  className="w-full h-11 bg-[#111113] border border-white/10 rounded-full pl-10 pr-10 text-base focus:outline-none focus:border-emerald-500/50 transition-all placeholder:text-gray-600 font-mono tracking-wide"
-                />
-                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
-                {loading && <Loader2 className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 animate-spin text-emerald-500" />}
-              </div>
-            </form>
-
-            <button
-              type="button"
-              disabled={loading || marketDataStatus === 'loading'}
-              onClick={() => void handleMarketDataRefresh()}
-              className="inline-flex items-center justify-center h-11 w-11 rounded-full border border-emerald-500/40 text-emerald-300 shrink-0 active:bg-emerald-500/15"
-              aria-label="Refresh market data"
-              title="Refresh"
-            >
-              {marketDataStatus === 'loading' || loading ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <RefreshCw className="w-4 h-4" />
-              )}
-            </button>
-
-            {!user ? (
-              <button
-                type="button"
-                onClick={() => setShowAuthModal(true)}
-                disabled={authLoading}
-                className="inline-flex items-center justify-center h-11 w-11 rounded-full border border-emerald-500/40 bg-emerald-500/15 text-emerald-300 shrink-0 disabled:opacity-50"
-                aria-label="Sign in"
-              >
-                <Shield className="h-4 w-4" />
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => signOut()}
-                className="inline-flex items-center justify-center h-11 px-3 rounded-full border border-white/10 text-[11px] font-semibold text-gray-300 shrink-0"
-              >
-                Out
-              </button>
-            )}
-          </div>
-
-          <div className="grid grid-cols-3 gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setActivePage('DASHBOARD');
-                setShowFindATrade((v) => !v);
-                if (!showFindATrade) {
-                  setShowSuggestATrade(false);
-                  setShowDayTrade(false);
-                }
-              }}
-              className={cn(
-                'inline-flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 min-h-[48px] rounded-2xl px-1.5 text-[10px] font-bold uppercase tracking-wide border transition-all cursor-pointer',
-                showFindATrade
-                  ? 'bg-emerald-500 text-black border-emerald-400'
-                  : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 active:bg-emerald-500/25'
-              )}
-            >
-              <Rocket className="w-4 h-4 shrink-0" />
-              <span>Find</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setActivePage('DASHBOARD');
-                setShowFindATrade(false);
-                setShowDayTrade(false);
-                setShowSuggestATrade(true);
-                setSuggestRunToken((n) => n + 1);
-              }}
-              className={cn(
-                'inline-flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 min-h-[48px] rounded-2xl px-1.5 text-[10px] font-bold uppercase tracking-wide border transition-all cursor-pointer',
-                showSuggestATrade
-                  ? 'bg-sky-500 text-black border-sky-400'
-                  : 'bg-sky-500/15 text-sky-300 border-sky-500/40 active:bg-sky-500/25'
-              )}
-            >
-              <Sparkles className="w-4 h-4 shrink-0" />
-              <span>Suggest</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setActivePage('DASHBOARD');
-                setShowFindATrade(false);
-                setShowSuggestATrade(false);
-                setShowDayTrade(true);
-                setDayTradeRunToken((n) => n + 1);
-              }}
-              className={cn(
-                'inline-flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 min-h-[48px] rounded-2xl px-1.5 text-[10px] font-bold uppercase tracking-wide border transition-all cursor-pointer',
-                showDayTrade
-                  ? 'bg-orange-500 text-black border-orange-400'
-                  : 'bg-orange-500/15 text-orange-300 border-orange-500/40 active:bg-orange-500/25'
-              )}
-            >
-              <Flame className="w-4 h-4 shrink-0" />
-              <span>Day</span>
-            </button>
-          </div>
-        </div>
-      </nav>
-
-      {quotaBanner && (
-        <div className="relative z-10 px-4 sm:px-6 pt-3">
-          <QuotaExhaustedBanner
-            kind={quotaBanner.kind}
-            message={quotaBanner.message}
-            email={user?.email}
-            onDismiss={() => setQuotaBanner(null)}
-          />
-        </div>
-      )}
-
-      {/* Market pulse — swipe on phone, centered wrap on desktop */}
-      <div className="relative z-10 bg-[#0A0A0C] border-b border-white/5 py-1.5 sm:py-2">
-        <div className="mx-auto max-w-[1400px] px-3 sm:px-6 flex items-center gap-x-4 sm:gap-x-6 overflow-x-auto no-scrollbar lg:flex-wrap lg:justify-center lg:overflow-visible [-webkit-overflow-scrolling:touch]">
-          {indices.length > 0 ? indices.map((idx, i) => (
-            <div key={`${idx.symbol}-${i}`} className="flex gap-1.5 sm:gap-2 items-center font-mono text-[10px] sm:text-[12px] tracking-tight shrink-0">
-              <span className="text-gray-500">{idx.shortName || idx.symbol}</span>
-              <span className="text-white font-semibold">${idx.regularMarketPrice?.toFixed(2) || '---'}</span>
-              <span className={(idx.regularMarketChange || 0) >= 0 ? "text-emerald-400 font-semibold" : "text-rose-400 font-semibold"}>
-                {(idx.regularMarketChangePercent || 0) >= 0 ? '+' : ''}
-                {idx.regularMarketChangePercent?.toFixed(2) || '0.00'}%
+            <div className="flex flex-col md:items-end gap-2 text-center md:text-right">
+              <span className="text-gray-500">
+                Quantum Node · Powered by Google Gemini ·{' '}
+                <span className="font-mono text-emerald-500/70">ui-shell-0813</span>
               </span>
+              <LegalLinks className="justify-center md:justify-end" />
             </div>
-          )) : (
-            <div className="text-[11px] text-gray-600 animate-pulse font-sans">Awaiting global exchange feed…</div>
-          )}
-        </div>
-      </div>
+          </footer>
+        }
+      >
+        {quotaBanner && (
+          <div className="mb-4">
+            <QuotaExhaustedBanner
+              kind={quotaBanner.kind}
+              message={quotaBanner.message}
+              email={user?.email}
+              onDismiss={() => setQuotaBanner(null)}
+            />
+          </div>
+        )}
 
-      <main className="relative z-10 max-w-[1400px] mx-auto px-3 py-4 sm:p-6 md:p-10 pb-[calc(7rem+env(safe-area-inset-bottom))] lg:pb-10">
+        {activePage === 'DASHBOARD' && (
+          <MarketCommandCenter
+            indices={indices}
+            sentiment={marketSentiment}
+            loadingSentiment={loadingSentiment}
+            opportunities={signalCache
+              .filter((r) => r.bucket === 'opportunity' || (!r.bucket && /buy|add/i.test(r.recommendation || '')))
+              .slice(0, 8)
+              .map((r) => ({
+                ticker: r.ticker,
+                name: r.name,
+                price: r.price,
+                changePct: r.changePct,
+                signal: r.recommendation,
+                confidence: r.confidence,
+              }))}
+            watch={signalCache
+              .filter((r) => r.bucket === 'watch' || /wait|hold/i.test(r.recommendation || ''))
+              .slice(0, 8)
+              .map((r) => ({
+                ticker: r.ticker,
+                name: r.name,
+                price: r.price,
+                changePct: r.changePct,
+                signal: r.recommendation,
+                confidence: r.confidence,
+              }))}
+            riskAlerts={signalCache
+              .filter((r) => r.bucket === 'risk' || /sell|bear|high/i.test((r.risk || '') + (r.recommendation || '')))
+              .slice(0, 8)
+              .map((r) => ({
+                ticker: r.ticker,
+                name: r.name,
+                price: r.price,
+                changePct: r.changePct,
+                signal: r.recommendation,
+                confidence: r.confidence,
+              }))}
+            onOpenTicker={(sym) => {
+              if (!assertAnalysisCredits()) return;
+              runTickerSearch(sym);
+            }}
+            onGoFind={() => setActivePage('FIND_TRADES')}
+          />
+        )}
 
-        <AnimatePresence>
-          {showFindATrade && (
-            <motion.div
-              key="find-a-trade-dock"
-              initial={{ opacity: 0, y: -8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              className="mb-6"
-            >
-              <Suspense fallback={<PanelChunkFallback className="min-h-[220px]" />}>
-                <FindATradePanel
-                  horizon={analysisHorizon}
-                  onOpenTicker={(sym) => {
-                    if (!assertAnalysisCredits()) return;
-                    setShowFindATrade(false);
-                    runTickerSearch(sym);
-                  }}
-                />
-              </Suspense>
-            </motion.div>
-          )}
-          {showSuggestATrade && (
-            <motion.div
-              key="suggest-a-trade-dock"
-              initial={{ opacity: 0, y: -8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              className="mb-6"
-            >
-              <Suspense fallback={<PanelChunkFallback className="min-h-[220px]" />}>
-                <SuggestATradePanel
-                  horizon={analysisHorizon}
-                  runToken={suggestRunToken}
-                  onOpenTicker={(sym) => {
-                    if (!assertAnalysisCredits()) return;
-                    setShowSuggestATrade(false);
-                    runTickerSearch(sym);
-                  }}
-                />
-              </Suspense>
-            </motion.div>
-          )}
-          {showDayTrade && (
-            <motion.div
-              key="day-trade-dock"
-              initial={{ opacity: 0, y: -8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              className="mb-6"
-            >
-              <Suspense fallback={<PanelChunkFallback className="min-h-[220px]" />}>
-                <DayTradePanel
-                  runToken={dayTradeRunToken}
-                  onOpenTicker={(sym) => {
-                    if (!assertAnalysisCredits()) return;
-                    setShowDayTrade(false);
-                    runTickerSearch(sym);
-                  }}
-                />
-              </Suspense>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {activePage === 'FIND_TRADES' && (
+          <FindTradesPage
+            horizon={analysisHorizon}
+            suggestRunToken={suggestRunToken}
+            dayTradeRunToken={dayTradeRunToken}
+            onBumpSuggest={() => setSuggestRunToken((n) => n + 1)}
+            onBumpDay={() => setDayTradeRunToken((n) => n + 1)}
+            onOpenTicker={(sym) => {
+              if (!assertAnalysisCredits()) return;
+              runTickerSearch(sym);
+            }}
+          />
+        )}
+
+        {activePage === 'AI_SIGNALS' && (
+          <AiSignalsPage
+            signals={signalCache.map((r) => ({
+              ticker: r.ticker,
+              name: r.name,
+              recommendation: r.recommendation || 'WAIT',
+              confidence: r.confidence ?? 50,
+              trend: r.trend,
+              smartMoney: r.smartMoney,
+              fundFlow: r.fundFlow,
+              rsi: r.rsi,
+              momentum: r.momentum,
+              technicalTrend: r.technicalTrend,
+              risk: r.risk,
+              price: r.price,
+              changePct: r.changePct,
+            }))}
+            onOpenTicker={(sym) => {
+              if (!assertAnalysisCredits()) return;
+              runTickerSearch(sym);
+            }}
+            onRefreshHint={() => setActivePage('FIND_TRADES')}
+          />
+        )}
+
+        {activePage === 'WATCHLIST' && (
+          <WatchlistPage
+            quotes={portfolioQuotes}
+            alertTickers={alerts.map((a) => a.ticker)}
+            onOpenTicker={(sym) => {
+              if (!assertAnalysisCredits()) return;
+              runTickerSearch(sym);
+            }}
+          />
+        )}
+
+        {activePage === 'PORTFOLIO' && (
+          <PortfolioPage
+            quotes={portfolioQuotes}
+            onOpenTicker={(sym) => {
+              if (!assertAnalysisCredits()) return;
+              runTickerSearch(sym);
+            }}
+          />
+        )}
+
+        {activePage === 'ALERTS' && (
+          <AlertsPage
+            alerts={alerts}
+            alertTicker={alertTicker}
+            setAlertTicker={setAlertTicker}
+            alertTargetPrice={alertTargetPrice}
+            setAlertTargetPrice={setAlertTargetPrice}
+            alertCondition={alertCondition}
+            setAlertCondition={setAlertCondition}
+            priceAlertSound={priceAlertSound}
+            setPriceAlertSound={setPriceAlertSound}
+            playAlertSound={playAlertSound}
+            onAddAlert={handleAddAlert}
+            onDeleteAlert={handleDeleteAlert}
+            onClearTriggered={handleClearTriggeredAlerts}
+            autoAlertRsiDivergence={autoAlertRsiDivergence}
+            setAutoAlertRsiDivergence={setAutoAlertRsiDivergence}
+            currentTicker={data?.ticker}
+            currentPrice={data?.quote?.regularMarketPrice}
+            onOpenTicker={(sym) => {
+              if (!assertAnalysisCredits()) return;
+              runTickerSearch(sym);
+            }}
+          />
+        )}
+
+        {activePage === 'SETTINGS' && (
+          <SettingsPage
+            lastUpdatedAt={lastMarketUpdatedAt}
+            marketDataStatus={marketDataStatus}
+            refreshMode={refreshMode}
+            autoRefreshIntervalSec={autoRefreshIntervalSec}
+            onModeChange={(mode) => {
+              setRefreshMode(mode);
+              saveRefreshMode(mode);
+            }}
+            onIntervalChange={(sec) => {
+              setAutoRefreshIntervalSec(sec);
+              saveAutoRefreshIntervalSec(sec);
+            }}
+            onRefresh={() => void handleMarketDataRefresh()}
+            disabled={loading || marketDataStatus === 'loading'}
+            userEmail={user?.email}
+            onSignOut={() => signOut()}
+            selfLearningSlot={
+              <div className="space-y-3">
+                {(Object.keys(modelWeights) as (keyof typeof modelWeights)[]).map((key) => (
+                  <label key={String(key)} className="block">
+                    <div className="flex justify-between text-[11px] text-gray-400 mb-1">
+                      <span className="capitalize">{String(key).replace(/([A-Z])/g, ' $1')}</span>
+                      <span className="font-mono text-emerald-300">{modelWeights[key]}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={40}
+                      value={modelWeights[key]}
+                      onChange={(e) => {
+                        const next = { ...modelWeights, [key]: Number(e.target.value) };
+                        setModelWeights(next);
+                        try {
+                          localStorage.setItem('quantum_model_weights', JSON.stringify(next));
+                        } catch {}
+                      }}
+                      className="w-full"
+                    />
+                  </label>
+                ))}
+                <p className="text-[11px] text-gray-500">
+                  Higher weight = that factor matters more in the AI score. Changes apply on the next analysis.
+                </p>
+              </div>
+            }
+          />
+        )}
 
         <AnimatePresence mode="wait">
           {activePage === 'NEWS_CENTER' ? (
@@ -8094,721 +7974,7 @@ export default function App() {
                 </div>
               )}
             </motion.div>
-          ) : activePage === 'SELF_LEARNING' ? (
-            <motion.div
-              key="self-learning-view"
-              initial={{ opacity: 0, y: 15 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -15 }}
-              className="space-y-8 text-left"
-            >
-              {/* === HEADER SUITE === */}
-              <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6 border-b border-white/5 pb-6">
-                <div>
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <Brain className="w-5 h-5 text-indigo-400 animate-pulse" />
-                    <span className="text-xs font-mono font-bold uppercase tracking-widest text-[#818cf8]">
-                      Adaptive Intelligence Unit
-                    </span>
-                  </div>
-                  <h2 className="text-2xl font-sans font-extrabold text-white tracking-tight">
-                    Self-Learning & Calibration Engine v6
-                  </h2>
-                  <p className="text-sm text-gray-400 font-sans mt-1">
-                    Feedback-loop auditing of predictive factors, backtests, and model coefficient auto-tuning
-                  </p>
-                </div>
-
-                {/* Timeframe Selectors */}
-                <div className="flex items-center gap-2 bg-[#101014] border border-white/5 rounded-xl p-1.5 self-stretch lg:self-auto justify-between">
-                  <span className="text-[10px] font-mono font-bold text-gray-500 uppercase px-2.5 hidden md:inline">
-                    Analysis Pool:
-                  </span>
-                  <div className="flex gap-1.5 w-full md:w-auto">
-                    {(['90_DAYS', '60_DAYS', '30_DAYS'] as const).map((p) => (
-                      <button
-                        key={p}
-                        type="button"
-                        onClick={() => {
-                          setLearningTimeframe(p);
-                          setCalibrationLog(prev => [
-                            `[${new Date().toLocaleTimeString()}] INTERFACE: Switched historical analysis pool to ${p.replace('_', ' ')}. Metrics and optimization targets re-compiled instantly.`,
-                            ...prev
-                          ]);
-                        }}
-                        className={cn(
-                          "px-3 py-1.5 rounded-lg text-[10px] font-mono font-bold tracking-wider uppercase transition-all cursor-pointer",
-                          learningTimeframe === p
-                            ? "bg-indigo-500/15 border border-indigo-500/35 text-indigo-400 font-extrabold shadow-[0_0_15px_rgba(99,102,241,0.15)]"
-                            : "border border-transparent text-gray-500 hover:text-white"
-                        )}
-                      >
-                        {p.replace('_', ' ')}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* === BENTO BOX STATS GRID === */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-                {/* 1. Win Rate */}
-                <div className="bg-[#111113] border border-white/5 rounded-2xl p-5 relative overflow-hidden group hover:border-[#818cf8]/35 transition-all">
-                  <div className="absolute top-4 right-4 text-indigo-400">
-                    <Trophy className="w-5 h-5 opacity-70 group-hover:scale-110 transition-transform" />
-                  </div>
-                  <span className="text-[9px] font-mono font-bold uppercase tracking-widest text-gray-500">
-                    Calculated Win Rate
-                  </span>
-                  <div className="mt-2.5 flex items-baseline gap-1.5">
-                    <span className="text-3xl font-black font-mono tracking-tighter text-white">
-                      {activeWinRate.toFixed(1)}%
-                    </span>
-                    <span className="text-[10px] font-mono font-bold text-emerald-400">
-                      ({activeWins}/{activeFilteredSignals.length})
-                    </span>
-                  </div>
-                  <p className="text-[10px] font-mono text-gray-400 leading-relaxed mt-2.5">
-                    Proportion of signals generating positive returns prior to micro trend fatigue or stop limits.
-                  </p>
-                  <div className="mt-4 bg-[#18181c] h-1.5 rounded-full overflow-hidden">
-                    <div 
-                      className="bg-indigo-505 h-full rounded-full transition-all duration-700" 
-                      style={{ width: `${activeWinRate}%` }}
-                    />
-                  </div>
-                </div>
-
-                {/* 2. Avg Return per Signal */}
-                <div className="bg-[#111113] border border-white/5 rounded-2xl p-5 relative overflow-hidden group hover:border-emerald-500/35 transition-all">
-                  <div className="absolute top-4 right-4 text-emerald-400">
-                    <TrendingUp className="w-5 h-5 opacity-70 group-hover:scale-110 transition-transform" />
-                  </div>
-                  <span className="text-[9px] font-mono font-bold uppercase tracking-widest text-gray-500">
-                    Average Return / Signal
-                  </span>
-                  <div className="mt-2.5 flex items-baseline gap-1">
-                    <span className="text-3xl font-black font-mono tracking-tighter text-emerald-400">
-                      +{activeAvgReturn.toFixed(2)}%
-                    </span>
-                  </div>
-                  <p className="text-[10px] font-mono text-gray-400 leading-relaxed mt-2.5">
-                    Arithmetic mean of price appreciation triggered globally during the {learningTimeframe === '30_DAYS' ? '30' : learningTimeframe === '60_DAYS' ? '60' : '90'}-day review sequence.
-                  </p>
-                  <div className="mt-4 flex gap-1 items-center text-[9px] font-mono font-semibold text-emerald-500 bg-emerald-500/5 px-2.5 py-1 rounded w-fit border border-emerald-500/10">
-                    <Zap className="w-3 h-3 animate-bounce" /> OUTPERFORMING EXCHANGES
-                  </div>
-                </div>
-
-                {/* 3. Sharpe Ratio */}
-                <div className="bg-[#111113] border border-white/5 rounded-2xl p-5 relative overflow-hidden group hover:border-cyan-500/35 transition-all">
-                  <div className="absolute top-4 right-4 text-cyan-400">
-                    <Brain className="w-5 h-5 opacity-70 group-hover:scale-110 transition-transform" />
-                  </div>
-                  <span className="text-[9px] font-mono font-bold uppercase tracking-widest text-gray-500">
-                    Engine Sharpe Ratio
-                  </span>
-                  <div className="mt-2.5 flex items-baseline gap-1">
-                    <span className="text-3xl font-black font-mono tracking-tighter text-cyan-400">
-                      {activeSharpe.toFixed(2)}
-                    </span>
-                  </div>
-                  <p className="text-[10px] font-mono text-gray-400 leading-relaxed mt-2.5">
-                    Indicator of risk-adjusted excess returns over volatile standard deviation bounds. Values exceed 1.5 standard.
-                  </p>
-                  <div className="mt-4 flex gap-1 items-center text-[9px] font-mono font-semibold text-cyan-500 bg-cyan-500/5 px-2.5 py-1 rounded w-fit border border-cyan-500/10">
-                    🛡️ STABLE RISK PROFILE
-                  </div>
-                </div>
-
-                {/* 4. Maximum Drawdown */}
-                <div className="bg-[#111113] border border-white/5 rounded-2xl p-5 relative overflow-hidden group hover:border-rose-500/35 transition-all">
-                  <div className="absolute top-4 right-4 text-rose-450">
-                    <ShieldAlert className="w-5 h-5 opacity-70 group-hover:scale-110 transition-transform" />
-                  </div>
-                  <span className="text-[9px] font-mono font-bold uppercase tracking-widest text-gray-500">
-                    Maximum Micro Drawdown
-                  </span>
-                  <div className="mt-2.5 flex items-baseline gap-1">
-                    <span className="text-3xl font-black font-mono tracking-tighter text-rose-400">
-                      {activeMaxDrawdown.toFixed(1)}%
-                    </span>
-                  </div>
-                  <p className="text-[10px] font-mono text-gray-400 leading-relaxed mt-2.5">
-                    Worst-case peak-to-trough capital decline recorded on a single asset trade during predictive cycle.
-                  </p>
-                  <div className="mt-4 flex gap-1 items-center text-[9px] font-mono font-semibold text-rose-500 bg-rose-500/5 px-2.5 py-1 rounded w-fit border border-rose-500/10">
-                    🔒 SYSTEM STOP GUARD SECURE
-                  </div>
-                </div>
-              </div>
-
-              {/* === DYNAMIC COMPOUND EQUITY CURVE CHART === */}
-              <div className="bg-[#111113] border border-white/5 rounded-2xl p-6 shadow-2xl relative overflow-hidden">
-                <div className="flex flex-col md:flex-row items-start md:items-center justify-between border-b border-white/5 pb-4 mb-6 gap-3">
-                  <div>
-                    <h3 className="text-xs font-bold tracking-widest uppercase text-gray-400">
-                      Compound Equity Growth Curve of StockTrend AI v6 Engine
-                    </h3>
-                    <p className="text-[10px] font-mono text-gray-500 mt-0.5">
-                      Visualizing cumulative percentage compounding growth of system signals starting from base value (100)
-                    </p>
-                  </div>
-                  <span className="bg-[#16161a] border border-white/10 rounded-lg px-3 py-1 text-xs font-mono font-bold text-emerald-400 flex items-center gap-1.5 shadow-sm">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-                    Compound Ending Value: {activeEquityCurveData[activeEquityCurveData.length - 1]?.value.toFixed(1)}
-                  </span>
-                </div>
-
-                {/* Recharts Container */}
-                <div className="h-[220px] sm:h-[280px] w-full mt-4">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart 
-                      data={activeEquityCurveData}
-                      margin={{ top: 10, right: 10, left: -25, bottom: 0 }}
-                    >
-                      <defs>
-                        <linearGradient id="colorEquity" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#818cf8" stopOpacity={0.25}/>
-                          <stop offset="95%" stopColor="#818cf8" stopOpacity={0}/>
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" />
-                      <XAxis 
-                        dataKey="date" 
-                        stroke="#4b5563" 
-                        fontSize={9} 
-                        fontFamily="monospace" 
-                        tickLine={false}
-                      />
-                      <YAxis 
-                        stroke="#4b5563" 
-                        fontSize={9} 
-                        fontFamily="monospace" 
-                        tickLine={false} 
-                        domain={['dataMin - 5', 'dataMax + 5']}
-                      />
-                      <Tooltip 
-                        contentStyle={{ 
-                          backgroundColor: '#0c0c0e', 
-                          borderColor: 'rgba(255,255,255,0.06)', 
-                          borderRadius: '12px',
-                          fontFamily: 'monospace',
-                          fontSize: '10px'
-                        }}
-                        formatter={(value: any, name: any, props: any) => {
-                          if (name === 'value') {
-                            return [`$${value}`, 'Compounded Capital'];
-                          }
-                          return [value, name];
-                        }}
-                        labelFormatter={(label) => `Signal Sequence Date: ${label}`}
-                      />
-                      <Area 
-                        type="monotone" 
-                        dataKey="value" 
-                        stroke="#818cf8" 
-                        strokeWidth={2} 
-                        fillOpacity={1} 
-                        fill="url(#colorEquity)" 
-                      />
-                      {activeEquityCurveData.map((d, i) => {
-                        if (d.return > 10) {
-                          return (
-                            <ReferenceLine
-                              key={i}
-                              x={d.date}
-                              stroke="rgba(16,185,129,0.15)"
-                              strokeDasharray="2 2"
-                            />
-                          );
-                        }
-                        return null;
-                      })}
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-              {/* === FOCUS MATRIX: BEST VS WORST PREDICTIVE FACTORS === */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {/* Best Performing Factors Block */}
-                <div className="bg-[#111113] border border-white/5 rounded-2xl p-6 shadow-xl relative overflow-hidden">
-                  <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-emerald-500/50 to-emerald-400/20" />
-                  <div className="flex items-center gap-2 mb-4 border-b border-white/5 pb-3">
-                    <Trophy className="w-4 h-4 text-emerald-400" />
-                    <h3 className="text-xs font-bold tracking-widest uppercase text-gray-300">
-                      Best Performing Predictive Factors
-                    </h3>
-                  </div>
-                  
-                  <div className="space-y-3.5 max-h-[280px] overflow-y-auto pr-1">
-                    {activeBestFactors.slice(0, 5).map((fact, index) => (
-                      <div 
-                        key={fact.key} 
-                        className="bg-[#15151a] border border-white/[0.03] rounded-xl p-3 flex items-center justify-between gap-4 hover:bg-white/[0.01] transition-all"
-                      >
-                        <div className="flex items-center gap-3">
-                          <span className="text-lg bg-[#1a1a20] w-9 h-9 flex items-center justify-center rounded-lg border border-white/5">
-                            {fact.icon}
-                          </span>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs font-black text-white hover:text-emerald-400 transition-colors uppercase">
-                                {fact.label}
-                              </span>
-                              <span className="text-[8px] bg-emerald-500/10 text-emerald-400 font-mono px-1.5 py-0.2 rounded border border-emerald-500/20 uppercase font-black uppercase tracking-wider">
-                                #{index + 1} Best
-                              </span>
-                            </div>
-                            <span className="text-[10px] text-gray-500 font-mono line-clamp-1 mt-0.5">
-                              {fact.desc}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="text-right whitespace-nowrap">
-                          <span className="text-xs font-black font-mono text-emerald-400 block">
-                            +{fact.avgReturn.toFixed(2)}% Avg
-                          </span>
-                          <span className="text-[9px] font-mono text-gray-400 mt-0.5 block">
-                            Win Rate: {fact.winRate.toFixed(0)}% ({fact.count} trades)
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Worst Performing Factors Block */}
-                <div className="bg-[#111113] border border-white/5 rounded-2xl p-6 shadow-xl relative overflow-hidden">
-                  <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-red-500/50 to-rose-450/20" />
-                  <div className="flex items-center gap-2 mb-4 border-b border-white/5 pb-3">
-                    <ShieldAlert className="w-4 h-4 text-rose-450" />
-                    <h3 className="text-xs font-bold tracking-widest uppercase text-gray-300">
-                      Lowest Performing Predictive Factors
-                    </h3>
-                  </div>
-
-                  <div className="space-y-3.5 max-h-[280px] overflow-y-auto pr-1">
-                    {activeWorstFactors.slice(0, 5).map((fact, index) => (
-                      <div 
-                        key={fact.key} 
-                        className="bg-[#15151a] border border-white/[0.03] rounded-xl p-3 flex items-center justify-between gap-4 hover:bg-white/[0.01] transition-all"
-                      >
-                        <div className="flex items-center gap-3">
-                          <span className="text-lg bg-[#1a1a20] w-9 h-9 flex items-center justify-center rounded-lg border border-white/5">
-                            {fact.icon}
-                          </span>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs font-black text-gray-300 hover:text-rose-400 transition-colors uppercase">
-                                {fact.label}
-                              </span>
-                              <span className="text-[8px] bg-amber-500/10 text-amber-500 font-mono px-1.5 py-0.2 rounded border border-amber-500/20 uppercase font-black tracking-wider">
-                                Lower Return
-                              </span>
-                            </div>
-                            <span className="text-[10px] text-gray-500 font-mono line-clamp-1 mt-0.5">
-                              {fact.desc}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="text-right whitespace-nowrap">
-                          <span className={cn(
-                            "text-xs font-black font-mono block",
-                            fact.avgReturn >= 0 ? "text-gray-300" : "text-rose-400"
-                          )}>
-                            {fact.avgReturn >= 0 ? "+" : ""}{fact.avgReturn.toFixed(2)}% Avg
-                          </span>
-                          <span className="text-[9px] font-mono text-gray-400 mt-0.5 block">
-                            Win Rate: {fact.winRate.toFixed(0)}% ({fact.count} trades)
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* === INTERACTIVE SCORING WEIGHT CALIBRATOR CONSOLE === */}
-              <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
-                {/* Sliders Console */}
-                <div className="bg-[#111113] border border-white/5 rounded-2xl p-6 shadow-2xl xl:col-span-7">
-                  <div className="flex justify-between items-center border-b border-white/5 pb-4 mb-5">
-                    <div>
-                      <h3 className="text-xs font-bold tracking-widest uppercase text-white">
-                        Live Weight Matrix Configurator
-                      </h3>
-                      <p className="text-[10px] font-mono text-gray-500 mt-0.5">
-                        Slide parameters to test custom algorithms. Sum must equal exactly 100%.
-                      </p>
-                    </div>
-
-                    <div className="flex flex-col items-end">
-                      <span className="text-[10px] font-mono text-gray-500 uppercase">Current Sum:</span>
-                      <span className={cn(
-                        "text-xl font-bold font-mono",
-                        manualWeightsSum === 100 ? "text-emerald-400" : "text-amber-500 animate-pulse"
-                      )}>
-                        {manualWeightsSum}%
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Allocation Alert Warning */}
-                  {manualWeightsSum !== 100 && (
-                    <div className="mb-6 bg-amber-550/5 border border-amber-500/25 p-4 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-4 animate-fade-in">
-                      <div className="flex items-center gap-3">
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
-                        <span className="text-[11px] font-mono text-amber-400 leading-normal">
-                          ALLOCATION WARNING: Total parameters total {manualWeightsSum}% instead of 100%. Auto-scoring logic will temporarily scale proportionally.
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={rebalanceWeightsProportionated}
-                        className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-black font-mono font-bold text-[9px] uppercase tracking-wider rounded-lg transition-all shadow-md shrink-0 cursor-pointer"
-                      >
-                        ⚖️ Equalize Weights
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Sliders list */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                    {/* Trend */}
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-baseline">
-                        <span className="text-xs font-bold text-gray-300 uppercase">📈 Trend Follow EMA</span>
-                        <span className="text-xs font-mono font-bold text-white">{modelWeights.trend || 0}%</span>
-                      </div>
-                      <input 
-                        type="range" min="0" max="40" 
-                        value={modelWeights.trend || 0}
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value);
-                          setModelWeights(prev => ({ ...prev, trend: val }));
-                        }}
-                        className="w-full accent-indigo-500 cursor-pointer bg-white/5 h-1.5 rounded-lg"
-                      />
-                      <div className="flex justify-between text-[9px] font-mono text-gray-500">
-                        <span>Min/Max: 0-40%</span>
-                        <span>Optimize Target: <span className="text-indigo-400 font-bold">{activeRecommendations.trend}%</span></span>
-                      </div>
-                    </div>
-
-                    {/* Smart Money */}
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-baseline">
-                        <span className="text-xs font-bold text-gray-300 uppercase">💎 Whale Accumulation</span>
-                        <span className="text-xs font-mono font-bold text-white">{modelWeights.smartMoney || 0}%</span>
-                      </div>
-                      <input 
-                        type="range" min="0" max="40" 
-                        value={modelWeights.smartMoney || 0}
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value);
-                          setModelWeights(prev => ({ ...prev, smartMoney: val }));
-                        }}
-                        className="w-full accent-indigo-500 cursor-pointer bg-white/5 h-1.5 rounded-lg"
-                      />
-                      <div className="flex justify-between text-[9px] font-mono text-gray-500">
-                        <span>Min/Max: 0-40%</span>
-                        <span>Optimize Target: <span className="text-indigo-400 font-bold">{activeRecommendations.smartMoney}%</span></span>
-                      </div>
-                    </div>
-
-                    {/* Volume */}
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-baseline">
-                        <span className="text-xs font-bold text-gray-300 uppercase">📊 Volume Vectors</span>
-                        <span className="text-xs font-mono font-bold text-white">{modelWeights.volume || 0}%</span>
-                      </div>
-                      <input 
-                        type="range" min="0" max="30" 
-                        value={modelWeights.volume || 0}
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value);
-                          setModelWeights(prev => ({ ...prev, volume: val }));
-                        }}
-                        className="w-full accent-indigo-500 cursor-pointer bg-white/5 h-1.5 rounded-lg"
-                      />
-                      <div className="flex justify-between text-[9px] font-mono text-gray-500">
-                        <span>Min/Max: 0-30%</span>
-                        <span>Optimize Target: <span className="text-indigo-400 font-bold">{activeRecommendations.volume}%</span></span>
-                      </div>
-                    </div>
-
-                    {/* Momentum */}
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-baseline">
-                        <span className="text-xs font-bold text-gray-300 uppercase">⚡ RSI/MACD Momentum</span>
-                        <span className="text-xs font-mono font-bold text-white">{modelWeights.momentum || 0}%</span>
-                      </div>
-                      <input 
-                        type="range" min="0" max="30" 
-                        value={modelWeights.momentum || 0}
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value);
-                          setModelWeights(prev => ({ ...prev, momentum: val }));
-                        }}
-                        className="w-full accent-indigo-500 cursor-pointer bg-white/5 h-1.5 rounded-lg"
-                      />
-                      <div className="flex justify-between text-[9px] font-mono text-gray-500">
-                        <span>Min/Max: 0-30%</span>
-                        <span>Optimize Target: <span className="text-indigo-400 font-bold">{activeRecommendations.momentum}%</span></span>
-                      </div>
-                    </div>
-
-                    {/* Fundamentals */}
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-baseline">
-                        <span className="text-xs font-bold text-gray-300 uppercase">🛡️ Moat Fundamentals</span>
-                        <span className="text-xs font-mono font-bold text-white">{modelWeights.fundamentals || 0}%</span>
-                      </div>
-                      <input 
-                        type="range" min="0" max="30" 
-                        value={modelWeights.fundamentals || 0}
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value);
-                          setModelWeights(prev => ({ ...prev, fundamentals: val }));
-                        }}
-                        className="w-full accent-indigo-500 cursor-pointer bg-white/5 h-1.5 rounded-lg"
-                      />
-                      <div className="flex justify-between text-[9px] font-mono text-gray-500">
-                        <span>Min/Max: 0-30%</span>
-                        <span>Optimize Target: <span className="text-indigo-400 font-bold">{activeRecommendations.fundamentals}%</span></span>
-                      </div>
-                    </div>
-
-                    {/* Earnings */}
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-baseline">
-                        <span className="text-xs font-bold text-gray-300 uppercase">💼 Revision Earnings</span>
-                        <span className="text-xs font-mono font-bold text-white">{modelWeights.earnings || 0}%</span>
-                      </div>
-                      <input 
-                        type="range" min="0" max="30" 
-                        value={modelWeights.earnings || 0}
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value);
-                          setModelWeights(prev => ({ ...prev, earnings: val }));
-                        }}
-                        className="w-full accent-indigo-500 cursor-pointer bg-white/5 h-1.5 rounded-lg"
-                      />
-                      <div className="flex justify-between text-[9px] font-mono text-gray-500">
-                        <span>Min/Max: 0-30%</span>
-                        <span>Optimize Target: <span className="text-indigo-400 font-bold">{activeRecommendations.earnings}%</span></span>
-                      </div>
-                    </div>
-
-                    {/* Sentiment */}
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-baseline">
-                        <span className="text-xs font-bold text-gray-300 uppercase">📰 Media Sentiment</span>
-                        <span className="text-xs font-mono font-bold text-white">{modelWeights.sentiment || 0}%</span>
-                      </div>
-                      <input 
-                        type="range" min="0" max="20" 
-                        value={modelWeights.sentiment || 0}
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value);
-                          setModelWeights(prev => ({ ...prev, sentiment: val }));
-                        }}
-                        className="w-full accent-indigo-500 cursor-pointer bg-white/5 h-1.5 rounded-lg"
-                      />
-                      <div className="flex justify-between text-[9px] font-mono text-gray-500">
-                        <span>Min/Max: 0-20%</span>
-                        <span>Optimize Target: <span className="text-indigo-400 font-bold">{activeRecommendations.sentiment}%</span></span>
-                      </div>
-                    </div>
-
-                    {/* Catalyst */}
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-baseline">
-                        <span className="text-xs font-bold text-gray-300 uppercase">🚀 Event Catalysts</span>
-                        <span className="text-xs font-mono font-bold text-white">{modelWeights.catalyst || 0}%</span>
-                      </div>
-                      <input 
-                        type="range" min="0" max="20" 
-                        value={modelWeights.catalyst || 0}
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value);
-                          setModelWeights(prev => ({ ...prev, catalyst: val }));
-                        }}
-                        className="w-full accent-indigo-500 cursor-pointer bg-white/5 h-1.5 rounded-lg"
-                      />
-                      <div className="flex justify-between text-[9px] font-mono text-gray-500">
-                        <span>Min/Max: 0-20%</span>
-                        <span>Optimize Target: <span className="text-indigo-400 font-bold">{activeRecommendations.catalyst}%</span></span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Operations Terminal Block */}
-                <div className="bg-[#111113] border border-white/5 rounded-2xl p-6 shadow-2xl xl:col-span-5 flex flex-col justify-between">
-                  <div>
-                    <div className="flex items-center justify-between border-b border-white/5 pb-4 mb-4">
-                      <div className="flex items-center gap-2">
-                        <Sliders className="w-4 h-4 text-indigo-400" />
-                        <h3 className="text-xs font-bold tracking-widest uppercase text-white">
-                          Optimization Terminal
-                        </h3>
-                      </div>
-                      <span className="text-[8px] bg-indigo-500/15 text-indigo-400 px-2 py-0.5 rounded border border-indigo-500/25 uppercase font-mono tracking-widest">
-                        Core System Calibrator
-                      </span>
-                    </div>
-
-                    {/* Simulated Console Logs Screen */}
-                    <div className="bg-[#050507] border border-white/5 rounded-xl p-4 font-mono text-[10px] space-y-3.5 h-[230px] overflow-y-auto section-scroll scrollbar-none flex flex-col-reverse text-[#a3a3c2] leading-relaxed">
-                      {calibrationLog.map((log, index) => {
-                        let textStyleClass = "text-[#8a8a9a]";
-                        if (log.includes("SUCCESS")) textStyleClass = "text-emerald-400 font-bold";
-                        else if (log.includes("INITIATING")) textStyleClass = "text-indigo-400 font-bold";
-                        else if (log.includes("REBALANCE")) textStyleClass = "text-amber-400";
-                        else if (log.includes("COMPILING")) textStyleClass = "text-cyan-400";
-                        return (
-                          <div 
-                            key={index} 
-                            className={cn(textStyleClass, "animate-fade-in border-l-2 pl-2.5 border-white/5")}
-                          >
-                            {log}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Calibration execution trigger */}
-                  <div className="mt-6 flex flex-col gap-3">
-                    <button
-                      type="button"
-                      disabled={calibrating}
-                      onClick={executeAutoCalibration}
-                      className="w-full py-3.5 bg-indigo-500 hover:bg-indigo-600 disabled:bg-indigo-500/30 disabled:text-gray-500 text-black font-mono font-bold text-xs uppercase tracking-wider rounded-xl transition-all shadow-[0_0_20px_rgba(99,102,241,0.25)] flex items-center justify-center gap-2 cursor-pointer"
-                    >
-                      {calibrating ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin text-black" />
-                          Calibrating Neural Scoring System...
-                        </>
-                      ) : (
-                        <>
-                          <Brain className="w-4 h-4 text-black" />
-                          Adopt Recommended Weightings & Adjust Future Model
-                        </>
-                      )}
-                    </button>
-                    <span className="text-[9px] text-gray-500 font-mono text-center">
-                      Recalibrating system weights will permanently write parameters to disk storage and adjust the final scores for future dynamic equity predictions.
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* === AUDIT LOG: HISTORICAL SYSTEM SIGNALS === */}
-              <div className="bg-[#111113] border border-white/5 rounded-2xl p-6 shadow-2xl overflow-hidden">
-                <div className="flex flex-col md:flex-row items-start md:items-center justify-between border-b border-white/5 pb-4 mb-5 gap-3">
-                  <div>
-                    <h3 className="text-xs font-bold tracking-widest uppercase text-gray-300">
-                      90-Day Signal Historical Audit Ledger
-                    </h3>
-                    <p className="text-[10px] font-mono text-gray-500 mt-0.5">
-                      Review ledger of all buying, selling and preservation decisions emitted by StockTrend AI Super V6 during current interval
-                    </p>
-                  </div>
-                  <span className="text-[10px] font-mono text-gray-400 uppercase tracking-widest">
-                    Showing {activeFilteredSignals.length} recorded signals
-                  </span>
-                </div>
-
-                {/* Audit table */}
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse font-mono text-xs">
-                    <thead>
-                      <tr className="border-b border-white/5 text-gray-500 text-[10px] tracking-wider uppercase">
-                        <th className="py-3 px-2">Symbol</th>
-                        <th className="py-3 px-2">Timestamp Date</th>
-                        <th className="py-3 px-2">Signal Emitted</th>
-                        <th className="py-3 px-2">Confidence</th>
-                        <th className="py-3 px-2 text-right">Entry Price</th>
-                        <th className="py-3 px-2 text-right">Exit Price / Close</th>
-                        <th className="py-3 px-2 text-right text-emerald-400">Net Return</th>
-                        <th className="py-3 px-2 text-center">Factor Telemetries</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-white/[0.03]">
-                      {activeFilteredSignals.map((sig) => (
-                        <tr key={sig.id} className="hover:bg-white/[0.02] transition-colors">
-                          {/* Symbol */}
-                          <td className="py-3.5 px-2 font-black text-white text-sm">
-                            {sig.ticker}
-                          </td>
-
-                          {/* Date */}
-                          <td className="py-3.5 px-2 text-gray-400 whitespace-nowrap">
-                            {sig.date}
-                          </td>
-
-                          {/* Signal */}
-                          <td className="py-3.5 px-2">
-                            <span className={cn(
-                              "px-2 py-0.5 rounded text-[9px] font-extrabold uppercase",
-                              getRecommendationTheme(sig.signalType).badgeClass
-                            )}>
-                              {sig.signalType}
-                            </span>
-                          </td>
-
-                          {/* Confidence */}
-                          <td className="py-3.5 px-2 text-gray-300">
-                            {sig.confidence}%
-                          </td>
-
-                          {/* Entry */}
-                          <td className="py-3.5 px-2 text-right text-gray-300">
-                            ${sig.entryPrice.toFixed(2)}
-                          </td>
-
-                          {/* Exit */}
-                          <td className="py-3.5 px-2 text-right text-gray-300">
-                            ${sig.exitPrice.toFixed(2)}
-                          </td>
-
-                          {/* Return */}
-                          <td className={cn(
-                            "py-3.5 px-2 text-right font-bold text-sm",
-                            sig.returnPercent > 0 ? "text-emerald-400" : "text-rose-400"
-                          )}>
-                            {sig.returnPercent > 0 ? "+" : ""}{sig.returnPercent.toFixed(2)}%
-                          </td>
-
-                          {/* Factors */}
-                          <td className="py-3.5 px-2">
-                            <div className="flex flex-wrap gap-1 items-center justify-center max-w-[280px] mx-auto">
-                              {sig.triggeredFactors.map(f => (
-                                <span 
-                                  key={f} 
-                                  title={factorsMetadata[f]?.label || f}
-                                  className="text-[7.5px] bg-white/5 border border-white/5 text-gray-450 px-1 py-0.2 rounded font-semibold uppercase whitespace-nowrap"
-                                >
-                                  {factorsMetadata[f]?.icon || "⚙️"} {f.replace('_', ' ')}
-                                </span>
-                              ))}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </motion.div>
-          ) : data ? (
+          ) : activePage === 'ANALYSIS' ? ( data ? (
               <motion.div 
                 key={data.ticker}
                 initial={{ opacity: 0 }}
@@ -13136,137 +12302,34 @@ export default function App() {
                 <h2 className="text-lg sm:text-xl font-sans font-bold text-white mb-2">Search a ticker to begin</h2>
                 <p className="text-sm text-gray-500 max-w-md mx-auto">
                   Press <span className="text-emerald-400 font-mono">Enter</span> in the search bar, or open{' '}
-                  <span className="text-emerald-400 font-semibold">Find Trades</span> /{' '}
-                  <span className="text-sky-400 font-semibold">Suggest Trades</span> /{' '}
-                  <span className="text-orange-400 font-semibold">Day Trade</span>.
+                  <span className="text-emerald-400 font-semibold">Find Trades</span> from the sidebar.
                 </p>
               </div>
               <div className="w-full max-w-xl space-y-2.5 sm:space-y-3">
-                {!showFindATrade && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowFindATrade(true);
-                      setShowSuggestATrade(false);
-                      setShowDayTrade(false);
-                    }}
-                    className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-emerald-500 text-black min-h-[48px] py-3 text-[12px] font-bold uppercase tracking-wider hover:bg-emerald-400 active:bg-emerald-600 transition-colors cursor-pointer"
-                  >
-                    <Rocket className="w-4 h-4" />
-                    Open Find Trades
-                  </button>
-                )}
-                {showFindATrade && (
-                  <p className="text-[11px] text-emerald-300/80 font-mono text-center">
-                    Find Trades panel is open above — paste tickers and scan.
-                  </p>
-                )}
-                {!showSuggestATrade && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowSuggestATrade(true);
-                      setShowFindATrade(false);
-                      setShowDayTrade(false);
-                      setSuggestRunToken((n) => n + 1);
-                    }}
-                    className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-sky-500 text-black min-h-[48px] py-3 text-[12px] font-bold uppercase tracking-wider hover:bg-sky-400 active:bg-sky-600 transition-colors cursor-pointer"
-                  >
-                    <Sparkles className="w-4 h-4" />
-                    Open Suggest Trades
-                  </button>
-                )}
-                {showSuggestATrade && (
-                  <p className="text-[11px] text-sky-300/80 font-mono text-center">
-                    Suggest Trades is searching above — press Suggest again for a new search.
-                  </p>
-                )}
-                {!showDayTrade && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowDayTrade(true);
-                      setShowFindATrade(false);
-                      setShowSuggestATrade(false);
-                      setDayTradeRunToken((n) => n + 1);
-                    }}
-                    className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-orange-500 text-black min-h-[48px] py-3 text-[12px] font-bold uppercase tracking-wider hover:bg-orange-400 active:bg-orange-600 transition-colors cursor-pointer"
-                  >
-                    <Flame className="w-4 h-4" />
-                    Open Day Trade
-                  </button>
-                )}
-                {showDayTrade && (
-                  <p className="text-[11px] text-orange-300/80 font-mono text-center">
-                    Day Trade scout is running above — press Day Trade again for a new search.
-                  </p>
-                )}
+                <button
+                  type="button"
+                  onClick={() => setActivePage('FIND_TRADES')}
+                  className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-emerald-500 text-black min-h-[48px] py-3 text-[12px] font-bold uppercase tracking-wider hover:bg-emerald-400 active:bg-emerald-600 transition-colors cursor-pointer"
+                >
+                  <Rocket className="w-4 h-4" />
+                  Open Find Trades
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActivePage('DASHBOARD')}
+                  className="w-full inline-flex items-center justify-center gap-2 rounded-full border border-white/15 bg-white/5 text-white min-h-[48px] py-3 text-[12px] font-bold uppercase tracking-wider hover:bg-white/10 transition-colors cursor-pointer"
+                >
+                  Market Command Center
+                </button>
               </div>
             </div>
-          )}
+          )
+          ) : null}
         </AnimatePresence>
-      </main>
-
-      {/* Footer */}
-      <footer className="mt-8 sm:mt-12 py-6 sm:py-8 px-4 sm:px-10 border-t border-white/5 flex flex-col md:flex-row items-center justify-between text-[11px] font-sans text-gray-500 gap-3 sm:gap-4 relative z-10 mb-20 lg:mb-0">
-        <div className="flex flex-wrap justify-center gap-x-6 gap-y-2">
-          <span className="font-mono text-gray-400">Session: {sessionId}</span>
-          <span className="hidden md:inline">Latency: <span className="text-emerald-400/80 font-mono">12.4ms</span></span>
-          <span className="hidden md:inline">Region: <span className="text-blue-400/80 font-mono">US_EAST_01</span></span>
-        </div>
-        <div className="flex flex-col md:items-end gap-2 text-center md:text-right">
-          <span className="text-gray-500">Quantum Node · Powered by Google Gemini · <span className="font-mono text-emerald-500/70">ui-multiauth-0813</span></span>
-          <LegalLinks className="justify-center md:justify-end" />
-        </div>
-      </footer>
-
-      {/* Mobile bottom navigation */}
-      <nav className="lg:hidden fixed bottom-0 inset-x-0 z-50 border-t border-white/10 bg-[#0a0a0c]/95 backdrop-blur-xl pb-[max(0.5rem,env(safe-area-inset-bottom))]">
-        <div className="grid grid-cols-3 gap-1 px-2 pt-1.5">
-          <button
-            type="button"
-            onClick={() => setActivePage('DASHBOARD')}
-            className={cn(
-              "flex flex-col items-center gap-0.5 rounded-xl px-2 py-2 text-[10px] sm:text-[11px] font-sans font-semibold transition-all cursor-pointer min-h-[44px]",
-              activePage === 'DASHBOARD'
-                ? "bg-emerald-500 text-black shadow-[0_0_18px_rgba(16,185,129,0.35)]"
-                : "text-gray-400 hover:text-white hover:bg-white/[0.04]"
-            )}
-          >
-            <Activity className="w-4 h-4" />
-            Dashboard
-          </button>
-          <button
-            type="button"
-            onClick={() => setActivePage('NEWS_CENTER')}
-            className={cn(
-              "flex flex-col items-center gap-0.5 rounded-xl px-2 py-2 text-[10px] sm:text-[11px] font-sans font-semibold transition-all cursor-pointer min-h-[44px]",
-              activePage === 'NEWS_CENTER'
-                ? "bg-blue-500 text-white shadow-[0_0_18px_rgba(59,130,246,0.3)]"
-                : "text-gray-400 hover:text-white hover:bg-white/[0.04]"
-            )}
-          >
-            <Newspaper className="w-4 h-4" />
-            News
-          </button>
-          <button
-            type="button"
-            onClick={() => setActivePage('SELF_LEARNING')}
-            className={cn(
-              "flex flex-col items-center gap-0.5 rounded-xl px-2 py-2 text-[10px] sm:text-[11px] font-sans font-semibold transition-all cursor-pointer min-h-[44px]",
-              activePage === 'SELF_LEARNING'
-                ? "bg-indigo-500 text-white shadow-[0_0_18px_rgba(99,102,241,0.3)]"
-                : "text-gray-400 hover:text-white hover:bg-white/[0.04]"
-            )}
-          >
-            <Brain className="w-4 h-4" />
-            Learning
-          </button>
-        </div>
-      </nav>
+      </AppShell>
 
       {/* Floating Price Alerts Toasts Viewport */}
-      <div className="fixed bottom-24 lg:bottom-6 right-3 sm:right-6 z-[999] flex flex-col gap-3 max-w-[calc(100vw-1.5rem)] sm:max-w-sm w-full pointer-events-none">
+      <div className="fixed bottom-6 right-3 sm:right-6 z-[999] flex flex-col gap-3 max-w-[calc(100vw-1.5rem)] sm:max-w-sm w-full pointer-events-none">
         <AnimatePresence>
           {toasts.map(toast => (
             <motion.div
@@ -13378,6 +12441,6 @@ export default function App() {
           ))}
         </AnimatePresence>
       </div>
-    </div>
+    </>
   );
 }
