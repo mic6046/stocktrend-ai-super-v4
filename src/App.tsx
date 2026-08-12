@@ -7347,9 +7347,9 @@ export default function App() {
       <div className="fixed top-[-100px] left-[-100px] w-[500px] h-[500px] bg-emerald-500/10 rounded-full blur-[120px] pointer-events-none" />
       <div className="fixed bottom-[-100px] right-[-100px] w-[600px] h-[600px] bg-blue-600/10 rounded-full blur-[150px] pointer-events-none" />
 
-      {/* Single-row centered header */}
-      <nav className="relative z-10 border-b border-white/5 backdrop-blur-md sticky top-0 pt-[env(safe-area-inset-top)] px-2 sm:px-4 py-1.5 sm:py-2 bg-[#050505]/85">
-        <div className="mx-auto flex w-full max-w-[1400px] items-center justify-center gap-1.5 sm:gap-2 min-w-0">
+      {/* Single-row header — never wraps to a second bar */}
+      <nav className="relative z-10 border-b border-white/5 backdrop-blur-md sticky top-0 pt-[env(safe-area-inset-top)] px-2 sm:px-3 py-1.5 bg-[#050505]/90">
+        <div className="mx-auto flex w-full max-w-[1400px] flex-nowrap items-center justify-center gap-1 sm:gap-1.5 min-w-0 overflow-x-auto">
           <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 min-w-0">
             <div className="w-7 h-7 sm:w-8 sm:h-8 bg-emerald-500 rounded-lg flex items-center justify-center shadow-[0_0_18px_rgba(16,185,129,0.45)] shrink-0">
               <Activity className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-black" />
@@ -13085,7 +13085,7 @@ export default function App() {
           <span className="hidden md:inline">Region: <span className="text-blue-400/80 font-mono">US_EAST_01</span></span>
         </div>
         <div className="flex flex-col md:items-end gap-2 text-center md:text-right">
-          <span className="text-gray-500">Quantum Node · Powered by Google Gemini · <span className="font-mono text-gray-600">ui-1a53c4a</span></span>
+          <span className="text-gray-500">Quantum Node · Powered by Google Gemini · <span className="font-mono text-emerald-500/70">ui-onerow-0812</span></span>
           <LegalLinks className="justify-center md:justify-end" />
         </div>
       </footer>
