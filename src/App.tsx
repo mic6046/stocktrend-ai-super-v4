@@ -7347,142 +7347,92 @@ export default function App() {
       <div className="fixed top-[-100px] left-[-100px] w-[500px] h-[500px] bg-emerald-500/10 rounded-full blur-[120px] pointer-events-none" />
       <div className="fixed bottom-[-100px] right-[-100px] w-[600px] h-[600px] bg-blue-600/10 rounded-full blur-[150px] pointer-events-none" />
 
-      {/* Responsive centered header — compact on phone, full controls on web */}
-      <nav className="relative z-10 border-b border-white/5 backdrop-blur-md sticky top-0 pt-[env(safe-area-inset-top)] px-3 sm:px-5 py-2 sm:py-2.5 bg-[#050505]/85">
-        <div className="mx-auto flex w-full max-w-[1400px] flex-col items-center gap-2">
-          {/* Row 1: brand · search · refresh/account — always centered */}
-          <div className="flex w-full items-center justify-center gap-2 sm:gap-3">
-            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-              <div className="w-7 h-7 sm:w-8 sm:h-8 bg-emerald-500 rounded-lg flex items-center justify-center shadow-[0_0_18px_rgba(16,185,129,0.45)] shrink-0">
-                <Activity className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-black" />
-              </div>
-              <h1 className="text-xs sm:text-sm md:text-base font-sans font-extrabold tracking-tight uppercase whitespace-nowrap leading-none">
-                QUANTUM<span className="text-emerald-500">NODE</span>
-              </h1>
-              <div className="hidden xl:flex items-center gap-0.5 ml-1 border-l border-white/10 pl-2">
-                <button
-                  type="button"
-                  onClick={() => setActivePage('DASHBOARD')}
-                  className={cn(
-                    "h-8 px-2.5 rounded-lg text-[10px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer inline-flex items-center",
-                    activePage === 'DASHBOARD'
-                      ? "bg-emerald-500 text-black border-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.35)]"
-                      : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
-                  )}
-                >
-                  Dashboard
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActivePage('NEWS_CENTER')}
-                  className={cn(
-                    "h-8 px-2.5 rounded-lg text-[10px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer inline-flex items-center",
-                    activePage === 'NEWS_CENTER'
-                      ? "bg-blue-500 text-white border-blue-400 shadow-[0_0_18px_rgba(59,130,246,0.3)]"
-                      : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
-                  )}
-                >
-                  News
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActivePage('SELF_LEARNING')}
-                  className={cn(
-                    "h-8 px-2.5 rounded-lg text-[10px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer inline-flex items-center",
-                    activePage === 'SELF_LEARNING'
-                      ? "bg-indigo-500 text-white border-indigo-400 shadow-[0_0_18px_rgba(99,102,241,0.3)]"
-                      : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
-                  )}
-                >
-                  Learn
-                </button>
-              </div>
+      {/* Single-row centered header */}
+      <nav className="relative z-10 border-b border-white/5 backdrop-blur-md sticky top-0 pt-[env(safe-area-inset-top)] px-2 sm:px-4 py-1.5 sm:py-2 bg-[#050505]/85">
+        <div className="mx-auto flex w-full max-w-[1400px] items-center justify-center gap-1.5 sm:gap-2 min-w-0">
+          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 min-w-0">
+            <div className="w-7 h-7 sm:w-8 sm:h-8 bg-emerald-500 rounded-lg flex items-center justify-center shadow-[0_0_18px_rgba(16,185,129,0.45)] shrink-0">
+              <Activity className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-black" />
             </div>
-
-            <form
-              onSubmit={handleSubmit}
-              className="min-w-0 flex-1 max-w-[13rem] sm:max-w-xs md:max-w-sm lg:max-w-md group"
-              autoComplete="off"
-            >
-              <div className="relative w-full min-w-0">
-                <input
-                  key={searchInputKey}
-                  ref={searchInputRef}
-                  type="search"
-                  value={searchQuery}
-                  onChange={(e) => {
-                    setSearchQuery(e.target.value);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
-                    e.preventDefault();
-                    runTickerSearch((e.target as HTMLInputElement).value);
-                  }}
-                  autoComplete="off"
-                  autoCorrect="off"
-                  autoCapitalize="off"
-                  spellCheck={false}
-                  inputMode="search"
-                  name={`qn-ticker-${searchInputKey}`}
-                  id={`qn-ticker-${searchInputKey}`}
-                  placeholder="Ticker"
-                  title="Press Enter to search"
-                  className="w-full h-8 sm:h-9 bg-[#111113] border border-white/10 rounded-full pl-8 sm:pl-9 pr-7 sm:pr-8 text-[13px] sm:text-sm focus:outline-none focus:border-emerald-500/50 transition-all placeholder:text-gray-600 font-mono tracking-wide"
-                />
-                <Search className="absolute left-2.5 sm:left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500 group-focus-within:text-emerald-500 transition-colors pointer-events-none" />
-                {loading && <Loader2 className="absolute right-2.5 sm:right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-emerald-500" />}
-              </div>
-            </form>
-
-            <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-              <MarketDataRefreshBar
-                variant="inline"
-                lastUpdatedAt={lastMarketUpdatedAt}
-                status={marketDataStatus}
-                mode={refreshMode}
-                intervalSec={autoRefreshIntervalSec}
-                onModeChange={(mode) => {
-                  setRefreshMode(mode);
-                  saveRefreshMode(mode);
-                }}
-                onIntervalChange={(sec) => {
-                  setAutoRefreshIntervalSec(sec);
-                  saveAutoRefreshIntervalSec(sec);
-                }}
-                onRefresh={() => void handleMarketDataRefresh()}
-                disabled={loading || marketDataStatus === 'loading'}
-              />
-
-              {user && (
-                <div className="hidden lg:block max-w-[200px] xl:max-w-[240px] overflow-hidden">
-                  <UsageQuotaBar usage={usage} email={user.email} onRefresh={refreshUsage} compact />
-                </div>
-              )}
-
-              {!user ? (
-                <button
-                  type="button"
-                  onClick={() => setShowAuthModal(true)}
-                  disabled={authLoading}
-                  className="inline-flex items-center justify-center gap-1 h-8 rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-2 sm:px-2.5 font-sans font-bold text-[10px] text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50 shrink-0"
-                >
-                  <Shield className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">Sign in</span>
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => signOut()}
-                  className="inline-flex items-center justify-center h-8 rounded-lg border border-white/10 px-2 sm:px-2.5 text-[10px] font-sans font-semibold text-gray-300 hover:bg-white/5 hover:text-white shrink-0"
-                >
-                  Out
-                </button>
-              )}
+            <h1 className="text-[11px] sm:text-sm font-sans font-extrabold tracking-tight uppercase whitespace-nowrap leading-none">
+              QUANTUM<span className="text-emerald-500">NODE</span>
+            </h1>
+            <div className="hidden xl:flex items-center gap-0.5 ml-1 border-l border-white/10 pl-2">
+              <button
+                type="button"
+                onClick={() => setActivePage('DASHBOARD')}
+                className={cn(
+                  "h-8 px-2.5 rounded-lg text-[10px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer inline-flex items-center",
+                  activePage === 'DASHBOARD'
+                    ? "bg-emerald-500 text-black border-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.35)]"
+                    : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
+                )}
+              >
+                Dashboard
+              </button>
+              <button
+                type="button"
+                onClick={() => setActivePage('NEWS_CENTER')}
+                className={cn(
+                  "h-8 px-2.5 rounded-lg text-[10px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer inline-flex items-center",
+                  activePage === 'NEWS_CENTER'
+                    ? "bg-blue-500 text-white border-blue-400 shadow-[0_0_18px_rgba(59,130,246,0.3)]"
+                    : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
+                )}
+              >
+                News
+              </button>
+              <button
+                type="button"
+                onClick={() => setActivePage('SELF_LEARNING')}
+                className={cn(
+                  "h-8 px-2.5 rounded-lg text-[10px] font-sans font-semibold tracking-wide uppercase transition-all border cursor-pointer inline-flex items-center",
+                  activePage === 'SELF_LEARNING'
+                    ? "bg-indigo-500 text-white border-indigo-400 shadow-[0_0_18px_rgba(99,102,241,0.3)]"
+                    : "border-transparent text-gray-400 hover:text-white hover:bg-white/[0.04]"
+                )}
+              >
+                Learn
+              </button>
             </div>
           </div>
 
-          {/* Row 2: Find / Suggest / Day Trade — equal centered strip */}
-          <div className="grid w-full max-w-lg grid-cols-3 gap-1.5 sm:gap-2 sm:max-w-xl md:max-w-2xl">
+          <form
+            onSubmit={handleSubmit}
+            className="min-w-0 flex-1 max-w-[7.5rem] sm:max-w-[11rem] md:max-w-xs lg:max-w-sm group"
+            autoComplete="off"
+          >
+            <div className="relative w-full min-w-0">
+              <input
+                key={searchInputKey}
+                ref={searchInputRef}
+                type="search"
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
+                  e.preventDefault();
+                  runTickerSearch((e.target as HTMLInputElement).value);
+                }}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                inputMode="search"
+                name={`qn-ticker-${searchInputKey}`}
+                id={`qn-ticker-${searchInputKey}`}
+                placeholder="Ticker"
+                title="Press Enter to search"
+                className="w-full h-8 sm:h-9 bg-[#111113] border border-white/10 rounded-full pl-7 sm:pl-9 pr-6 sm:pr-8 text-[12px] sm:text-sm focus:outline-none focus:border-emerald-500/50 transition-all placeholder:text-gray-600 font-mono tracking-wide"
+              />
+              <Search className="absolute left-2 sm:left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500 group-focus-within:text-emerald-500 transition-colors pointer-events-none" />
+              {loading && <Loader2 className="absolute right-2 sm:right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-emerald-500" />}
+            </div>
+          </form>
+
+          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
             <button
               type="button"
               onClick={() => {
@@ -7494,7 +7444,7 @@ export default function App() {
                 }
               }}
               className={cn(
-                'inline-flex items-center justify-center gap-1 sm:gap-1.5 rounded-full px-1.5 sm:px-3 py-2 text-[9px] sm:text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
+                'inline-flex items-center justify-center gap-1 h-8 rounded-full px-1.5 sm:px-2.5 text-[9px] sm:text-[10px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
                 showFindATrade
                   ? 'bg-emerald-500 text-black border-emerald-400 shadow-[0_0_16px_rgba(16,185,129,0.35)]'
                   : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/25'
@@ -7502,7 +7452,8 @@ export default function App() {
               title="Find Trades — paste tickers or fill from market/theme lists"
             >
               <Rocket className="w-3.5 h-3.5 shrink-0" />
-              <span className="truncate">Find Trades</span>
+              <span className="hidden md:inline">Find Trades</span>
+              <span className="md:hidden">Find</span>
             </button>
             <button
               type="button"
@@ -7514,7 +7465,7 @@ export default function App() {
                 setSuggestRunToken((n) => n + 1);
               }}
               className={cn(
-                'inline-flex items-center justify-center gap-1 sm:gap-1.5 rounded-full px-1.5 sm:px-3 py-2 text-[9px] sm:text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
+                'inline-flex items-center justify-center gap-1 h-8 rounded-full px-1.5 sm:px-2.5 text-[9px] sm:text-[10px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
                 showSuggestATrade
                   ? 'bg-sky-500 text-black border-sky-400 shadow-[0_0_16px_rgba(56,189,248,0.35)]'
                   : 'bg-sky-500/15 text-sky-300 border-sky-500/40 hover:bg-sky-500/25'
@@ -7522,7 +7473,8 @@ export default function App() {
               title="New Suggest Trades search from popular US / HK / Japan / Europe markets"
             >
               <Sparkles className="w-3.5 h-3.5 shrink-0" />
-              <span className="truncate">Suggest Trades</span>
+              <span className="hidden md:inline">Suggest Trades</span>
+              <span className="md:hidden">Suggest</span>
             </button>
             <button
               type="button"
@@ -7534,7 +7486,7 @@ export default function App() {
                 setDayTradeRunToken((n) => n + 1);
               }}
               className={cn(
-                'inline-flex items-center justify-center gap-1 sm:gap-1.5 rounded-full px-1.5 sm:px-3 py-2 text-[9px] sm:text-[11px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
+                'inline-flex items-center justify-center gap-1 h-8 rounded-full px-1.5 sm:px-2.5 text-[9px] sm:text-[10px] font-bold uppercase tracking-wider border transition-all cursor-pointer whitespace-nowrap',
                 showDayTrade
                   ? 'bg-orange-500 text-black border-orange-400 shadow-[0_0_16px_rgba(249,115,22,0.35)]'
                   : 'bg-orange-500/15 text-orange-300 border-orange-500/40 hover:bg-orange-500/25'
@@ -7542,8 +7494,55 @@ export default function App() {
               title="Scout popular stocks that clear day-trade liquidity / range / bias gates"
             >
               <Flame className="w-3.5 h-3.5 shrink-0" />
-              <span className="truncate">Day Trade</span>
+              <span className="hidden md:inline">Day Trade</span>
+              <span className="md:hidden">Day</span>
             </button>
+          </div>
+
+          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+            <MarketDataRefreshBar
+              variant="inline"
+              lastUpdatedAt={lastMarketUpdatedAt}
+              status={marketDataStatus}
+              mode={refreshMode}
+              intervalSec={autoRefreshIntervalSec}
+              onModeChange={(mode) => {
+                setRefreshMode(mode);
+                saveRefreshMode(mode);
+              }}
+              onIntervalChange={(sec) => {
+                setAutoRefreshIntervalSec(sec);
+                saveAutoRefreshIntervalSec(sec);
+              }}
+              onRefresh={() => void handleMarketDataRefresh()}
+              disabled={loading || marketDataStatus === 'loading'}
+            />
+
+            {user && (
+              <div className="hidden lg:block max-w-[200px] xl:max-w-[240px] overflow-hidden">
+                <UsageQuotaBar usage={usage} email={user.email} onRefresh={refreshUsage} compact />
+              </div>
+            )}
+
+            {!user ? (
+              <button
+                type="button"
+                onClick={() => setShowAuthModal(true)}
+                disabled={authLoading}
+                className="inline-flex items-center justify-center gap-1 h-8 rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-2 sm:px-2.5 font-sans font-bold text-[10px] text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50 shrink-0"
+              >
+                <Shield className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Sign in</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => signOut()}
+                className="inline-flex items-center justify-center h-8 rounded-lg border border-white/10 px-2 sm:px-2.5 text-[10px] font-sans font-semibold text-gray-300 hover:bg-white/5 hover:text-white shrink-0"
+              >
+                Out
+              </button>
+            )}
           </div>
         </div>
       </nav>
