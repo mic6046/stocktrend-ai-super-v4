@@ -12,6 +12,9 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   X,
+  Shield,
+  LogOut,
+  LogIn,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { AppPage } from './navTypes';
@@ -36,6 +39,11 @@ type AppSidebarProps = {
   mobileOpen: boolean;
   onMobileOpenChange: (open: boolean) => void;
   alertCount?: number;
+  userEmail?: string | null;
+  onSignIn: () => void;
+  onSignOut: () => void;
+  authLoading?: boolean;
+  usageSlot?: React.ReactNode;
 };
 
 export function AppSidebar({
@@ -46,6 +54,11 @@ export function AppSidebar({
   mobileOpen,
   onMobileOpenChange,
   alertCount = 0,
+  userEmail,
+  onSignIn,
+  onSignOut,
+  authLoading,
+  usageSlot,
 }: AppSidebarProps) {
   const go = (page: AppPage) => {
     onNavigate(page);
@@ -128,13 +141,54 @@ export function AppSidebar({
           })}
         </nav>
 
-        {!isCollapsed && (
-          <div className="border-t border-white/5 p-3 shrink-0">
-            <p className="text-[10px] text-gray-600 leading-relaxed">
-              Signals translated into plain language for clear decisions.
-            </p>
-          </div>
-        )}
+        <div className={cn('border-t border-white/5 shrink-0 space-y-2', isCollapsed ? 'p-2' : 'p-3')}>
+          {!isCollapsed && userEmail && (
+            <div className="px-1 space-y-1.5">
+              <div className="flex items-center gap-2 min-w-0">
+                <Shield className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                <p className="text-[10px] text-gray-400 font-mono truncate" title={userEmail}>
+                  {userEmail}
+                </p>
+              </div>
+              {usageSlot && <div className="overflow-hidden">{usageSlot}</div>}
+            </div>
+          )}
+
+          {!userEmail ? (
+            <button
+              type="button"
+              onClick={() => {
+                onSignIn();
+                onMobileOpenChange(false);
+              }}
+              disabled={authLoading}
+              title="Sign in"
+              className={cn(
+                'w-full inline-flex items-center justify-center gap-2 min-h-[44px] rounded-xl border border-emerald-500/40 bg-emerald-500/15 font-bold text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50 cursor-pointer',
+                isCollapsed ? 'px-2' : 'px-3 text-[12px]'
+              )}
+            >
+              <LogIn className="h-4 w-4 shrink-0" />
+              {!isCollapsed && <span>Sign in</span>}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                onSignOut();
+                onMobileOpenChange(false);
+              }}
+              title="Sign out"
+              className={cn(
+                'w-full inline-flex items-center justify-center gap-2 min-h-[44px] rounded-xl border border-rose-500/30 bg-rose-500/10 font-bold text-rose-300 hover:bg-rose-500/20 cursor-pointer',
+                isCollapsed ? 'px-2' : 'px-3 text-[12px]'
+              )}
+            >
+              <LogOut className="h-4 w-4 shrink-0" />
+              {!isCollapsed && <span>Sign out</span>}
+            </button>
+          )}
+        </div>
       </div>
     );
   };

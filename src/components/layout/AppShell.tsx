@@ -80,6 +80,11 @@ export function AppShell({
         mobileOpen={mobileOpen}
         onMobileOpenChange={onMobileOpenChange}
         alertCount={alertCount}
+        userEmail={userEmail}
+        onSignIn={onSignIn}
+        onSignOut={onSignOut}
+        authLoading={authLoading}
+        usageSlot={usageSlot}
       />
 
       <div className="flex-1 min-w-0 flex flex-col">
@@ -99,11 +104,6 @@ export function AppShell({
           onToggleMobileSidebar={() => onMobileOpenChange(!mobileOpen)}
           onOpenAlerts={() => onNavigate('ALERTS')}
           alertCount={alertCount}
-          userEmail={userEmail}
-          onSignIn={onSignIn}
-          onSignOut={onSignOut}
-          authLoading={authLoading}
-          usageSlot={usageSlot}
           onGoDashboard={() => onNavigate('DASHBOARD')}
         />
 
