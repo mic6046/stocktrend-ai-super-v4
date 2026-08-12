@@ -110,10 +110,10 @@ export function AppShell({
         {/* Market pulse */}
         <div className="relative z-10 bg-[#0A0A0C] border-b border-white/5 py-1.5 sm:py-2">
           <div className="px-3 sm:px-4 flex items-center gap-x-4 sm:gap-x-6 overflow-x-auto no-scrollbar lg:flex-wrap lg:justify-center lg:overflow-visible [-webkit-overflow-scrolling:touch]">
-            {indices.length > 0 ? (
-              indices.map((idx, i) => (
+            {Array.isArray(indices) && indices.length > 0 ? (
+              indices.filter(Boolean).map((idx, i) => (
                 <div
-                  key={`${idx.symbol}-${i}`}
+                  key={`${idx?.symbol || 'idx'}-${i}`}
                   className="flex gap-1.5 sm:gap-2 items-center font-mono text-[10px] sm:text-[12px] tracking-tight shrink-0"
                 >
                   <span className="text-gray-500">{idx.shortName || idx.symbol}</span>

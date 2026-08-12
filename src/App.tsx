@@ -5861,7 +5861,9 @@ export default function App() {
     try {
       const res = await fetchWithRetry(`/api/markets${bypassCache ? '?bypassCache=true' : ''}`);
       const data = await res.json();
-      setIndices(data);
+      if (Array.isArray(data)) {
+        setIndices(data.filter(Boolean));
+      }
     } catch (err) {
       console.warn('Failed to fetch indices, using pre-loaded cache:', err);
     } finally {
@@ -7454,7 +7456,7 @@ export default function App() {
             <div className="flex flex-col md:items-end gap-2 text-center md:text-right">
               <span className="text-gray-500">
                 Quantum Node · Powered by Google Gemini ·{' '}
-                <span className="font-mono text-emerald-500/70">ui-shell-0813</span>
+                <span className="font-mono text-emerald-500/70">ui-fix-black-0813</span>
               </span>
               <LegalLinks className="justify-center md:justify-end" />
             </div>

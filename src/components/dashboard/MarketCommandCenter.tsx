@@ -34,6 +34,15 @@ type MarketCommandCenterProps = {
 
 const CORE_SYMBOLS = ['^GSPC', '^IXIC', '^DJI', '^RUT'];
 
+function headlineText(raw: unknown): string | null {
+  if (!raw) return null;
+  if (typeof raw === 'string') return raw;
+  if (typeof raw === 'object' && raw && 'title' in raw && typeof (raw as { title?: unknown }).title === 'string') {
+    return (raw as { title: string }).title;
+  }
+  return null;
+}
+
 function sentimentFromApi(sentiment: any | null): {
   label: 'BULLISH' | 'NEUTRAL' | 'BEARISH';
   confidence: number;
@@ -52,30 +61,27 @@ function sentimentFromApi(sentiment: any | null): {
   const bad = Number(us.bad || 0);
   const score = (good - bad) / total;
   const confidence = Math.round(Math.min(92, Math.max(45, 55 + Math.abs(score) * 40)));
+  const topHeadline = Array.isArray(us.headlines)
+    ? headlineText(us.headlines[0])
+    : headlineText(us.headlines);
   if (score > 0.12) {
     return {
       label: 'BULLISH',
       confidence,
-      why:
-        us.headlines?.[0] ||
-        'Positive headlines outweigh negatives — risk appetite looks constructive.',
+      why: topHeadline || 'Positive headlines outweigh negatives — risk appetite looks constructive.',
     };
   }
   if (score < -0.12) {
     return {
       label: 'BEARISH',
       confidence,
-      why:
-        us.headlines?.[0] ||
-        'Negative headlines dominate — caution is warranted near support levels.',
+      why: topHeadline || 'Negative headlines dominate — caution is warranted near support levels.',
     };
   }
   return {
     label: 'NEUTRAL',
     confidence,
-    why:
-      us.headlines?.[0] ||
-      'Mixed headlines — markets lack a clear directional bias today.',
+    why: topHeadline || 'Mixed headlines — markets lack a clear directional bias today.',
   };
 }
 
@@ -149,10 +155,11 @@ export function MarketCommandCenter({
   onGoFind,
 }: MarketCommandCenterProps) {
   const core = useMemo(() => {
-    const bySym = new Map(indices.map((i) => [i.symbol, i]));
+    const list = Array.isArray(indices) ? indices.filter(Boolean) : [];
+    const bySym = new Map(list.map((i) => [i.symbol, i]));
     return CORE_SYMBOLS.map((sym) => {
       const hit = bySym.get(sym);
-      const fallback = indices.find((i) =>
+      const fallback = list.find((i) =>
         sym === '^GSPC'
           ? /S&P|GSPC/i.test(i.shortName || '')
           : sym === '^IXIC'
