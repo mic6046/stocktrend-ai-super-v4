@@ -17,6 +17,8 @@ import {
   LogIn,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { LegalLinks } from '../LegalDocs';
+import { openLegalDoc } from '../../lib/legal';
 import type { AppPage } from './navTypes';
 
 const NAV_ITEMS: { id: AppPage; label: string; icon: React.ElementType }[] = [
@@ -188,6 +190,28 @@ export function AppSidebar({
               {!isCollapsed && <span>Sign out</span>}
             </button>
           )}
+
+          {!isCollapsed && (
+            <div className="pt-1 px-0.5">
+              <p className="text-[9px] font-mono uppercase tracking-wider text-gray-600 mb-1.5">
+                Legal
+              </p>
+              <LegalLinks
+                className="flex-col items-start gap-y-1.5 text-[10px]"
+                linkClassName="text-gray-500 hover:text-emerald-400 underline-offset-2 hover:underline transition-colors cursor-pointer text-left"
+              />
+            </div>
+          )}
+          {isCollapsed && (
+            <button
+              type="button"
+              onClick={() => openLegalDoc('risk')}
+              className="w-full text-center text-[8px] text-gray-500 hover:text-emerald-400 leading-tight px-0.5 py-1 cursor-pointer"
+              title="Risk Warning · Terms of Use · Privacy Policy"
+            >
+              Legal
+            </button>
+          )}
         </div>
       </div>
     );
@@ -195,7 +219,6 @@ export function AppSidebar({
 
   return (
     <>
-      {/* Desktop sidebar */}
       <aside
         className={cn(
           'hidden lg:flex flex-col shrink-0 border-r border-white/5 bg-[#08080a]/95 backdrop-blur-md sticky top-0 h-screen z-30 transition-[width] duration-200',
@@ -205,7 +228,6 @@ export function AppSidebar({
         {navBody('desktop')}
       </aside>
 
-      {/* Mobile drawer */}
       {mobileOpen && (
         <div className="lg:hidden fixed inset-0 z-[60]">
           <button

@@ -40,36 +40,56 @@ export function LandingPage() {
       </header>
 
       <main className="relative z-10 flex-1 flex items-center justify-center px-4 sm:px-6 pb-10 sm:pb-16">
-        <div id="signin" className="w-full max-w-md text-center scroll-mt-24">
-          <p className="text-[11px] font-mono uppercase tracking-[0.28em] text-emerald-400 mb-3 sm:mb-4">
-            AI equity terminal
-          </p>
-          <h1 className="text-3xl sm:text-5xl font-sans font-extrabold tracking-tight text-white mb-3 sm:mb-4">
-            Quantum<span className="text-emerald-500">Node</span>
-          </h1>
-          <p className="text-sm sm:text-lg text-gray-400 font-sans leading-relaxed mb-4 sm:mb-5 max-w-md mx-auto">
-            Sign in with any Google account or email to open your private dashboard.
-          </p>
-          <p className="mb-6 sm:mb-8 text-[11px] text-gray-500 leading-relaxed max-w-sm mx-auto">
-            Analysis tool only — not financial advice.{' '}
-            <button
-              type="button"
-              className="text-emerald-400/90 hover:underline cursor-pointer"
-              onClick={() => openLegalDoc('risk')}
-            >
-              Read risk warning
-            </button>
-          </p>
+        <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)] gap-10 lg:gap-12 items-center">
+          <div id="signin" className="w-full max-w-md mx-auto lg:mx-0 text-center lg:text-left scroll-mt-24">
+            <p className="text-[11px] font-mono uppercase tracking-[0.28em] text-emerald-400 mb-3 sm:mb-4">
+              AI equity terminal
+            </p>
+            <h1 className="text-3xl sm:text-5xl font-sans font-extrabold tracking-tight text-white mb-3 sm:mb-4">
+              Quantum<span className="text-emerald-500">Node</span>
+            </h1>
+            <p className="text-sm sm:text-lg text-gray-400 font-sans leading-relaxed mb-4 sm:mb-5 max-w-md mx-auto lg:mx-0">
+              Sign in with any Google account or email to open your private dashboard.
+            </p>
+            <p className="mb-6 sm:mb-8 text-[11px] text-gray-500 leading-relaxed max-w-sm mx-auto lg:mx-0">
+              Analysis tool only — not financial advice.{' '}
+              <button
+                type="button"
+                className="text-emerald-400/90 hover:underline cursor-pointer"
+                onClick={() => openLegalDoc('risk')}
+              >
+                Read risk warning
+              </button>
+            </p>
 
-          <div className="rounded-2xl border border-white/10 bg-[#0c0c0e]/90 backdrop-blur-md p-4 sm:p-5 text-left shadow-[0_0_40px_rgba(0,0,0,0.35)]">
-            <p className="text-[10px] font-mono uppercase tracking-widest text-emerald-400 mb-1">
-              Login to access
-            </p>
-            <p className="text-sm text-gray-400 mb-4">
-              Use a different Google account or your email — each account keeps its own dashboard.
-            </p>
-            <AuthPanel variant="landing" />
+            <div className="rounded-2xl border border-white/10 bg-[#0c0c0e]/90 backdrop-blur-md p-4 sm:p-5 text-left shadow-[0_0_40px_rgba(0,0,0,0.35)]">
+              <p className="text-[10px] font-mono uppercase tracking-widest text-emerald-400 mb-1">
+                Login to access
+              </p>
+              <p className="text-sm text-gray-400 mb-4">
+                Use a different Google account or your email — each account keeps its own dashboard.
+              </p>
+              <AuthPanel variant="landing" />
+            </div>
           </div>
+
+          <section className="w-full min-w-0" aria-label="Product preview">
+            <p className="text-center lg:text-left text-[10px] font-mono uppercase tracking-[0.22em] text-gray-500 mb-3">
+              Inside the terminal
+            </p>
+            <div className="relative rounded-2xl border border-white/10 bg-[#0a0a0c]/80 p-1.5 sm:p-2 shadow-[0_24px_80px_rgba(0,0,0,0.55)] overflow-hidden">
+              <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-emerald-400/40 to-transparent pointer-events-none" />
+              <img
+                src="/app-preview.png"
+                alt="Quantum Node dashboard — Market Command Center with sidebar navigation, live indices, and AI opportunities"
+                width={1440}
+                height={900}
+                className="w-full h-auto rounded-xl border border-white/5"
+                loading="eager"
+                decoding="async"
+              />
+            </div>
+          </section>
         </div>
       </main>
 
