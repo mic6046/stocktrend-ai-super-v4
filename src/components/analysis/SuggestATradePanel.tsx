@@ -12,6 +12,7 @@ import {
   type SuggestTradeCandidate,
   type SuggestTradeResult,
 } from '../../lib/findATrade';
+import { toHkTickerIfNumeric } from '../../lib/tickerNormalize';
 import {
   SUGGEST_FACTOR_ORDER,
   type SuggestFactorRating,
@@ -65,7 +66,7 @@ function loadInitialList(market: SuggestMarket, theme: SuggestTheme): string {
 }
 
 function normalizeAddTicker(raw: string): string | null {
-  const t = raw.trim().toUpperCase().replace(/^\$/, '');
+  const t = toHkTickerIfNumeric(raw.trim().toUpperCase().replace(/^\$/, ''));
   if (!/^[A-Z0-9.-]{1,16}$/.test(t)) return null;
   return t;
 }

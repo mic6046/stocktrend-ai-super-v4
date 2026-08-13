@@ -8,6 +8,7 @@ import {
   type WatchlistItem,
 } from '../../lib/watchlistStore';
 import { cn } from '../../lib/utils';
+import { toHkTickerIfNumeric } from '../../lib/tickerNormalize';
 
 type WatchlistPageProps = {
   quotes?: Record<string, { price?: number; changePct?: number; name?: string; signal?: string; confidence?: number; trend?: string }>;
@@ -25,7 +26,7 @@ export function WatchlistPage({ quotes = {}, alertTickers, onOpenTicker }: Watch
   const [draft, setDraft] = useState('');
 
   const add = () => {
-    const t = draft.trim().toUpperCase();
+    const t = toHkTickerIfNumeric(draft);
     if (!t) return;
     setItems(addToWatchlist(t));
     setDraft('');

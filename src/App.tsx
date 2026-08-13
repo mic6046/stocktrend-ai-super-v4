@@ -56,6 +56,7 @@ import {
 import { fetchUsage, type UsageSnapshot } from './lib/usageApi';
 import { buildInstitutionalFlowNarrative, formatSignedMillions } from './lib/institutionalFlow';
 import { getRecommendationTheme } from './utils/recommendationTheme';
+import { toHkTickerIfNumeric } from './lib/tickerNormalize';
 import { 
   AreaChart, 
   Area, 
@@ -142,6 +143,11 @@ interface PriceAlert {
 function decomposeCompoundTicker(ticker: string): string {
   if (!ticker) return ticker;
   const clean = ticker.trim().toUpperCase();
+
+  // Bare 1–4 digit codes are Hong Kong stocks (0700 → 0700.HK)
+  if (/^\d{1,4}$/.test(clean) || /^\d{1,4}\.HK$/.test(clean)) {
+    return toHkTickerIfNumeric(clean);
+  }
   
   const known = [
     'AAPL', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'TSLA', 'NVDA', 'META', 

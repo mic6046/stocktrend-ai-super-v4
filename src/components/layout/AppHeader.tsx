@@ -106,7 +106,7 @@ export function AppHeader({
               spellCheck={false}
               inputMode="search"
               enterKeyHint="search"
-              placeholder="Search ticker..."
+              placeholder="AAPL or 0700…"
               className="w-full h-10 sm:h-9 bg-[#111113] border border-white/10 rounded-full pl-10 pr-9 text-base sm:text-sm focus:outline-none focus:border-emerald-500/50 transition-all placeholder:text-gray-600 font-mono tracking-wide"
             />
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 group-focus-within:text-emerald-500 pointer-events-none" />

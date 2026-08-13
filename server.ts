@@ -368,6 +368,12 @@ async function safeSearch(query: string, queryOpts: any): Promise<any> {
 function decomposeCompoundTicker(ticker: string): string {
   if (!ticker) return ticker;
   const clean = ticker.trim().toUpperCase();
+
+  // Bare 1–4 digit codes are Hong Kong stocks (0700 → 0700.HK)
+  if (/^\d{1,4}$/.test(clean) || /^\d{1,4}\.HK$/.test(clean)) {
+    const num = clean.replace(/\.HK$/, '');
+    return `${num.padStart(4, '0')}.HK`;
+  }
   
   const known = [
     'AAPL', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'TSLA', 'NVDA', 'META', 
@@ -1449,19 +1455,17 @@ app.get('/api/stock/:ticker?', async (req, res) => {
       }
 
       let resolvedTicker = ticker;
-      // Attempt to resolve numeric tickers (Common in Asia/HKEX like '1211')
-      if (/^\d{1,5}$/.test(resolvedTicker)) {
+      // 1–4 digit codes are always Hong Kong (HKEX); pad to 4 and append .HK
+      if (/^\d{1,4}$/.test(resolvedTicker)) {
+        resolvedTicker = `${resolvedTicker.padStart(4, '0')}.HK`;
+      } else if (/^\d{5}$/.test(resolvedTicker)) {
+        // Rare 5-digit Asian codes — try Yahoo search, else leave as-is
         try {
           const searchResults = (await safeSearch(resolvedTicker, {})) as any;
           const bestMatch = searchResults.quotes?.find((q: any) => q.symbol.includes(resolvedTicker));
-          if (bestMatch) {
-            resolvedTicker = bestMatch.symbol;
-          } else if (resolvedTicker.length <= 4) {
-            resolvedTicker = `${resolvedTicker.padStart(4, '0')}.HK`;
-          }
+          if (bestMatch) resolvedTicker = bestMatch.symbol;
         } catch (searchError) {
-          if (resolvedTicker.length <= 4) resolvedTicker = `${resolvedTicker.padStart(4, '0')}.HK`;
-          console.warn(`Ticker search failed for ${resolvedTicker}, using fallback.`);
+          console.warn(`Ticker search failed for ${resolvedTicker}.`);
         }
       }
 
@@ -1624,15 +1628,16 @@ app.get('/api/quote/:ticker?', async (req, res) => {
       return res.status(400).json({ error: 'Ticker symbol is required' });
     }
 
-    // Resolve numeric HKEX-style tickers the same way /api/stock does
-    if (/^\d{1,5}$/.test(ticker)) {
+    // 1–4 digit codes are always Hong Kong (HKEX)
+    if (/^\d{1,4}$/.test(ticker)) {
+      ticker = `${ticker.padStart(4, '0')}.HK`;
+    } else if (/^\d{5}$/.test(ticker)) {
       try {
         const searchResults = (await safeSearch(ticker, {})) as any;
         const bestMatch = searchResults.quotes?.find((q: any) => q.symbol.includes(ticker));
         if (bestMatch) ticker = bestMatch.symbol;
-        else if (ticker.length <= 4) ticker = `${ticker.padStart(4, '0')}.HK`;
       } catch {
-        if (ticker.length <= 4) ticker = `${ticker.padStart(4, '0')}.HK`;
+        /* leave as-is */
       }
     }
 

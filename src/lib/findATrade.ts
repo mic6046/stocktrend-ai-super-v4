@@ -23,6 +23,7 @@ import {
   type ZoneAction,
 } from './quantumRecommendationEngine';
 import { computeTechnicalIndicators } from './technical';
+import { toHkTickerIfNumeric } from './tickerNormalize';
 import {
   buildRealisticSuggestEntry,
   formatFactorStrip,
@@ -86,7 +87,7 @@ export type SuggestTradeCandidate = {
 };
 
 function normalizeTicker(raw: string): string {
-  return raw.trim().toUpperCase().replace(/^\$/, '');
+  return toHkTickerIfNumeric(raw.trim().toUpperCase().replace(/^\$/, ''));
 }
 
 /** Parse comma / space / newline separated tickers; dedupe; cap list size. */

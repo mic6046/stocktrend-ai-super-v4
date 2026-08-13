@@ -8,6 +8,7 @@ import {
   type PortfolioHolding,
 } from '../../lib/portfolioStore';
 import { cn } from '../../lib/utils';
+import { toHkTickerIfNumeric } from '../../lib/tickerNormalize';
 
 type QuoteInfo = {
   price?: number;
@@ -56,7 +57,7 @@ export function PortfolioPage({ quotes = {}, onOpenTicker }: PortfolioPageProps)
   }, [rows]);
 
   const add = () => {
-    const t = ticker.trim().toUpperCase();
+    const t = toHkTickerIfNumeric(ticker);
     const q = Number(qty);
     const a = Number(avg);
     if (!t || !(q > 0) || !(a >= 0)) return;
