@@ -22,16 +22,22 @@ if (typeof window !== 'undefined' && window.performance && typeof window.perform
 
 import {StrictMode, lazy, Suspense} from 'react';
 import {createRoot} from 'react-dom/client';
+import {registerSW} from 'virtual:pwa-register';
 import { AuthProvider } from './lib/auth';
 import { SubscriptionGate } from './components/SubscriptionGate';
 import { LegalHost } from './components/LegalDocs';
 import { ProductAppPreview } from './components/ProductAppPreview';
+import { PwaInstallPrompt } from './components/PwaInstallPrompt';
 import './index.css';
 
 const App = lazy(() => import('./App.tsx'));
 
 if (typeof document !== 'undefined') {
   document.title = 'Quantum Node';
+}
+
+if (typeof window !== 'undefined') {
+  registerSW({immediate: true});
 }
 
 const isProductPreview =
@@ -56,6 +62,7 @@ createRoot(document.getElementById('root')!).render(
               <App />
             </Suspense>
           </SubscriptionGate>
+          <PwaInstallPrompt />
         </LegalHost>
       </AuthProvider>
     )}

@@ -2,10 +2,79 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig} from 'vite';
+import {VitePWA} from 'vite-plugin-pwa';
 
 export default defineConfig(() => {
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [
+      react(),
+      tailwindcss(),
+      VitePWA({
+        registerType: 'autoUpdate',
+        includeAssets: ['pwa-192.png', 'pwa-512.png', 'apple-touch-icon.png', 'app-preview.png'],
+        manifest: {
+          name: 'Quantum Node',
+          short_name: 'QuantumNode',
+          description: 'AI equity terminal — market command center and trade analysis',
+          theme_color: '#050505',
+          background_color: '#050505',
+          display: 'standalone',
+          orientation: 'any',
+          start_url: '/',
+          scope: '/',
+          lang: 'en',
+          categories: ['finance', 'business'],
+          icons: [
+            {
+              src: '/pwa-192.png',
+              sizes: '192x192',
+              type: 'image/png',
+              purpose: 'any',
+            },
+            {
+              src: '/pwa-512.png',
+              sizes: '512x512',
+              type: 'image/png',
+              purpose: 'any',
+            },
+            {
+              src: '/pwa-512.png',
+              sizes: '512x512',
+              type: 'image/png',
+              purpose: 'maskable',
+            },
+          ],
+        },
+        workbox: {
+          navigateFallback: '/index.html',
+          globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff2}'],
+          runtimeCaching: [
+            {
+              urlPattern: ({url}) => url.pathname.startsWith('/api/'),
+              handler: 'NetworkOnly',
+            },
+            {
+              urlPattern: ({url}) =>
+                url.hostname.includes('googleapis.com') ||
+                url.hostname.includes('firebaseio.com') ||
+                url.hostname.includes('run.app'),
+              handler: 'NetworkOnly',
+            },
+            {
+              urlPattern: ({request}) => request.destination === 'image',
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'qn-images',
+                expiration: {maxEntries: 64, maxAgeSeconds: 60 * 60 * 24 * 30},
+              },
+            },
+          ],
+        },
+        devOptions: {
+          enabled: false,
+        },
+      }),
+    ],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
