@@ -22,7 +22,7 @@ export function LandingPage() {
         }}
       />
 
-      <header className="relative z-10 flex items-center justify-between px-4 sm:px-10 py-4 sm:py-5 pt-[max(1rem,env(safe-area-inset-top))]">
+      <header className="relative z-10 flex items-center px-4 sm:px-10 py-4 sm:py-5 pt-[max(1rem,env(safe-area-inset-top))]">
         <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
           <div className="w-9 h-9 bg-emerald-500 rounded-lg flex items-center justify-center shadow-[0_0_18px_rgba(16,185,129,0.45)] shrink-0">
             <Activity className="w-5 h-5 text-black" />
@@ -31,12 +31,6 @@ export function LandingPage() {
             QUANTUM<span className="text-emerald-500">NODE</span>
           </span>
         </div>
-        <a
-          href="#signin"
-          className="rounded-xl bg-emerald-500 px-4 py-2.5 min-h-[44px] inline-flex items-center text-[11px] font-sans font-bold uppercase tracking-wide text-black hover:bg-emerald-400 cursor-pointer shrink-0"
-        >
-          Sign in
-        </a>
       </header>
 
       <main className="relative z-10 flex-1 flex items-center justify-center px-4 sm:px-6 pb-10 sm:pb-16">
