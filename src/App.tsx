@@ -1101,7 +1101,7 @@ const Candlestick = (props: any) => {
 };
 
 export default function App() {
-  const { user, loading: authLoading, accessState, signOut, subscription } = useAuth();
+  const { user, loading: authLoading, accessState, signOut } = useAuth();
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [cloudSyncStatus, setCloudSyncStatus] = useState<'idle' | 'loading' | 'synced' | 'error'>('idle');
   const [cloudHydrated, setCloudHydrated] = useState(false);
@@ -2585,7 +2585,8 @@ export default function App() {
   }, [annotations]);
 
   // Live same-account sync: watchlist, AI signals, portfolio, alerts, prefs across devices
-  const syncDocId = (subscription?.id || user?.email || '').trim();
+  // Always key by email so devices never split across uid vs email docs.
+  const syncDocId = (user?.email || '').trim().toLowerCase();
 
   useEffect(() => {
     if (!syncDocId || accessState !== 'active') {
@@ -2603,27 +2604,61 @@ export default function App() {
     lastSyncFingerprintRef.current = '';
     lastWatchlistFpRef.current = '';
 
+    const applyWatchlistFromCloud = (
+      cloudWatchlist: unknown,
+      isLiveRemote: boolean
+    ): 'applied' | 'kept-local' | 'same' => {
+      if (!Array.isArray(cloudWatchlist)) return 'same';
+      const remote = normalizeWatchlist(cloudWatchlist);
+      const local = loadWatchlist();
+      const remoteFp = watchlistFingerprint(remote);
+      const localFp = watchlistFingerprint(local);
+      if (remoteFp === localFp) {
+        lastWatchlistFpRef.current = remoteFp;
+        return 'same';
+      }
+      // First hydrate: empty cloud must not wipe a populated local list
+      if (!isLiveRemote && remote.length === 0 && local.length > 0) {
+        return 'kept-local';
+      }
+      saveWatchlist(remote, { silent: true });
+      lastWatchlistFpRef.current = remoteFp;
+      notifyAccountDataChanged('watchlist', 'remote');
+      return 'applied';
+    };
+
     const unsub = subscribeUserData(
       syncDocId,
       (snap) => {
         const cloud = snap.data;
         const fp = accountSyncFingerprint(cloud);
+        const isLiveRemote = cloudHydratedRef.current;
 
-        // Ignore echo from our own in-flight / just-completed write
+        // Pure echo of what we already applied/saved — still merge watchlist
         if (fp === lastSyncFingerprintRef.current) {
           if (!cloudHydratedRef.current) {
             cloudHydratedRef.current = true;
             setCloudHydrated(true);
           }
+          applyWatchlistFromCloud(cloud.watchlist, isLiveRemote);
           setCloudSyncStatus('synced');
           return;
         }
+
+        // While a full-blob save is in flight, STILL apply watchlist/portfolio/signals.
+        // Skipping here previously dropped cross-device watchlist updates.
         if (suppressCloudSaveRef.current) {
-          // Adopt server truth while our write is settling — don't skip forever
-          lastSyncFingerprintRef.current = fp;
-          if (Array.isArray(cloud.watchlist)) {
-            lastWatchlistFpRef.current = watchlistFingerprint(normalizeWatchlist(cloud.watchlist));
+          applyWatchlistFromCloud(cloud.watchlist, true);
+          if (Array.isArray(cloud.portfolio)) {
+            savePortfolio(cloud.portfolio, { silent: true });
+            notifyAccountDataChanged('portfolio', 'remote');
           }
+          if (Array.isArray(cloud.signalCache)) {
+            saveSignalCache(cloud.signalCache, { silent: true });
+            setSignalCache(cloud.signalCache);
+            notifyAccountDataChanged('signals', 'remote');
+          }
+          lastSyncFingerprintRef.current = fp;
           if (!cloudHydratedRef.current) {
             cloudHydratedRef.current = true;
             setCloudHydrated(true);
@@ -2632,10 +2667,8 @@ export default function App() {
           return;
         }
 
-        const isLiveRemote = cloudHydratedRef.current;
         suppressCloudSaveRef.current = true;
 
-        // Cloud wins when field is present; null = never synced → keep local for first upload
         if (Array.isArray(cloud.alerts)) {
           setAlerts(cloud.alerts as PriceAlert[]);
           try {
@@ -2682,25 +2715,17 @@ export default function App() {
             /* ignore */
           }
         }
-        if (Array.isArray(cloud.watchlist)) {
-          const remote = normalizeWatchlist(cloud.watchlist);
-          const local = loadWatchlist();
-          // First hydrate: never let an empty cloud wipe a populated local watchlist
-          if (!isLiveRemote && remote.length === 0 && local.length > 0) {
-            lastWatchlistFpRef.current = watchlistFingerprint(local);
-          } else if (watchlistFingerprint(remote) !== watchlistFingerprint(local)) {
-            saveWatchlist(remote, { silent: true });
-            lastWatchlistFpRef.current = watchlistFingerprint(remote);
-          } else {
-            lastWatchlistFpRef.current = watchlistFingerprint(remote);
-          }
-        }
+
+        const watchlistAction = applyWatchlistFromCloud(cloud.watchlist, isLiveRemote);
+
         if (Array.isArray(cloud.portfolio)) {
           savePortfolio(cloud.portfolio, { silent: true });
+          if (isLiveRemote) notifyAccountDataChanged('portfolio', 'remote');
         }
         if (Array.isArray(cloud.signalCache)) {
           saveSignalCache(cloud.signalCache, { silent: true });
           setSignalCache(cloud.signalCache);
+          if (isLiveRemote) notifyAccountDataChanged('signals', 'remote');
         }
         if (cloud.prefs) {
           if (cloud.prefs.refreshMode === 'auto' || cloud.prefs.refreshMode === 'manual') {
@@ -2739,12 +2764,28 @@ export default function App() {
         cloudHydratedRef.current = true;
         setCloudHydrated(true);
         setCloudSyncStatus('synced');
-        notifyAccountDataChanged('all');
+        if (!isLiveRemote) {
+          notifyAccountDataChanged('all', 'remote');
+        }
 
         window.setTimeout(() => {
           suppressCloudSaveRef.current = false;
-          // First hydrate: push local-only fields that cloud never had (null)
           if (!isLiveRemote && syncDocId) {
+            if (watchlistAction === 'kept-local' || !Array.isArray(cloud.watchlist)) {
+              const wl = loadWatchlist();
+              lastWatchlistFpRef.current = '';
+              setCloudSyncStatus('loading');
+              saveUserData(syncDocId, { watchlist: wl })
+                .then(() => {
+                  lastWatchlistFpRef.current = watchlistFingerprint(wl);
+                  setCloudSyncStatus('synced');
+                })
+                .catch((err) => {
+                  console.error('Firestore watchlist seed upload failed:', err);
+                  setCloudSyncStatus('error');
+                });
+            }
+
             let storedAlerts: unknown[] = [];
             let storedAutoRsi = false;
             let storedWeights: Record<string, number> | null = null;
@@ -2774,11 +2815,7 @@ export default function App() {
               modelWeights: cloud.modelWeights || storedWeights,
               trendlines: Array.isArray(cloud.trendlines) ? cloud.trendlines : storedTrends,
               annotations: Array.isArray(cloud.annotations) ? cloud.annotations : storedAnnotations,
-              watchlist: Array.isArray(cloud.watchlist)
-                ? cloud.watchlist.length === 0 && loadWatchlist().length > 0
-                  ? loadWatchlist()
-                  : normalizeWatchlist(cloud.watchlist)
-                : loadWatchlist(),
+              watchlist: loadWatchlist(),
               portfolio: Array.isArray(cloud.portfolio) ? cloud.portfolio : loadPortfolio(),
               signalCache: Array.isArray(cloud.signalCache) ? cloud.signalCache : loadSignalCache(),
               prefs: {
@@ -2786,23 +2823,14 @@ export default function App() {
                 autoRefreshIntervalSec: loadAutoRefreshIntervalSec(),
                 dashboardMarket: loadDashboardMarket(),
                 sidebarCollapsed: loadSidebarCollapsed(),
-                analysisHorizon:
-                  typeof cloud.prefs?.analysisHorizon === 'string' && cloud.prefs.analysisHorizon
-                    ? cloud.prefs.analysisHorizon
-                    : undefined,
                 ...(cloud.prefs || {}),
               },
             };
-
-            lastWatchlistFpRef.current = watchlistFingerprint(
-              normalizeWatchlist(payload.watchlist || [])
-            );
 
             const nextFp = accountSyncFingerprint(payload);
             if (nextFp !== lastSyncFingerprintRef.current) {
               lastSyncFingerprintRef.current = nextFp;
               suppressCloudSaveRef.current = true;
-              setCloudSyncStatus('loading');
               saveUserData(syncDocId, payload)
                 .then(() => setCloudSyncStatus('synced'))
                 .catch((err) => {
@@ -2815,20 +2843,9 @@ export default function App() {
                     suppressCloudSaveRef.current = false;
                   }, 500);
                 });
-            } else {
-              // Still ensure watchlist field exists in cloud even if full blob matched oddly
-              const wl = loadWatchlist();
-              const wlFp = watchlistFingerprint(wl);
-              if (wlFp !== watchlistFingerprint(normalizeWatchlist(cloud.watchlist || []))) {
-                lastWatchlistFpRef.current = wlFp;
-                saveUserData(syncDocId, { watchlist: wl }).catch((err) => {
-                  console.error('Firestore watchlist upload failed:', err);
-                  setCloudSyncStatus('error');
-                });
-              }
             }
           }
-        }, isLiveRemote ? 900 : 250);
+        }, isLiveRemote ? 400 : 200);
       },
       (err) => {
         console.error('Firestore sync listener failed:', err);
@@ -2839,8 +2856,6 @@ export default function App() {
     );
 
     return () => unsub();
-    // alerts/modelWeights etc. intentionally omitted — first-upload closure uses latest via loaders + state at fire time
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [syncDocId, accessState]);
 
   const refreshUsage = async () => {
@@ -2969,7 +2984,10 @@ export default function App() {
   // Watchlist / portfolio / prefs localStorage writes → cloud
   useEffect(() => {
     if (!syncDocId || accessState !== 'active' || !cloudHydrated) return;
-    return subscribeAccountDataChanged((kind) => {
+    return subscribeAccountDataChanged((kind, source) => {
+      // Remote applies already wrote localStorage — refresh UI only, do not echo back
+      if (source === 'remote') return;
+
       if (kind === 'watchlist' || kind === 'all') {
         if (watchlistPushTimerRef.current) window.clearTimeout(watchlistPushTimerRef.current);
         watchlistPushTimerRef.current = window.setTimeout(() => {
@@ -7986,7 +8004,7 @@ export default function App() {
             <div className="flex flex-col md:items-end gap-2 text-center md:text-right">
               <span className="text-gray-500">
                 Quantum Node · Powered by Google Gemini ·{' '}
-                <span className="font-mono text-emerald-500/70">watchlist-sync-0814</span>
+                <span className="font-mono text-emerald-500/70">wl-fix-0814b</span>
               </span>
               <LegalLinks className="justify-center md:justify-end" />
             </div>

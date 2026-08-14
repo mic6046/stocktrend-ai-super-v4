@@ -13,20 +13,27 @@ export type AccountDataKind =
   | 'prefs'
   | 'all';
 
-export function notifyAccountDataChanged(kind: AccountDataKind = 'all') {
+export type AccountDataSource = 'local' | 'remote';
+
+export function notifyAccountDataChanged(
+  kind: AccountDataKind = 'all',
+  source: AccountDataSource = 'local'
+) {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(
-    new CustomEvent(ACCOUNT_DATA_EVENT, { detail: { kind, at: Date.now() } })
+    new CustomEvent(ACCOUNT_DATA_EVENT, { detail: { kind, source, at: Date.now() } })
   );
 }
 
 export function subscribeAccountDataChanged(
-  handler: (kind: AccountDataKind) => void
+  handler: (kind: AccountDataKind, source: AccountDataSource) => void
 ): () => void {
   if (typeof window === 'undefined') return () => {};
   const onEvent = (ev: Event) => {
-    const detail = (ev as CustomEvent).detail as { kind?: AccountDataKind } | undefined;
-    handler(detail?.kind || 'all');
+    const detail = (ev as CustomEvent).detail as
+      | { kind?: AccountDataKind; source?: AccountDataSource }
+      | undefined;
+    handler(detail?.kind || 'all', detail?.source === 'remote' ? 'remote' : 'local');
   };
   window.addEventListener(ACCOUNT_DATA_EVENT, onEvent);
   return () => window.removeEventListener(ACCOUNT_DATA_EVENT, onEvent);
