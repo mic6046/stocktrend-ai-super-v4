@@ -36,6 +36,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Markets',
     items: [
       { id: 'DASHBOARD', label: 'Dashboard', icon: LayoutDashboard },
+      { id: 'ANALYSIS', label: 'Analysis', icon: LineChart },
       { id: 'FIND_TRADES', label: 'Find Trades', icon: Search },
       { id: 'AI_SIGNALS', label: 'AI Signals', icon: Bot },
     ],
@@ -45,7 +46,6 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: 'WATCHLIST', label: 'Watchlist', icon: Star },
       { id: 'PORTFOLIO', label: 'Portfolio', icon: Briefcase },
-      { id: 'ANALYSIS', label: 'Analysis', icon: LineChart },
       { id: 'NEWS_CENTER', label: 'News', icon: Newspaper },
     ],
   },

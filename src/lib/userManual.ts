@@ -42,7 +42,7 @@ export const MANUAL_SECTIONS: ManualSection[] = [
     title: 'Getting started',
     body: [
       'Sign in with Google or email/password. An active subscription (or developer access) unlocks the full terminal.',
-      'Use the left sidebar to move between Dashboard, Find Trades, AI Signals, Watchlist, Portfolio, Analysis, News, Alerts, and Settings.',
+      'Use the left sidebar to move between Dashboard, Analysis, Find Trades, AI Signals, Watchlist, Portfolio, News, Alerts, and Settings.',
       'On phones, open the menu button to show the same navigation.',
     ],
   },
