@@ -12,8 +12,8 @@ export const DASHBOARD_MARKETS: { key: DashboardMarket; label: string; short: st
 
 export const DASHBOARD_INDEX_SYMBOLS: Record<Exclude<DashboardMarket, 'ALL'>, string[]> = {
   US: ['^GSPC', '^IXIC', '^DJI', '^RUT'],
-  HK: ['^HSI', '^KS11'],
-  JP: ['^N225', '^KS11'],
+  HK: ['^HSI'],
+  JP: ['^N225'],
   EU: ['^STOXX50E', '^FTSE', '^GDAXI', '^FCHI'],
 };
 

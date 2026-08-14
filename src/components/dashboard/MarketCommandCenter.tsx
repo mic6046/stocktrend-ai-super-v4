@@ -1,7 +1,8 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { TrendingUp, TrendingDown, Sparkles, Eye, ShieldAlert, ArrowRight } from 'lucide-react';
 import { GlassCard, SectionLabel } from '../analysis/GlassCard';
 import { cn } from '../../lib/utils';
+import { apiUrl, loggedFetch } from '../../lib/api';
 import {
   DASHBOARD_ALL_INDEX_SYMBOLS,
   DASHBOARD_INDEX_SYMBOLS,
@@ -54,6 +55,15 @@ const INDEX_LABEL: Record<string, string> = {
   '^KS11': 'KOSPI',
 };
 
+/** Primary benchmark whose chart trend line drives Market Outlook. */
+export const MARKET_TREND_SYMBOL: Record<DashboardMarket, string> = {
+  US: '^GSPC',
+  HK: '^HSI',
+  JP: '^N225',
+  EU: '^STOXX50E',
+  ALL: '^GSPC',
+};
+
 function formatPrice(price: number | undefined, market: DashboardMarket, ticker?: string): string {
   if (price == null || !Number.isFinite(price)) return '—';
   const m =
@@ -83,88 +93,130 @@ function headlineText(raw: unknown): string | null {
   return null;
 }
 
-/** Primary benchmark for each dashboard market — trend follows this index's day move. */
-const MARKET_TREND_SYMBOL: Record<DashboardMarket, string> = {
-  US: '^GSPC',
-  HK: '^HSI',
-  JP: '^N225',
-  EU: '^STOXX50E',
-  ALL: '^GSPC',
-};
-
-function averageChangePct(indices: MarketIndex[]): number | null {
-  const vals = indices
-    .map((i) => i.regularMarketChangePercent)
-    .filter((n): n is number => typeof n === 'number' && Number.isFinite(n));
-  if (!vals.length) return null;
-  return vals.reduce((a, b) => a + b, 0) / vals.length;
+function sma(values: number[], period: number): number | null {
+  if (values.length < period) return null;
+  const slice = values.slice(-period);
+  return slice.reduce((a, b) => a + b, 0) / slice.length;
 }
 
-function marketTrendOutlook(
-  indices: MarketIndex[],
-  sentiment: any | null,
-  market: DashboardMarket
-): {
+/** Simple linear slope of last N closes as % of price per bar. */
+function trendSlopePct(closes: number[], lookback = 20): number | null {
+  const n = Math.min(lookback, closes.length);
+  if (n < 5) return null;
+  const y = closes.slice(-n);
+  const xMean = (n - 1) / 2;
+  const yMean = y.reduce((a, b) => a + b, 0) / n;
+  let num = 0;
+  let den = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = i - xMean;
+    num += dx * (y[i] - yMean);
+    den += dx * dx;
+  }
+  if (den === 0 || yMean === 0) return null;
+  const slopePerBar = num / den;
+  return (slopePerBar / yMean) * 100;
+}
+
+export type TrendOutlook = {
   label: 'BULLISH' | 'NEUTRAL' | 'BEARISH';
   confidence: number;
   why: string;
-} {
-  const primarySym = MARKET_TREND_SYMBOL[market];
-  const primary =
-    market === 'ALL'
-      ? null
-      : indices.find((i) => i.symbol === primarySym) || null;
+};
 
-  const pct =
-    market === 'ALL'
-      ? averageChangePct(indices)
-      : primary?.regularMarketChangePercent != null &&
-          Number.isFinite(primary.regularMarketChangePercent)
-        ? primary.regularMarketChangePercent
-        : averageChangePct(indices);
+/**
+ * Market outlook from the benchmark's chart trend line (price vs SMA20 + slope),
+ * with today's session move as confirmation — not headline keywords.
+ */
+export function outlookFromTrendLine(params: {
+  name: string;
+  closes: number[];
+  todayPct: number | null;
+  headline?: string | null;
+}): TrendOutlook {
+  const { name, closes, todayPct, headline } = params;
+  const last = closes.length ? closes[closes.length - 1] : null;
+  const ma20 = sma(closes, Math.min(20, closes.length));
+  const slope = trendSlopePct(closes, 20);
+  const newsBit = headline ? ` News: ${headline}` : '';
 
-  const name =
-    market === 'ALL'
-      ? 'global benchmarks'
-      : primary?.shortName || INDEX_LABEL[primarySym] || primarySym;
-
-  const pickKey = market === 'HK' ? 'HK' : 'US';
-  const block = sentiment?.[pickKey];
-  const topHeadline = Array.isArray(block?.headlines)
-    ? headlineText(block.headlines[0])
-    : headlineText(block?.headlines);
-
-  if (pct == null) {
+  if (last == null || ma20 == null) {
+    if (todayPct == null) {
+      return {
+        label: 'NEUTRAL',
+        confidence: 50,
+        why: `Waiting for ${name} chart data to read the trend line.`,
+      };
+    }
+    const pctStr = `${todayPct >= 0 ? '+' : ''}${todayPct.toFixed(2)}%`;
+    if (todayPct > 0.15) {
+      return {
+        label: 'BULLISH',
+        confidence: 60,
+        why: `${name} is up ${pctStr} today (trend line loading).${newsBit}`,
+      };
+    }
+    if (todayPct < -0.15) {
+      return {
+        label: 'BEARISH',
+        confidence: 60,
+        why: `${name} is down ${pctStr} today (trend line loading).${newsBit}`,
+      };
+    }
     return {
       label: 'NEUTRAL',
-      confidence: 50,
-      why: 'Waiting for live index quotes to determine market trend.',
+      confidence: 55,
+      why: `${name} is flat today (${pctStr}).${newsBit}`,
     };
   }
 
-  const abs = Math.abs(pct);
-  const confidence = Math.round(Math.min(92, Math.max(52, 55 + abs * 12)));
-  const pctStr = `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
-  const newsBit = topHeadline ? ` News lean: ${topHeadline}` : '';
+  const vsMaPct = ((last - ma20) / ma20) * 100;
+  let score = 0;
+  if (vsMaPct > 0.35) score += 2;
+  else if (vsMaPct < -0.35) score -= 2;
+  else if (vsMaPct > 0.1) score += 1;
+  else if (vsMaPct < -0.1) score -= 1;
 
-  if (pct > 0.15) {
+  if (slope != null) {
+    if (slope > 0.04) score += 2;
+    else if (slope < -0.04) score -= 2;
+    else if (slope > 0.01) score += 1;
+    else if (slope < -0.01) score -= 1;
+  }
+
+  // Today's tape confirms / softens the trend line (does not override a clear trend alone)
+  if (todayPct != null) {
+    if (todayPct > 0.4) score += 1;
+    else if (todayPct < -0.4) score -= 1;
+  }
+
+  const absStrength = Math.abs(vsMaPct) + Math.abs(slope || 0) * 8 + Math.abs(todayPct || 0) * 0.5;
+  const confidence = Math.round(Math.min(92, Math.max(55, 58 + absStrength * 4)));
+
+  const todayStr =
+    todayPct != null ? ` Today ${todayPct >= 0 ? '+' : ''}${todayPct.toFixed(2)}%.` : '';
+  const maStr = ` vs 20-day avg ${vsMaPct >= 0 ? '+' : ''}${vsMaPct.toFixed(2)}%`;
+  const slopeStr =
+    slope != null ? `; trend-line slope ${slope >= 0 ? '+' : ''}${slope.toFixed(3)}%/bar` : '';
+
+  if (score >= 2) {
     return {
       label: 'BULLISH',
       confidence,
-      why: `${name} is up ${pctStr} today — market trend is positive.${newsBit}`,
+      why: `${name} trend line is rising (${maStr}${slopeStr}).${todayStr}${newsBit}`,
     };
   }
-  if (pct < -0.15) {
+  if (score <= -2) {
     return {
       label: 'BEARISH',
       confidence,
-      why: `${name} is down ${pctStr} today — market trend is negative.${newsBit}`,
+      why: `${name} trend line is falling (${maStr}${slopeStr}).${todayStr}${newsBit}`,
     };
   }
   return {
     label: 'NEUTRAL',
-    confidence: Math.min(confidence, 62),
-    why: `${name} is roughly flat (${pctStr}) — no strong directional trend today.${newsBit}`,
+    confidence: Math.min(confidence, 68),
+    why: `${name} trend line is sideways (${maStr}${slopeStr}).${todayStr}${newsBit}`,
   };
 }
 
@@ -249,7 +301,6 @@ function StockTable({
 export function MarketCommandCenter({
   indices,
   sentiment,
-  loadingSentiment,
   opportunities,
   watch,
   riskAlerts,
@@ -262,10 +313,76 @@ export function MarketCommandCenter({
     return resolveIndices(indices, symbols).slice(0, 4);
   }, [indices, market]);
 
-  const outlook = useMemo(
-    () => marketTrendOutlook(core, sentiment, market),
-    [core, sentiment, market]
-  );
+  const trendSym = MARKET_TREND_SYMBOL[market];
+  const primaryQuote =
+    indices.find((i) => i.symbol === trendSym) ||
+    core.find((i) => i.symbol === trendSym) ||
+    core[0] ||
+    null;
+
+  const [closes, setCloses] = useState<number[]>([]);
+  const [loadingTrend, setLoadingTrend] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      setLoadingTrend(true);
+      try {
+        const url = apiUrl(
+          `/api/stock/${encodeURIComponent(trendSym)}?range=3mo&interval=1d`
+        );
+        const res = await loggedFetch(url, {
+          __qnMeta: { reason: 'market-trend', userAction: 'Dashboard trend line' },
+        });
+        const data = await res.json();
+        const hist = Array.isArray(data?.history) ? data.history : [];
+        const series = hist
+          .map((h: any) => Number(h?.close))
+          .filter((n: number) => Number.isFinite(n) && n > 0);
+        if (!cancelled) setCloses(series);
+      } catch {
+        if (!cancelled) setCloses([]);
+      } finally {
+        if (!cancelled) setLoadingTrend(false);
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [trendSym]);
+
+  const outlook = useMemo(() => {
+    const name = primaryQuote?.shortName || INDEX_LABEL[trendSym] || trendSym;
+    const todayPct =
+      primaryQuote?.regularMarketChangePercent != null &&
+      Number.isFinite(primaryQuote.regularMarketChangePercent)
+        ? primaryQuote.regularMarketChangePercent
+        : null;
+    const pickKey = market === 'HK' ? 'HK' : 'US';
+    const block = sentiment?.[pickKey];
+    const topHeadline = Array.isArray(block?.headlines)
+      ? headlineText(block.headlines[0])
+      : headlineText(block?.headlines);
+
+    // Prefer live quote as last point on the trend line when available
+    const series = [...closes];
+    if (
+      primaryQuote?.regularMarketPrice != null &&
+      Number.isFinite(primaryQuote.regularMarketPrice) &&
+      primaryQuote.regularMarketPrice > 0
+    ) {
+      if (series.length) series[series.length - 1] = primaryQuote.regularMarketPrice;
+      else series.push(primaryQuote.regularMarketPrice);
+    }
+
+    return outlookFromTrendLine({
+      name,
+      closes: series,
+      todayPct,
+      headline: topHeadline,
+    });
+  }, [closes, primaryQuote, sentiment, market, trendSym]);
 
   const filterRows = (rows: CommandStockRow[]) =>
     rows.filter((r) => tickerBelongsToMarket(r.ticker, market));
@@ -286,7 +403,7 @@ export function MarketCommandCenter({
           </h2>
           <p className="mt-1 text-[13px] text-gray-500 max-w-xl">
             Use <span className="text-emerald-400 font-semibold">Select market</span> above the ticker strip to switch
-            region. Indices and AI lists update with your choice.
+            region. Outlook follows that market’s benchmark trend line.
           </p>
         </div>
         <button
@@ -301,7 +418,8 @@ export function MarketCommandCenter({
       <div
         className={cn(
           'grid gap-3',
-          core.length <= 2 ? 'grid-cols-2' : 'grid-cols-2 lg:grid-cols-4'
+          core.length <= 2 ? 'grid-cols-2' : 'grid-cols-2 lg:grid-cols-4',
+          core.length === 1 && 'grid-cols-1 max-w-sm'
         )}
       >
         {core.map((idx) => {
@@ -336,7 +454,9 @@ export function MarketCommandCenter({
         </SectionLabel>
         <div className="mt-3 flex flex-col sm:flex-row sm:items-center gap-4">
           <div className="shrink-0">
-            <p className="text-[10px] uppercase tracking-wider text-gray-500">Market Trend</p>
+            <p className="text-[10px] uppercase tracking-wider text-gray-500">
+              Trend line · {INDEX_LABEL[trendSym] || trendSym}
+            </p>
             <p
               className={cn(
                 'mt-1 text-2xl font-black tracking-wide',
@@ -345,15 +465,15 @@ export function MarketCommandCenter({
                 outlook.label === 'NEUTRAL' && 'text-amber-300'
               )}
             >
-              {outlook.label}
+              {loadingTrend && !closes.length ? '…' : outlook.label}
             </p>
             <p className="mt-1 text-[12px] font-mono text-cyan-300">Confidence {outlook.confidence}%</p>
           </div>
           <p className="text-[13px] text-gray-300 leading-relaxed flex-1">{outlook.why}</p>
         </div>
         <p className="mt-3 text-[11px] text-gray-500">
-          Plain language: trend follows the main index day move for this market (e.g. Hang Seng for HK) — not a trade
-          order. Headlines are secondary context only.
+          Plain language: outlook follows this market’s benchmark chart trend line (20-day average + slope). Today’s %
+          confirms; headlines are secondary — not a trade order.
         </p>
       </GlassCard>
 

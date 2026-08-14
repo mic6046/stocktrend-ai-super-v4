@@ -47,45 +47,26 @@ export function SubscriptionPlansSummary({
       ? 'Developer'
       : planDisplayName(currentPlanId, currentPlanLabel);
     return (
-      <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 overflow-hidden">
-        <div className="px-2.5 py-1.5 border-b border-amber-500/20 flex items-center gap-1.5">
+      <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 px-2.5 py-2">
+        <div className="flex items-center gap-1.5 min-w-0">
           <CreditCard className="h-3.5 w-3.5 text-amber-400 shrink-0" />
-          <p className="text-[10px] font-mono uppercase tracking-wider text-amber-200/90 truncate">
-            Subscription
-          </p>
-        </div>
-        <div className="px-2.5 py-2 space-y-2">
-          <p className="text-[11px] text-gray-300">
-            Plan:{' '}
+          <p className="text-[10px] text-gray-300 truncate min-w-0">
+            <span className="font-mono uppercase tracking-wider text-amber-200/80">Plan</span>{' '}
             <span className="font-bold text-emerald-300">{label}</span>
           </p>
-          <div className="grid grid-cols-2 gap-1.5">
-            {PRICING_PLANS.map((plan) => (
-              <div
-                key={plan.id}
-                className={cn(
-                  'rounded-lg border px-1.5 py-1.5 text-center',
-                  plan.highlight ? 'border-emerald-500/35 bg-emerald-500/10' : 'border-white/10 bg-black/30'
-                )}
-              >
-                <p className="text-[9px] font-mono uppercase tracking-wider text-gray-500">
-                  {plan.name}
-                </p>
-                <p className="text-[11px] font-bold text-white leading-tight">{plan.price}</p>
-                <p className="text-[8px] text-gray-500">{plan.period}</p>
-              </div>
-            ))}
-          </div>
-          {onCta && (
-            <button
-              type="button"
-              onClick={onCta}
-              className="w-full min-h-[36px] rounded-lg border border-amber-500/40 bg-amber-500/15 text-[11px] font-bold uppercase tracking-wider text-amber-100 hover:bg-amber-500/25 cursor-pointer"
-            >
-              {ctaLabel || 'View plans'}
-            </button>
-          )}
         </div>
+        <p className="mt-1 text-[9px] text-gray-500 leading-tight">
+          Basic RM 199 · Pro RM 349
+        </p>
+        {onCta && (
+          <button
+            type="button"
+            onClick={onCta}
+            className="mt-1.5 w-full min-h-[32px] rounded-lg border border-amber-500/35 bg-amber-500/10 text-[10px] font-bold uppercase tracking-wider text-amber-100 hover:bg-amber-500/20 cursor-pointer"
+          >
+            {ctaLabel || 'Manage plan'}
+          </button>
+        )}
       </div>
     );
   }

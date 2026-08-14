@@ -52,7 +52,6 @@ type AppSidebarProps = {
   usageSlot?: React.ReactNode;
   chatContext: AssistantChatContext;
   onChatUsageUpdate?: (usage: UsageSnapshot) => void;
-  /** Current subscription plan for the sign-bar plans strip */
   planLabel?: string | null;
   planId?: string | null;
   planUnlimited?: boolean;
@@ -87,7 +86,7 @@ export function AppSidebar({
   const navBody = (mode: 'desktop' | 'mobile') => {
     const isCollapsed = mode === 'desktop' && collapsed;
     return (
-      <div className="flex h-full flex-col">
+      <div className="flex h-full min-h-0 flex-col overflow-hidden">
         <div
           className={cn(
             'flex items-center border-b border-white/5 shrink-0',
@@ -121,7 +120,7 @@ export function AppSidebar({
           )}
         </div>
 
-        <nav className="flex-1 overflow-y-auto py-2 px-2 space-y-0.5">
+        <nav className="flex-1 min-h-0 overflow-y-auto py-2 px-2 space-y-0.5 overscroll-contain">
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             const active = activePage === item.id;
@@ -133,7 +132,7 @@ export function AppSidebar({
                 onClick={() => go(item.id)}
                 title={item.label}
                 className={cn(
-                  'relative w-full flex items-center gap-3 rounded-xl text-left transition-colors cursor-pointer min-h-[44px]',
+                  'relative w-full flex items-center gap-3 rounded-xl text-left transition-colors cursor-pointer min-h-[40px]',
                   isCollapsed ? 'justify-center px-2' : 'px-3',
                   active
                     ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/35'
@@ -160,112 +159,103 @@ export function AppSidebar({
           })}
         </nav>
 
+        {/* Bottom stack — compact, scrolls if viewport is short */}
         <div
           className={cn(
-            'border-t border-white/5 shrink-0 flex flex-col min-h-0',
-            isCollapsed ? 'p-2 gap-2' : 'p-3 gap-2'
+            'border-t border-white/5 shrink-0 overflow-y-auto overscroll-contain space-y-2',
+            isCollapsed ? 'p-2' : 'p-2.5',
+            'max-h-[min(46vh,22rem)]'
           )}
         >
           {!isCollapsed && userEmail && (
-            <div className="px-1 space-y-1.5 shrink-0">
+            <div className="px-0.5 space-y-1.5">
               <div className="flex items-center gap-2 min-w-0">
                 <Shield className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
                 <p className="text-[10px] text-gray-400 font-mono truncate" title={userEmail}>
                   {userEmail}
                 </p>
               </div>
-              {usageSlot && <div className="overflow-hidden">{usageSlot}</div>}
+              {usageSlot && <div className="overflow-x-auto overflow-y-hidden -mx-0.5">{usageSlot}</div>}
             </div>
           )}
 
-          <div className="min-h-0 overflow-y-auto space-y-2">
-            <SidebarAiChat
-              activePage={activePage}
-              collapsed={isCollapsed}
-              onExpandSidebar={() => onCollapsedChange(false)}
-              userEmail={userEmail}
-              onSignIn={() => {
+          <SubscriptionPlansSummary
+            variant="sidebar"
+            collapsed={isCollapsed}
+            currentPlanLabel={planLabel}
+            currentPlanId={planId}
+            unlimited={planUnlimited}
+            onExpand={() => onCollapsedChange(false)}
+            onCta={() => {
+              onOpenPlans?.();
+              onMobileOpenChange(false);
+            }}
+            ctaLabel="Manage plan"
+          />
+
+          <SidebarAiChat
+            activePage={activePage}
+            collapsed={isCollapsed}
+            onExpandSidebar={() => onCollapsedChange(false)}
+            userEmail={userEmail}
+            onSignIn={() => {
+              onSignIn();
+              onMobileOpenChange(false);
+            }}
+            chatContext={chatContext}
+            onUsageUpdate={onChatUsageUpdate}
+          />
+
+          {!userEmail ? (
+            <button
+              type="button"
+              onClick={() => {
                 onSignIn();
                 onMobileOpenChange(false);
               }}
-              chatContext={chatContext}
-              onUsageUpdate={onChatUsageUpdate}
-            />
-          </div>
-
-          {/* Sign bar — subscription always sits with Sign in/out */}
-          <div className="shrink-0 space-y-2 pt-1 border-t border-white/5">
-            <SubscriptionPlansSummary
-              variant="sidebar"
-              collapsed={isCollapsed}
-              currentPlanLabel={planLabel}
-              currentPlanId={planId}
-              unlimited={planUnlimited}
-              onExpand={() => onCollapsedChange(false)}
-              onCta={() => {
-                onOpenPlans?.();
+              disabled={authLoading}
+              title="Sign in"
+              className={cn(
+                'w-full inline-flex items-center justify-center gap-2 min-h-[40px] rounded-xl border border-emerald-500/40 bg-emerald-500/15 font-bold text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50 cursor-pointer',
+                isCollapsed ? 'px-2' : 'px-3 text-[12px]'
+              )}
+            >
+              <LogIn className="h-4 w-4 shrink-0" />
+              {!isCollapsed && <span>Sign in</span>}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                onSignOut();
                 onMobileOpenChange(false);
               }}
-              ctaLabel="Manage plan"
+              title="Sign out"
+              className={cn(
+                'w-full inline-flex items-center justify-center gap-2 min-h-[40px] rounded-xl border border-rose-500/30 bg-rose-500/10 font-bold text-rose-300 hover:bg-rose-500/20 cursor-pointer',
+                isCollapsed ? 'px-2' : 'px-3 text-[12px]'
+              )}
+            >
+              <LogOut className="h-4 w-4 shrink-0" />
+              {!isCollapsed && <span>Sign out</span>}
+            </button>
+          )}
+
+          {!isCollapsed ? (
+            <LegalLinks
+              className="flex-wrap gap-x-2 gap-y-1 px-0.5 text-[9px]"
+              linkClassName="text-gray-500 hover:text-emerald-400 underline-offset-2 hover:underline transition-colors cursor-pointer"
             />
-
-            {!userEmail ? (
-              <button
-                type="button"
-                onClick={() => {
-                  onSignIn();
-                  onMobileOpenChange(false);
-                }}
-                disabled={authLoading}
-                title="Sign in"
-                className={cn(
-                  'w-full inline-flex items-center justify-center gap-2 min-h-[44px] rounded-xl border border-emerald-500/40 bg-emerald-500/15 font-bold text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50 cursor-pointer',
-                  isCollapsed ? 'px-2' : 'px-3 text-[12px]'
-                )}
-              >
-                <LogIn className="h-4 w-4 shrink-0" />
-                {!isCollapsed && <span>Sign in</span>}
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => {
-                  onSignOut();
-                  onMobileOpenChange(false);
-                }}
-                title="Sign out"
-                className={cn(
-                  'w-full inline-flex items-center justify-center gap-2 min-h-[44px] rounded-xl border border-rose-500/30 bg-rose-500/10 font-bold text-rose-300 hover:bg-rose-500/20 cursor-pointer',
-                  isCollapsed ? 'px-2' : 'px-3 text-[12px]'
-                )}
-              >
-                <LogOut className="h-4 w-4 shrink-0" />
-                {!isCollapsed && <span>Sign out</span>}
-              </button>
-            )}
-
-            {!isCollapsed && (
-              <div className="pt-0.5 px-0.5">
-                <p className="text-[9px] font-mono uppercase tracking-wider text-gray-600 mb-1.5">
-                  Legal
-                </p>
-                <LegalLinks
-                  className="flex-col items-start gap-y-1.5 text-[10px]"
-                  linkClassName="text-gray-500 hover:text-emerald-400 underline-offset-2 hover:underline transition-colors cursor-pointer text-left"
-                />
-              </div>
-            )}
-            {isCollapsed && (
-              <button
-                type="button"
-                onClick={() => openLegalDoc('risk')}
-                className="w-full text-center text-[8px] text-gray-500 hover:text-emerald-400 leading-tight px-0.5 py-1 cursor-pointer"
-                title="Risk Warning · Terms of Use · Privacy Policy"
-              >
-                Legal
-              </button>
-            )}
-          </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => openLegalDoc('risk')}
+              className="w-full text-center text-[8px] text-gray-500 hover:text-emerald-400 leading-tight px-0.5 py-1 cursor-pointer"
+              title="Risk Warning · Terms of Use · Privacy Policy"
+            >
+              Legal
+            </button>
+          )}
         </div>
       </div>
     );
@@ -275,8 +265,8 @@ export function AppSidebar({
     <>
       <aside
         className={cn(
-          'hidden lg:flex flex-col shrink-0 border-r border-white/5 bg-[#08080a]/95 backdrop-blur-md sticky top-0 h-screen z-30 transition-[width] duration-200',
-          collapsed ? 'w-16' : 'w-56'
+          'hidden lg:flex flex-col shrink-0 border-r border-white/5 bg-[#08080a]/95 backdrop-blur-md sticky top-0 h-screen max-h-screen overflow-hidden z-30 transition-[width] duration-200',
+          collapsed ? 'w-16' : 'w-60'
         )}
       >
         {navBody('desktop')}
@@ -290,7 +280,7 @@ export function AppSidebar({
             aria-label="Close sidebar backdrop"
             onClick={() => onMobileOpenChange(false)}
           />
-          <aside className="absolute left-0 top-0 bottom-0 w-[min(18rem,88vw)] bg-[#08080a] border-r border-white/10 shadow-2xl pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+          <aside className="absolute left-0 top-0 bottom-0 w-[min(19rem,90vw)] bg-[#08080a] border-r border-white/10 shadow-2xl pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] overflow-hidden">
             {navBody('mobile')}
           </aside>
         </div>

@@ -20,7 +20,7 @@ type SidebarAiChatProps = {
   onUsageUpdate?: (usage: UsageSnapshot) => void;
 };
 
-const MAX_VISIBLE = 4;
+const MAX_VISIBLE = 2;
 
 export function SidebarAiChat({
   activePage,
@@ -137,7 +137,7 @@ export function SidebarAiChat({
 
       <div
         ref={listRef}
-        className="h-[7.5rem] overflow-y-auto px-2 py-1.5 space-y-1.5 text-[11px] leading-snug"
+        className="h-[4.5rem] overflow-y-auto px-2 py-1.5 space-y-1.5 text-[11px] leading-snug"
       >
         {visible.length === 0 && !sending && (
           <p className="text-gray-600 italic">Ask about this page…</p>
