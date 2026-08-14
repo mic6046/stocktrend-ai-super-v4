@@ -22,8 +22,8 @@ export const PRICING_PLANS: PricingPlanCard[] = [
     blurb: 'Focused watchlist use with fair daily AI limits.',
     icon: 'rocket',
     features: [
-      '10 AI stock analyses per day',
-      '10 AI news summaries per day',
+      '20 AI stock analyses per day',
+      '20 AI news summaries per day',
       'Full charts, alerts, score & advisory',
       'Cloud sync across devices',
       'Cancel anytime',

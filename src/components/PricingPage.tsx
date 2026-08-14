@@ -12,8 +12,8 @@ const PLANS = PRICING_PLANS;
 const QUOTA_COMPARE = [
   {
     plan: 'Basic',
-    analyses: '10 / day',
-    news: '10 / day',
+    analyses: '20 / day',
+    news: '20 / day',
   },
   {
     plan: 'Pro',

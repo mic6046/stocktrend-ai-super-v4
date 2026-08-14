@@ -1,6 +1,6 @@
 /**
  * Daily AI usage quotas (MYT) for Quantum Node plans.
- * Basic: 10 analyses + 10 news / day
+ * Basic: 20 analyses + 20 news / day
  * Pro:   30 analyses + 30 news / day
  * Overage: Pack +12 analyses, Mini +5 analyses / +10 news
  *
@@ -39,7 +39,7 @@ export function dailyLimitsForPlan(plan: SubscriptionPlanId): {
   if (plan === 'pro_monthly') {
     return { analyses: 30, news: 30, planLabel: 'Pro' };
   }
-  return { analyses: 10, news: 10, planLabel: 'Basic' };
+  return { analyses: 20, news: 20, planLabel: 'Basic' };
 }
 
 function ensureFirebaseAdmin() {
