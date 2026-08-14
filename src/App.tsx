@@ -1101,7 +1101,7 @@ const Candlestick = (props: any) => {
 };
 
 export default function App() {
-  const { user, loading: authLoading, accessState, signOut } = useAuth();
+  const { user, loading: authLoading, accessState, signOut, subscription } = useAuth();
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [cloudSyncStatus, setCloudSyncStatus] = useState<'idle' | 'loading' | 'synced' | 'error'>('idle');
   const [cloudHydrated, setCloudHydrated] = useState(false);
@@ -2582,8 +2582,10 @@ export default function App() {
   }, [annotations]);
 
   // Live same-account sync: watchlist, AI signals, portfolio, alerts, prefs across devices
+  const syncDocId = (subscription?.id || user?.email || '').trim();
+
   useEffect(() => {
-    if (!user?.email || accessState !== 'active') {
+    if (!syncDocId || accessState !== 'active') {
       cloudHydratedRef.current = false;
       setCloudHydrated(false);
       setCloudSyncStatus('idle');
@@ -2597,44 +2599,70 @@ export default function App() {
     lastSyncFingerprintRef.current = '';
 
     const unsub = subscribeUserData(
-      user.email,
+      syncDocId,
       (snap) => {
         const cloud = snap.data;
         const fp = accountSyncFingerprint(cloud);
-        if (cloudHydratedRef.current && fp === lastSyncFingerprintRef.current) {
+
+        // Ignore echo from our own in-flight / just-completed write
+        if (suppressCloudSaveRef.current || fp === lastSyncFingerprintRef.current) {
+          if (!cloudHydratedRef.current) {
+            cloudHydratedRef.current = true;
+            setCloudHydrated(true);
+          }
           setCloudSyncStatus('synced');
           return;
         }
 
         const isLiveRemote = cloudHydratedRef.current;
-        if (isLiveRemote) suppressCloudSaveRef.current = true;
+        suppressCloudSaveRef.current = true;
 
         // Cloud wins when field is present; null = never synced → keep local for first upload
         if (Array.isArray(cloud.alerts)) {
           setAlerts(cloud.alerts as PriceAlert[]);
-          localStorage.setItem('quantum_price_alerts', JSON.stringify(cloud.alerts));
+          try {
+            localStorage.setItem('quantum_price_alerts', JSON.stringify(cloud.alerts));
+          } catch {
+            /* ignore */
+          }
         }
         if (typeof cloud.autoAlertRsiDivergence === 'boolean') {
           setAutoAlertRsiDivergence(cloud.autoAlertRsiDivergence);
-          localStorage.setItem(
-            'quantum_auto_alert_rsi_divergence',
-            JSON.stringify(cloud.autoAlertRsiDivergence)
-          );
+          try {
+            localStorage.setItem(
+              'quantum_auto_alert_rsi_divergence',
+              JSON.stringify(cloud.autoAlertRsiDivergence)
+            );
+          } catch {
+            /* ignore */
+          }
         }
         if (cloud.modelWeights) {
           setModelWeights((prev) => {
             const merged = { ...prev, ...cloud.modelWeights };
-            localStorage.setItem('quantum_model_weights', JSON.stringify(merged));
+            try {
+              localStorage.setItem('quantum_model_weights', JSON.stringify(merged));
+            } catch {
+              /* ignore */
+            }
             return merged;
           });
         }
         if (Array.isArray(cloud.trendlines)) {
           setTrendlines(cloud.trendlines);
-          localStorage.setItem('quantum_trendlines', JSON.stringify(cloud.trendlines));
+          try {
+            localStorage.setItem('quantum_trendlines', JSON.stringify(cloud.trendlines));
+          } catch {
+            /* ignore */
+          }
         }
         if (Array.isArray(cloud.annotations)) {
           setAnnotations(cloud.annotations);
-          localStorage.setItem('quantum_annotations', JSON.stringify(cloud.annotations));
+          try {
+            localStorage.setItem('quantum_annotations', JSON.stringify(cloud.annotations));
+          } catch {
+            /* ignore */
+          }
         }
         if (Array.isArray(cloud.watchlist)) {
           saveWatchlist(cloud.watchlist, { silent: true });
@@ -2683,17 +2711,80 @@ export default function App() {
         cloudHydratedRef.current = true;
         setCloudHydrated(true);
         setCloudSyncStatus('synced');
-        // Refresh Watchlist / Portfolio pages (and push local-only fields on first hydrate)
         notifyAccountDataChanged('all');
 
-        if (isLiveRemote) {
-          window.setTimeout(() => {
-            suppressCloudSaveRef.current = false;
-          }, 900);
-        }
+        window.setTimeout(() => {
+          suppressCloudSaveRef.current = false;
+          // First hydrate: push local-only fields that cloud never had (null)
+          if (!isLiveRemote && syncDocId) {
+            let storedAlerts: unknown[] = [];
+            let storedAutoRsi = false;
+            let storedWeights: Record<string, number> | null = null;
+            let storedTrends: unknown = [];
+            let storedAnnotations: unknown = [];
+            try {
+              const a = localStorage.getItem('quantum_price_alerts');
+              if (a) storedAlerts = JSON.parse(a);
+              const r = localStorage.getItem('quantum_auto_alert_rsi_divergence');
+              if (r) storedAutoRsi = JSON.parse(r);
+              const w = localStorage.getItem('quantum_model_weights');
+              if (w) storedWeights = JSON.parse(w);
+              const t = localStorage.getItem('quantum_trendlines');
+              if (t) storedTrends = JSON.parse(t);
+              const n = localStorage.getItem('quantum_annotations');
+              if (n) storedAnnotations = JSON.parse(n);
+            } catch {
+              /* ignore */
+            }
+
+            const payload: Partial<UserCloudData> = {
+              alerts: Array.isArray(cloud.alerts) ? cloud.alerts : storedAlerts,
+              autoAlertRsiDivergence:
+                typeof cloud.autoAlertRsiDivergence === 'boolean'
+                  ? cloud.autoAlertRsiDivergence
+                  : storedAutoRsi,
+              modelWeights: cloud.modelWeights || storedWeights,
+              trendlines: Array.isArray(cloud.trendlines) ? cloud.trendlines : storedTrends,
+              annotations: Array.isArray(cloud.annotations) ? cloud.annotations : storedAnnotations,
+              watchlist: Array.isArray(cloud.watchlist) ? cloud.watchlist : loadWatchlist(),
+              portfolio: Array.isArray(cloud.portfolio) ? cloud.portfolio : loadPortfolio(),
+              signalCache: Array.isArray(cloud.signalCache) ? cloud.signalCache : loadSignalCache(),
+              prefs: {
+                refreshMode: loadRefreshMode(),
+                autoRefreshIntervalSec: loadAutoRefreshIntervalSec(),
+                dashboardMarket: loadDashboardMarket(),
+                sidebarCollapsed: loadSidebarCollapsed(),
+                analysisHorizon:
+                  typeof cloud.prefs?.analysisHorizon === 'string' && cloud.prefs.analysisHorizon
+                    ? cloud.prefs.analysisHorizon
+                    : undefined,
+                ...(cloud.prefs || {}),
+              },
+            };
+
+            const nextFp = accountSyncFingerprint(payload);
+            if (nextFp !== lastSyncFingerprintRef.current) {
+              lastSyncFingerprintRef.current = nextFp;
+              suppressCloudSaveRef.current = true;
+              setCloudSyncStatus('loading');
+              saveUserData(syncDocId, payload)
+                .then(() => setCloudSyncStatus('synced'))
+                .catch((err) => {
+                  console.error('Firestore account sync upload failed:', err);
+                  lastSyncFingerprintRef.current = '';
+                  setCloudSyncStatus('error');
+                })
+                .finally(() => {
+                  window.setTimeout(() => {
+                    suppressCloudSaveRef.current = false;
+                  }, 500);
+                });
+            }
+          }
+        }, isLiveRemote ? 900 : 250);
       },
       (err) => {
-        console.warn('Firestore sync failed:', err);
+        console.error('Firestore sync listener failed:', err);
         cloudHydratedRef.current = true;
         setCloudHydrated(true);
         setCloudSyncStatus('error');
@@ -2701,7 +2792,9 @@ export default function App() {
     );
 
     return () => unsub();
-  }, [user?.email, accessState]);
+    // alerts/modelWeights etc. intentionally omitted — first-upload closure uses latest via loaders + state at fire time
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncDocId, accessState]);
 
   const refreshUsage = async () => {
     if (!user?.email) {
@@ -2737,50 +2830,60 @@ export default function App() {
     return () => window.removeEventListener('quantum:usage-refresh', onRefresh);
   }, [user?.email]);
 
-  const buildAccountSyncPayload = (): Partial<UserCloudData> => ({
-    alerts,
-    autoAlertRsiDivergence,
-    modelWeights,
-    trendlines,
-    annotations,
-    watchlist: loadWatchlist(),
-    portfolio: loadPortfolio(),
-    signalCache: loadSignalCache(),
-    prefs: {
-      refreshMode,
-      autoRefreshIntervalSec,
-      dashboardMarket: loadDashboardMarket(),
-      sidebarCollapsed,
-      analysisHorizon,
-    },
-  });
+  const syncDocIdRef = useRef(syncDocId);
+  syncDocIdRef.current = syncDocId;
 
   const pushAccountSync = (payload: Partial<UserCloudData>) => {
-    if (!user?.email || suppressCloudSaveRef.current || !cloudHydratedRef.current) return;
+    const docId = syncDocIdRef.current;
+    if (!docId || suppressCloudSaveRef.current || !cloudHydratedRef.current) return;
     const fp = accountSyncFingerprint(payload);
     if (fp === lastSyncFingerprintRef.current) return;
+    const prevFp = lastSyncFingerprintRef.current;
     lastSyncFingerprintRef.current = fp;
+    suppressCloudSaveRef.current = true;
     setCloudSyncStatus('loading');
-    saveUserData(user.email, payload)
+    saveUserData(docId, payload)
       .then(() => setCloudSyncStatus('synced'))
       .catch((err) => {
-        console.warn('Firestore save failed:', err);
+        console.error('Firestore save failed:', err);
+        lastSyncFingerprintRef.current = prevFp;
         setCloudSyncStatus('error');
+      })
+      .finally(() => {
+        window.setTimeout(() => {
+          suppressCloudSaveRef.current = false;
+        }, 500);
       });
   };
 
   // Persist React-owned fields to Firestore (alerts, signals state, prefs, …)
   useEffect(() => {
-    if (!user?.email || accessState !== 'active' || !cloudHydrated) return;
+    if (!syncDocId || accessState !== 'active' || !cloudHydrated) return;
 
     const timer = window.setTimeout(() => {
       if (suppressCloudSaveRef.current) return;
-      pushAccountSync(buildAccountSyncPayload());
+      pushAccountSync({
+        alerts,
+        autoAlertRsiDivergence,
+        modelWeights,
+        trendlines,
+        annotations,
+        watchlist: loadWatchlist(),
+        portfolio: loadPortfolio(),
+        signalCache: loadSignalCache(),
+        prefs: {
+          refreshMode,
+          autoRefreshIntervalSec,
+          dashboardMarket: loadDashboardMarket(),
+          sidebarCollapsed,
+          analysisHorizon,
+        },
+      });
     }, 800);
 
     return () => window.clearTimeout(timer);
   }, [
-    user?.email,
+    syncDocId,
     accessState,
     cloudHydrated,
     alerts,
@@ -2797,7 +2900,7 @@ export default function App() {
 
   // Watchlist / portfolio / prefs localStorage writes → push full account blob
   useEffect(() => {
-    if (!user?.email || accessState !== 'active' || !cloudHydrated) return;
+    if (!syncDocId || accessState !== 'active' || !cloudHydrated) return;
     return subscribeAccountDataChanged(() => {
       window.setTimeout(() => {
         if (suppressCloudSaveRef.current || !cloudHydratedRef.current) return;
@@ -2818,10 +2921,10 @@ export default function App() {
             analysisHorizon,
           },
         });
-      }, 500);
+      }, 400);
     });
   }, [
-    user?.email,
+    syncDocId,
     accessState,
     cloudHydrated,
     alerts,
@@ -7798,6 +7901,7 @@ export default function App() {
         planId={usage?.plan || null}
         planUnlimited={!!usage?.unlimited}
         onOpenPlans={() => setActivePage('SETTINGS')}
+        cloudSyncStatus={cloudSyncStatus}
         footer={
           <footer className="mt-4 py-6 px-4 sm:px-8 border-t border-white/5 flex flex-col md:flex-row items-center justify-between text-[11px] font-sans text-gray-500 gap-3 relative z-10">
             <div className="flex flex-wrap justify-center gap-x-6 gap-y-2">
@@ -7806,7 +7910,7 @@ export default function App() {
             <div className="flex flex-col md:items-end gap-2 text-center md:text-right">
               <span className="text-gray-500">
                 Quantum Node · Powered by Google Gemini ·{' '}
-                <span className="font-mono text-emerald-500/70">sidebar-pro-0814</span>
+                <span className="font-mono text-emerald-500/70">cloud-sync-0814</span>
               </span>
               <LegalLinks className="justify-center md:justify-end" />
             </div>

@@ -6,6 +6,8 @@ import {
   Menu,
   Bell,
   RefreshCw,
+  Cloud,
+  CloudOff,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { MarketDataStatus } from '../../lib/marketDataRefresh';
@@ -24,6 +26,7 @@ type AppHeaderProps = {
   onOpenAlerts: () => void;
   alertCount?: number;
   onGoDashboard?: () => void;
+  cloudSyncStatus?: 'idle' | 'loading' | 'synced' | 'error';
 };
 
 function formatAgo(ts: number | null): string {
@@ -49,6 +52,7 @@ export function AppHeader({
   onOpenAlerts,
   alertCount = 0,
   onGoDashboard,
+  cloudSyncStatus = 'idle',
 }: AppHeaderProps) {
   const marketLive = marketDataStatus === 'idle' || marketDataStatus === 'updated';
 
@@ -118,6 +122,37 @@ export function AppHeader({
 
         {/* Right: market + alerts only (account lives in sidebar) */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          {cloudSyncStatus !== 'idle' && (
+            <div
+              className={cn(
+                'hidden sm:inline-flex items-center gap-1 rounded-full border px-2 h-9 text-[10px] font-mono uppercase tracking-wide',
+                cloudSyncStatus === 'synced'
+                  ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-300'
+                  : cloudSyncStatus === 'loading'
+                    ? 'border-cyan-500/25 bg-cyan-500/10 text-cyan-300'
+                    : 'border-rose-500/30 bg-rose-500/10 text-rose-300'
+              )}
+              title={
+                cloudSyncStatus === 'synced'
+                  ? 'Account data synced across devices'
+                  : cloudSyncStatus === 'loading'
+                    ? 'Syncing account data…'
+                    : 'Account sync failed — check connection and reload'
+              }
+            >
+              {cloudSyncStatus === 'error' ? (
+                <CloudOff className="h-3 w-3" />
+              ) : cloudSyncStatus === 'loading' ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Cloud className="h-3 w-3" />
+              )}
+              <span className="hidden lg:inline">
+                {cloudSyncStatus === 'synced' ? 'Cloud' : cloudSyncStatus === 'loading' ? 'Sync' : 'Sync err'}
+              </span>
+            </div>
+          )}
+
           <div
             className={cn(
               'hidden md:flex items-center gap-1.5 rounded-full border px-2.5 h-9 text-[10px] font-mono uppercase tracking-wide',

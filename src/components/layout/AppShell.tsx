@@ -49,6 +49,7 @@ type AppShellProps = {
   planId?: string | null;
   planUnlimited?: boolean;
   onOpenPlans?: () => void;
+  cloudSyncStatus?: 'idle' | 'loading' | 'synced' | 'error';
   children: React.ReactNode;
   footer?: React.ReactNode;
 };
@@ -82,6 +83,7 @@ export function AppShell({
   planId,
   planUnlimited,
   onOpenPlans,
+  cloudSyncStatus,
   children,
   footer,
 }: AppShellProps) {
@@ -129,6 +131,7 @@ export function AppShell({
           onOpenAlerts={() => onNavigate('ALERTS')}
           alertCount={alertCount}
           onGoDashboard={() => onNavigate('DASHBOARD')}
+          cloudSyncStatus={cloudSyncStatus}
         />
 
         {showMarketSelect && (
