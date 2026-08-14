@@ -14,6 +14,7 @@ const yahooFinance = new YahooFinanceConstructor({
 import dotenv from 'dotenv';
 import { registerStripeWebhook, registerStripeRoutes } from './server/stripe';
 import { consumeUsageCredit, getUsageSnapshot } from './server/usageQuota';
+import { requireAuthedEmailMatch } from './server/authBearer';
 
 dotenv.config();
 
@@ -548,11 +549,12 @@ registerStripeRoutes(app);
 
 app.get('/api/usage', async (req, res) => {
   try {
-    const email = String(req.query.email || '').trim().toLowerCase();
-    if (!email) {
-      return res.status(400).json({ error: 'email query param required' });
+    const claimed = String(req.query.email || '').trim().toLowerCase();
+    const authed = await requireAuthedEmailMatch(req, claimed || null);
+    if (!authed.ok) {
+      return res.status(authed.status).json({ error: authed.error });
     }
-    const usage = await getUsageSnapshot(email);
+    const usage = await getUsageSnapshot(authed.email);
     res.json(usage);
   } catch (err: any) {
     console.error('[usage] failed:', err?.message || err);
@@ -1990,10 +1992,19 @@ function getProceduralNewsSummary(articles: any[], ticker?: string): string {
 }
 
 app.post('/api/news-summary', async (req, res) => {
-  const { articles, ticker, email } = req.body;
+  const { articles, ticker, email: claimedEmail } = req.body;
   if (!articles || !Array.isArray(articles) || articles.length === 0) {
     return res.status(400).json({ error: 'No news articles provided to summarize.' });
   }
+
+  const authed = await requireAuthedEmailMatch(
+    req,
+    typeof claimedEmail === 'string' ? claimedEmail : null
+  );
+  if (!authed.ok) {
+    return res.status(authed.status).json({ error: authed.error, code: 'auth_required' });
+  }
+  const email = authed.email;
 
   const joinedTitles = articles.map((a: any) => a.title || '').join('|');
   const cacheKey = `summary_${ticker || 'all'}_${Buffer.from(joinedTitles).toString('base64').substring(0, 60)}`;
@@ -2001,18 +2012,15 @@ app.post('/api/news-summary', async (req, res) => {
   const cached = (global as any).newsSummaryCache[cacheKey];
   
   if (cached && (Date.now() - cached.timestamp < 600000)) { // 10 minutes cache
-    if (email) {
-      const usageSnap = await getUsageSnapshot(String(email)).catch(() => null);
-      if (usageSnap && !usageSnap.unlimited && usageSnap.newsRemaining <= 0) {
-        return res.status(402).json({
-          error: 'Daily AI news usage is out. Please reload credits (News mini RM5 +10) to continue.',
-          code: 'news_quota_exceeded',
-          usage: usageSnap,
-        });
-      }
-      return res.json({ summary: cached.summary, cached: true, usage: usageSnap || undefined });
+    const usageSnap = await getUsageSnapshot(email).catch(() => null);
+    if (usageSnap && !usageSnap.unlimited && usageSnap.newsRemaining <= 0) {
+      return res.status(402).json({
+        error: 'Daily AI news usage is out. Please reload credits (News mini RM5 +10) to continue.',
+        code: 'news_quota_exceeded',
+        usage: usageSnap,
+      });
     }
-    return res.json({ summary: cached.summary, cached: true });
+    return res.json({ summary: cached.summary, cached: true, usage: usageSnap || undefined });
   }
 
   const billed = await consumeUsageCredit(email, 'news');
@@ -2089,15 +2097,17 @@ app.post('/api/assistant-chat', async (req, res) => {
   const context = req.body?.context && typeof req.body.context === 'object' ? req.body.context : {};
   const prior = Array.isArray(req.body?.history) ? req.body.history : [];
 
-  const email = typeof emailRaw === 'string' ? emailRaw.trim() : '';
+  const claimedEmail = typeof emailRaw === 'string' ? emailRaw.trim() : '';
   const message = typeof messageRaw === 'string' ? messageRaw.trim() : '';
 
-  if (!email) {
-    return res.status(401).json({
-      error: 'Sign in required to use the AI assistant.',
+  const authed = await requireAuthedEmailMatch(req, claimedEmail || null);
+  if (!authed.ok) {
+    return res.status(authed.status).json({
+      error: authed.error || 'Sign in required to use the AI assistant.',
       code: 'auth_required',
     });
   }
+  const email = authed.email;
   if (!message) {
     return res.status(400).json({ error: 'Message is required.' });
   }
@@ -2415,11 +2425,23 @@ Provide a powerful 2-sentence macro analysis outlining the asymmetric risks and 
 });
 
 app.post('/api/predict', async (req, res) => {
-  const { ticker, history, quote: passedQuote, indicators, news: passedNews, bypassCache, modelWeights, email } = req.body;
+  const { ticker, history, quote: passedQuote, indicators, news: passedNews, bypassCache, modelWeights, email: claimedEmail } = req.body;
   
   if (!history || history.length === 0) {
     return res.status(400).json({ error: 'Insufficient data for analysis' });
   }
+
+  const authed = await requireAuthedEmailMatch(
+    req,
+    typeof claimedEmail === 'string' ? claimedEmail : null
+  );
+  if (!authed.ok) {
+    return res.status(authed.status).json({
+      error: authed.error || 'Sign in required for AI analysis.',
+      code: 'auth_required',
+    });
+  }
+  const email = authed.email;
 
   // Use client quote first so cache key + early return avoid Yahoo/Finnhub on hits
   let quote = passedQuote && typeof passedQuote === 'object' ? passedQuote : null;
@@ -2435,32 +2457,26 @@ app.post('/api/predict', async (req, res) => {
   const cachedEarly = (global as any).predictionCache[cacheKeyEarly];
   if (bypassCache !== true && cachedEarly && (Date.now() - cachedEarly.timestamp < 1800000)) {
     // Cache hit still consumes 1 analysis credit (Search / Refresh always bill).
-    if (email) {
-      const billed = await consumeUsageCredit(String(email), 'analysis');
-      if (!billed.ok) {
-        return res.status(billed.status).json({
-          error: billed.error,
-          code: billed.code,
-          usage: billed.usage,
-        });
-      }
-      console.log(`Serving cached prediction for ${ticker} (early hit, billed)`);
-      return res.json({ ...cachedEarly.data, cached: true, usage: billed.usage });
+    const billed = await consumeUsageCredit(email, 'analysis');
+    if (!billed.ok) {
+      return res.status(billed.status).json({
+        error: billed.error,
+        code: billed.code,
+        usage: billed.usage,
+      });
     }
-    console.log(`Serving cached prediction for ${ticker} (early hit)`);
-    return res.json({ ...cachedEarly.data, cached: true });
+    console.log(`Serving cached prediction for ${ticker} (early hit, billed)`);
+    return res.json({ ...cachedEarly.data, cached: true, usage: billed.usage });
   }
 
   // Fresh quote / fundamentals / news only after confirming credits remain (avoid burning Yahoo/Finnhub on 402)
-  if (email) {
-    const usageSnapPre = await getUsageSnapshot(String(email)).catch(() => null);
-    if (usageSnapPre && !usageSnapPre.unlimited && usageSnapPre.analysesRemaining <= 0) {
-      return res.status(402).json({
-        error: 'Daily AI search/analysis usage is out. Please reload credits (+5 RM5 or Reload pack RM10) to continue.',
-        code: 'analysis_quota_exceeded',
-        usage: usageSnapPre,
-      });
-    }
+  const usageSnapPre = await getUsageSnapshot(email).catch(() => null);
+  if (usageSnapPre && !usageSnapPre.unlimited && usageSnapPre.analysesRemaining <= 0) {
+    return res.status(402).json({
+      error: 'Daily AI search/analysis usage is out. Please reload credits (+5 RM5 or Reload pack RM10) to continue.',
+      code: 'analysis_quota_exceeded',
+      usage: usageSnapPre,
+    });
   }
 
   const needQuote = !(quote && quote.regularMarketPrice != null);
@@ -2579,20 +2595,16 @@ app.post('/api/predict', async (req, res) => {
   
   if (bypassCache !== true && cachedResult && (Date.now() - cachedResult.timestamp < 1800000)) { // 30 mins cache
     // Cache hit still consumes 1 analysis credit (Search / Refresh always bill).
-    if (email) {
-      const billed = await consumeUsageCredit(String(email), 'analysis');
-      if (!billed.ok) {
-        return res.status(billed.status).json({
-          error: billed.error,
-          code: billed.code,
-          usage: billed.usage,
-        });
-      }
-      console.log(`Serving cached prediction for ${ticker} (billed)`);
-      return res.json({ ...cachedResult.data, cached: true, usage: billed.usage });
+    const billed = await consumeUsageCredit(email, 'analysis');
+    if (!billed.ok) {
+      return res.status(billed.status).json({
+        error: billed.error,
+        code: billed.code,
+        usage: billed.usage,
+      });
     }
-    console.log(`Serving cached prediction for ${ticker}`);
-    return res.json({ ...cachedResult.data, cached: true });
+    console.log(`Serving cached prediction for ${ticker} (billed)`);
+    return res.json({ ...cachedResult.data, cached: true, usage: billed.usage });
   }
 
   const billed = await consumeUsageCredit(email, 'analysis');

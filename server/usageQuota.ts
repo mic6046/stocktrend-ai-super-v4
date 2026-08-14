@@ -327,22 +327,47 @@ export async function getUsageSnapshot(email: string): Promise<UsageSnapshot> {
 
 export type BonusCreditKind = BillableKind | 'analysis_pack' | 'reload_pack';
 
+/**
+ * Grant purchased bonus credits. Only callable after a verified paid Stripe session.
+ * `sessionId` is required for idempotency (server-only stripeProcessedSessions + user map).
+ */
 export async function addBonusCredits(
   email: string,
   kind: BonusCreditKind,
   amount?: number,
   sessionId?: string
 ): Promise<UsageSnapshot> {
+  const sid = String(sessionId || '').trim();
+  if (!sid) {
+    throw new Error('sessionId is required to grant bonus credits');
+  }
+
   const db = ensureFirebaseAdmin();
   const id = email.trim().toLowerCase();
   const ref = db.collection('users').doc(id);
+  const sessionRef = db.collection('stripeProcessedSessions').doc(sid);
   const dateKey = mytDateKey();
 
   await db.runTransaction(async (tx) => {
+    const sessionSnap = await tx.get(sessionRef);
     const snap = await tx.get(ref);
-    const data = (snap.exists ? snap.data() : {}) as UserDoc;
+    if (sessionSnap.exists) {
+      return; // already granted for this Stripe session
+    }
 
-    if (sessionId && wasOverageSessionApplied(data, sessionId)) {
+    const data = (snap.exists ? snap.data() : {}) as UserDoc;
+    if (wasOverageSessionApplied(data, sid)) {
+      // Legacy map already applied — still seal server-only idempotency doc
+      tx.set(
+        sessionRef,
+        {
+          email: id,
+          kind,
+          legacy: true,
+          appliedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
       return;
     }
 
@@ -362,7 +387,6 @@ export async function addBonusCredits(
     } = state;
 
     if (kind === 'reload_pack') {
-      // Combo pack: +10 analyses +10 news. Persists until spent; daily quota stays intact.
       const addAnalyses = amount ?? 10;
       const addNews = 10;
       bonusAnalyses = bonusAnalyses + addAnalyses;
@@ -384,9 +408,17 @@ export async function addBonusCredits(
     }
 
     const applied = { ...(data.appliedOverageSessions || {}) };
-    if (sessionId) {
-      applied[sessionId] = true;
-    }
+    applied[sid] = true;
+
+    tx.set(
+      sessionRef,
+      {
+        email: id,
+        kind,
+        appliedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
 
     tx.set(
       ref,
@@ -396,7 +428,7 @@ export async function addBonusCredits(
         bonusNews,
         bonusAnalysesPackSize,
         bonusNewsPackSize,
-        ...(sessionId ? { appliedOverageSessions: applied } : {}),
+        appliedOverageSessions: applied,
         usage: {
           dateKey: state.dateKey,
           analysesUsed,

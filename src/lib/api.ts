@@ -1,3 +1,5 @@
+import { auth } from './firebase';
+
 /**
  * Absolute API base for production (Cloud Run) or empty for same-origin local dev.
  */
@@ -76,9 +78,24 @@ function logApiRequest(method: string, url: string, meta: ApiRequestMeta) {
   });
 }
 
+async function withAuthHeaders(init?: RequestInit): Promise<RequestInit | undefined> {
+  const headers = new Headers(init?.headers || {});
+  try {
+    const user = auth.currentUser;
+    if (user) {
+      const token = await user.getIdToken();
+      headers.set('Authorization', `Bearer ${token}`);
+    }
+  } catch {
+    // proceed without auth header
+  }
+  return { ...(init || {}), headers };
+}
+
 /**
  * Dev-traced fetch. Logs every outbound request for cost verification.
  * Dedupes identical in-flight GET requests (same method+url).
+ * Attaches Firebase ID token when signed in (billing / usage auth).
  */
 export async function loggedFetch(input: RequestInfo | URL, init?: LoggedInit): Promise<Response> {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : String(input);
@@ -110,7 +127,10 @@ export async function loggedFetch(input: RequestInfo | URL, init?: LoggedInit): 
     return inflightByKey.get(key)!.then((r) => r.clone());
   }
 
-  const pending = fetch(input, cleanInit).finally(() => {
+  const pending = (async () => {
+    const authedInit = await withAuthHeaders(cleanInit);
+    return fetch(input, authedInit);
+  })().finally(() => {
     if (dedupe) inflightByKey.delete(key);
   });
   if (dedupe) inflightByKey.set(key, pending);

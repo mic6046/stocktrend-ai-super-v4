@@ -15,35 +15,73 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    function lockedSubscriptionFieldsUnchanged() {
+    // Billing / quota / Stripe fields — Admin SDK (Cloud Run) only.
+    function billingKeys() {
+      return [
+        'subscriptionStatus',
+        'subscriptionPlan',
+        'subscriptionEndsAt',
+        'stripeCustomerId',
+        'stripeSubscriptionId',
+        'bonusAnalyses',
+        'bonusNews',
+        'bonusAnalysesPackSize',
+        'bonusNewsPackSize',
+        'appliedOverageSessions',
+        'usage'
+      ];
+    }
+
+    function noBillingFieldsOnCreate() {
+      return !request.resource.data.keys().hasAny([
+        'subscriptionEndsAt',
+        'stripeCustomerId',
+        'stripeSubscriptionId',
+        'bonusAnalyses',
+        'bonusNews',
+        'bonusAnalysesPackSize',
+        'bonusNewsPackSize',
+        'appliedOverageSessions',
+        'usage'
+      ])
+      && (
+        !('subscriptionStatus' in request.resource.data)
+        || request.resource.data.subscriptionStatus == 'none'
+      )
+      && (
+        !('subscriptionPlan' in request.resource.data)
+        || request.resource.data.subscriptionPlan == null
+      );
+    }
+
+    function lockedBillingFieldsUnchanged() {
       return !request.resource.data.diff(resource.data).affectedKeys()
-        .hasAny([
-          'subscriptionStatus',
-          'subscriptionPlan',
-          'subscriptionEndsAt',
-          'stripeCustomerId',
-          'stripeSubscriptionId'
-        ]);
+        .hasAny(billingKeys());
     }
 
     match /users/{userId} {
-      // Email-keyed or uid-keyed user docs
       allow read: if isOwnerEmail(userId) || isOwnerUid(userId)
         || (isSignedIn()
             && resource.data.email is string
             && resource.data.email.lower() == request.auth.token.email.lower());
 
-      allow create: if isOwnerEmail(userId) || isOwnerUid(userId);
+      allow create: if (isOwnerEmail(userId) || isOwnerUid(userId))
+        && noBillingFieldsOnCreate();
 
-      // Clients may sync app data, but not billing fields (Stripe webhook / admin only)
+      // Clients may sync app data, but never billing/quota fields
       allow update: if (isOwnerEmail(userId) || isOwnerUid(userId)
           || (resource.data.email is string
               && resource.data.email.lower() == request.auth.token.email.lower()))
-        && lockedSubscriptionFieldsUnchanged();
+        && lockedBillingFieldsUnchanged();
 
       match /{document=**} {
         allow read, write: if isOwnerEmail(userId) || isOwnerUid(userId);
       }
+    }
+
+    // Server-only Stripe grant idempotency — no client access
+    match /stripeProcessedSessions/{sessionId} {
+      allow read, write: if false;
     }
   }
 }

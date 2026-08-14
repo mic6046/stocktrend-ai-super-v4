@@ -43,6 +43,8 @@ export function SubscriptionGate({ children, onActive, onOverageSuccess }: Subsc
     const checkoutOk = params.get('checkout') === 'success';
     const overageOk = params.get('overage') === 'success';
     if (!checkoutOk && !overageOk) return;
+    // Confirm requires a Firebase ID token matching the checkout email
+    if (!user?.email) return;
 
     const sessionId = params.get('session_id');
     (async () => {
@@ -59,9 +61,7 @@ export function SubscriptionGate({ children, onActive, onOverageSuccess }: Subsc
             );
           }
         }
-        if (user?.email) {
-          await syncStripeSubscription(user.email);
-        }
+        await syncStripeSubscription(user.email);
       } catch {
         // webhook may still update; refresh either way
       } finally {

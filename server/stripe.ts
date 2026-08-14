@@ -3,6 +3,7 @@ import Stripe from 'stripe';
 import { initializeApp, getApps, cert, applicationDefault } from 'firebase-admin/app';
 import { getFirestore, Timestamp, FieldValue } from 'firebase-admin/firestore';
 import { addBonusCredits } from './usageQuota';
+import { requireAuthedEmail, requireAuthedEmailMatch } from './authBearer';
 
 type Plan = 'monthly' | 'yearly' | 'pro_monthly';
 type OverageProduct = 'analysis' | 'news' | 'analysis_pack' | 'reload_pack';
@@ -12,6 +13,31 @@ function getStripe(): Stripe | null {
   if (!key) return null;
   // Header values cannot contain CR/LF; Secret Manager / shell pastes often add them.
   return new Stripe(key);
+}
+
+function isPaidCheckoutSession(session: Stripe.Checkout.Session): boolean {
+  return session.payment_status === 'paid';
+}
+
+function sessionAccountEmail(session: Stripe.Checkout.Session): string {
+  const accountEmail = String(session.metadata?.email || '')
+    .trim()
+    .toLowerCase();
+  const checkoutEmail = String(
+    session.customer_details?.email || session.customer_email || ''
+  )
+    .trim()
+    .toLowerCase();
+  return accountEmail || checkoutEmail;
+}
+
+function isAllowedOverageProduct(product: string): product is OverageProduct {
+  return (
+    product === 'analysis' ||
+    product === 'news' ||
+    product === 'analysis_pack' ||
+    product === 'reload_pack'
+  );
 }
 
 function getPriceId(plan: Plan): string | null {
@@ -165,8 +191,11 @@ async function customerEmail(
 async function applyOveragePurchase(
   email: string,
   product: OverageProduct,
-  sessionId?: string
+  sessionId: string
 ) {
+  if (!sessionId) {
+    throw new Error('Stripe session id required to grant credits');
+  }
   if (product === 'reload_pack') {
     return addBonusCredits(email, 'reload_pack', 10, sessionId);
   }
@@ -174,9 +203,28 @@ async function applyOveragePurchase(
     return addBonusCredits(email, 'analysis_pack', 12, sessionId);
   }
   if (product === 'news') {
-    return addBonusCredits(email, 'news', 10, sessionId); // RM 5 mini → +10 news
+    return addBonusCredits(email, 'news', 10, sessionId);
   }
-  return addBonusCredits(email, 'analysis', 5, sessionId); // RM 5 mini → +5 analyses
+  return addBonusCredits(email, 'analysis', 5, sessionId);
+}
+
+async function grantOverageIfPaid(session: Stripe.Checkout.Session) {
+  const overageProduct = session.metadata?.overageProduct as string | undefined;
+  if (session.mode !== 'payment' || !overageProduct || !isAllowedOverageProduct(overageProduct)) {
+    return null;
+  }
+  if (!isPaidCheckoutSession(session)) {
+    console.warn(
+      `[stripe] skip overage grant for ${session.id}: payment_status=${session.payment_status}`
+    );
+    return null;
+  }
+  const email = sessionAccountEmail(session);
+  if (!email) {
+    console.warn(`[stripe] skip overage grant for ${session.id}: missing email`);
+    return null;
+  }
+  return applyOveragePurchase(email, overageProduct, session.id);
 }
 
 /**
@@ -209,51 +257,46 @@ export function registerStripeWebhook(app: express.Express) {
 
       try {
         switch (event.type) {
-          case 'checkout.session.completed': {
+          case 'checkout.session.completed':
+          case 'checkout.session.async_payment_succeeded': {
             const session = event.data.object as Stripe.Checkout.Session;
-            const overageProduct = session.metadata?.overageProduct as OverageProduct | undefined;
+            const overageProduct = session.metadata?.overageProduct as string | undefined;
 
-            // Overage packs must credit the signed-in account email from metadata
-            // (Stripe checkout email can differ and would hide credits from the meter).
+            // Overage packs: only after successful payment (signature already verified).
             if (session.mode === 'payment' && overageProduct) {
-              const accountEmail = String(session.metadata?.email || '')
-                .trim()
-                .toLowerCase();
-              const checkoutEmail = String(
-                session.customer_details?.email || session.customer_email || ''
-              )
-                .trim()
-                .toLowerCase();
-              const email = accountEmail || checkoutEmail;
-              if (!email) break;
-              await applyOveragePurchase(email, overageProduct, session.id);
+              await grantOverageIfPaid(session);
               break;
             }
 
-            const email =
-              session.customer_details?.email ||
-              session.customer_email ||
-              (session.metadata?.email as string | undefined);
+            // Subscription activation requires a real Stripe subscription + paid/trialing status.
+            if (session.mode !== 'subscription') {
+              break;
+            }
+
+            const email = sessionAccountEmail(session);
             if (!email) break;
 
             const plan = (session.metadata?.plan as Plan | undefined) || 'monthly';
             if (session.subscription && typeof session.subscription === 'string') {
               const sub = await stripe.subscriptions.retrieve(session.subscription);
+              if (sub.status !== 'active' && sub.status !== 'trialing') {
+                console.warn(
+                  `[stripe] skip subscription activate for ${session.id}: sub.status=${sub.status}`
+                );
+                break;
+              }
               const endsAt = subscriptionPeriodEnd(sub);
               await upsertSubscriptionByEmail(email, {
-                subscriptionStatus:
-                  sub.status === 'active' || sub.status === 'trialing' ? 'active' : 'inactive',
+                subscriptionStatus: 'active',
                 subscriptionPlan: plan,
                 subscriptionEndsAt: Timestamp.fromDate(endsAt),
                 stripeCustomerId: typeof session.customer === 'string' ? session.customer : null,
                 stripeSubscriptionId: sub.id,
               });
             } else {
-              await upsertSubscriptionByEmail(email, {
-                subscriptionStatus: 'active',
-                subscriptionPlan: plan,
-                stripeCustomerId: typeof session.customer === 'string' ? session.customer : null,
-              });
+              console.warn(
+                `[stripe] skip subscription activate for ${session.id}: missing subscription id`
+              );
             }
             break;
           }
@@ -329,10 +372,12 @@ export function registerStripeRoutes(app: express.Express) {
       }
 
       const plan = (req.body?.plan as Plan) || 'monthly';
-      const email = String(req.body?.email || '').trim().toLowerCase();
-      if (!email) {
-        return res.status(400).json({ error: 'Email is required' });
+      const claimedEmail = String(req.body?.email || '').trim().toLowerCase();
+      const authed = await requireAuthedEmailMatch(req, claimedEmail || null);
+      if (!authed.ok) {
+        return res.status(authed.status).json({ error: authed.error });
       }
+      const email = authed.email;
       if (plan !== 'monthly' && plan !== 'pro_monthly') {
         return res.status(400).json({ error: 'Plan must be monthly or pro_monthly' });
       }
@@ -385,17 +430,14 @@ export function registerStripeRoutes(app: express.Express) {
         return res.status(503).json({ error: 'Stripe is not configured' });
       }
 
-      const email = String(req.body?.email || '').trim().toLowerCase();
-      const product = String(req.body?.product || '') as OverageProduct;
-      if (!email) {
-        return res.status(400).json({ error: 'Email is required' });
+      const claimedEmail = String(req.body?.email || '').trim().toLowerCase();
+      const product = String(req.body?.product || '');
+      const authed = await requireAuthedEmailMatch(req, claimedEmail || null);
+      if (!authed.ok) {
+        return res.status(authed.status).json({ error: authed.error });
       }
-      if (
-        product !== 'analysis' &&
-        product !== 'news' &&
-        product !== 'analysis_pack' &&
-        product !== 'reload_pack'
-      ) {
+      const email = authed.email;
+      if (!isAllowedOverageProduct(product)) {
         return res.status(400).json({
           error: 'product must be analysis, news, analysis_pack, or reload_pack',
         });
@@ -427,13 +469,18 @@ export function registerStripeRoutes(app: express.Express) {
     }
   });
 
-  // Optional confirm endpoint after redirect (useful before webhooks are fully set up)
+  // Confirm after redirect — requires signed-in user matching session email + paid status
   app.get('/api/stripe/confirm', async (req, res) => {
     try {
       const stripe = getStripe();
       if (!stripe) {
         return res.status(503).json({ error: 'Stripe is not configured' });
       }
+      const authed = await requireAuthedEmail(req);
+      if (!authed.ok) {
+        return res.status(authed.status).json({ error: authed.error });
+      }
+
       const sessionId = String(req.query.session_id || '');
       if (!sessionId) {
         return res.status(400).json({ error: 'session_id required' });
@@ -443,46 +490,55 @@ export function registerStripeRoutes(app: express.Express) {
         expand: ['subscription'],
       });
 
-      const overageProduct = session.metadata?.overageProduct as OverageProduct | undefined;
-      if (session.mode === 'payment' && overageProduct && session.payment_status === 'paid') {
-        // Prefer account email stored at checkout — not whatever email Stripe collected.
-        const accountEmail = String(session.metadata?.email || '')
-          .trim()
-          .toLowerCase();
-        const checkoutEmail = String(
-          session.customer_details?.email || session.customer_email || ''
-        )
-          .trim()
-          .toLowerCase();
-        const email = accountEmail || checkoutEmail;
-        if (!email) {
-          return res.status(400).json({ error: 'No email on session' });
-        }
-        const usage = await applyOveragePurchase(email, overageProduct, session.id);
-        return res.json({ ok: true, email, overageProduct, type: 'overage', usage });
+      const sessionEmail = sessionAccountEmail(session);
+      if (!sessionEmail || sessionEmail !== authed.email) {
+        return res.status(403).json({
+          error: 'Checkout session does not belong to the signed-in account.',
+        });
       }
 
-      const email =
-        session.customer_details?.email ||
-        session.customer_email ||
-        session.metadata?.email ||
-        '';
-      if (!email) {
-        return res.status(400).json({ error: 'No email on session' });
+      const overageProduct = session.metadata?.overageProduct as string | undefined;
+      if (session.mode === 'payment' && overageProduct) {
+        if (!isPaidCheckoutSession(session)) {
+          return res.status(402).json({
+            error: 'Payment not completed',
+            payment_status: session.payment_status,
+          });
+        }
+        if (!isAllowedOverageProduct(overageProduct)) {
+          return res.status(400).json({ error: 'Unknown overage product on session' });
+        }
+        const usage = await applyOveragePurchase(sessionEmail, overageProduct, session.id);
+        return res.json({ ok: true, email: sessionEmail, overageProduct, type: 'overage', usage });
+      }
+
+      if (session.mode !== 'subscription') {
+        return res.status(400).json({ error: 'Unsupported checkout mode' });
+      }
+      if (!isPaidCheckoutSession(session) && session.status !== 'complete') {
+        return res.status(402).json({
+          error: 'Subscription payment not completed',
+          payment_status: session.payment_status,
+        });
       }
 
       const plan = (session.metadata?.plan as Plan | undefined) || 'monthly';
       const sub = session.subscription as Stripe.Subscription | null;
-      await upsertSubscriptionByEmail(email, {
-        subscriptionStatus:
-          session.payment_status === 'paid' || sub?.status === 'active' ? 'active' : 'inactive',
+      if (!sub || (sub.status !== 'active' && sub.status !== 'trialing')) {
+        return res.status(402).json({
+          error: 'No active subscription on this checkout session',
+        });
+      }
+
+      await upsertSubscriptionByEmail(sessionEmail, {
+        subscriptionStatus: 'active',
         subscriptionPlan: plan,
-        subscriptionEndsAt: sub ? Timestamp.fromDate(subscriptionPeriodEnd(sub)) : null,
+        subscriptionEndsAt: Timestamp.fromDate(subscriptionPeriodEnd(sub)),
         stripeCustomerId: typeof session.customer === 'string' ? session.customer : null,
-        stripeSubscriptionId: sub?.id || null,
+        stripeSubscriptionId: sub.id,
       });
 
-      res.json({ ok: true, email, plan, status: 'active', type: 'subscription' });
+      res.json({ ok: true, email: sessionEmail, plan, status: 'active', type: 'subscription' });
     } catch (err: any) {
       console.error('stripe confirm error:', err);
       res.status(500).json({ error: err?.message || 'Confirm failed' });
@@ -490,8 +546,7 @@ export function registerStripeRoutes(app: express.Express) {
   });
 
   /**
-   * Re-sync Firestore subscription fields from Stripe for an email.
-   * Used after checkout when period-end / webhook writes were wrong.
+   * Re-sync Firestore subscription fields from Stripe for the signed-in email.
    */
   app.post('/api/stripe/sync-subscription', async (req, res) => {
     try {
@@ -499,10 +554,12 @@ export function registerStripeRoutes(app: express.Express) {
       if (!stripe) {
         return res.status(503).json({ error: 'Stripe is not configured' });
       }
-      const email = String(req.body?.email || '').trim().toLowerCase();
-      if (!email || !email.includes('@')) {
-        return res.status(400).json({ error: 'Valid email is required' });
+      const claimedEmail = String(req.body?.email || '').trim().toLowerCase();
+      const authed = await requireAuthedEmailMatch(req, claimedEmail || null);
+      if (!authed.ok) {
+        return res.status(authed.status).json({ error: authed.error });
       }
+      const email = authed.email;
 
       const customers = await stripe.customers.list({ email, limit: 10 });
       let activeSub: Stripe.Subscription | null = null;
