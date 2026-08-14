@@ -93,7 +93,7 @@ export function AiSignalsPage({
     return WATCHLIST_MARKETS.filter((m) => grouped[m.key].length > 0);
   }, [marketFilter, grouped]);
 
-  const renderCard = (s: AiSignalRow) => (
+  const renderCard = (s: AiSignalRow, market: WatchlistMarket) => (
     <div key={s.ticker} className="relative">
       {onDeleteSignal && (
         <button
@@ -119,6 +119,9 @@ export function AiSignalsPage({
           <div className="flex items-center justify-between gap-2 pr-8 min-w-0">
             <div className="min-w-0 flex items-baseline gap-2">
               <p className="font-mono font-bold text-white text-[13px] shrink-0">{s.ticker}</p>
+              <span className="rounded bg-cyan-500/15 px-1 py-px text-[8px] font-bold uppercase tracking-wide text-cyan-300 shrink-0">
+                {market}
+              </span>
               <p className="text-[10px] text-gray-500 truncate hidden sm:block">{s.name || ''}</p>
             </div>
             <div className="text-right shrink-0">
@@ -179,7 +182,7 @@ export function AiSignalsPage({
           <p className="text-[10px] font-mono uppercase tracking-[0.22em] text-cyan-400">Intelligence</p>
           <h2 className="mt-1 text-2xl font-sans font-bold text-white">AI Signals</h2>
           <p className="mt-1 text-[13px] text-gray-500 max-w-2xl">
-            Signals catalogued by market. Tap a stock for the full analysis workspace.
+            Grouped by market (US · HK · JP · EU). Use the chips below, then tap a stock for full analysis.
           </p>
           <p
             className={cn(
@@ -256,34 +259,39 @@ export function AiSignalsPage({
       </div>
 
       {signals.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          <button
-            type="button"
-            onClick={() => setMarketFilter('ALL')}
-            className={cn(
-              'min-h-[30px] rounded-lg px-2.5 text-[10px] font-bold uppercase tracking-wide border cursor-pointer',
-              marketFilter === 'ALL'
-                ? 'bg-cyan-500 text-black border-cyan-400'
-                : 'bg-black/40 text-gray-400 border-white/10 hover:text-white hover:border-cyan-500/35'
-            )}
-          >
-            All · {signals.length}
-          </button>
-          {WATCHLIST_MARKETS.map((m) => (
+        <div className="sticky top-0 z-20 -mx-1 px-1 py-2 bg-[#050505]/95 backdrop-blur-sm border-b border-white/5">
+          <p className="mb-1.5 text-[9px] font-mono uppercase tracking-[0.18em] text-gray-500">
+            Markets
+          </p>
+          <div className="flex flex-wrap gap-1.5">
             <button
-              key={m.key}
               type="button"
-              onClick={() => setMarketFilter(m.key)}
+              onClick={() => setMarketFilter('ALL')}
               className={cn(
-                'min-h-[30px] rounded-lg px-2.5 text-[10px] font-bold uppercase tracking-wide border cursor-pointer',
-                marketFilter === m.key
+                'min-h-[34px] rounded-lg px-3 text-[11px] font-bold uppercase tracking-wide border cursor-pointer',
+                marketFilter === 'ALL'
                   ? 'bg-cyan-500 text-black border-cyan-400'
                   : 'bg-black/40 text-gray-400 border-white/10 hover:text-white hover:border-cyan-500/35'
               )}
             >
-              {m.short} · {grouped[m.key].length}
+              All · {signals.length}
             </button>
-          ))}
+            {WATCHLIST_MARKETS.map((m) => (
+              <button
+                key={m.key}
+                type="button"
+                onClick={() => setMarketFilter(m.key)}
+                className={cn(
+                  'min-h-[34px] rounded-lg px-3 text-[11px] font-bold uppercase tracking-wide border cursor-pointer',
+                  marketFilter === m.key
+                    ? 'bg-cyan-500 text-black border-cyan-400'
+                    : 'bg-black/40 text-gray-400 border-white/10 hover:text-white hover:border-cyan-500/35'
+                )}
+              >
+                {m.short} · {grouped[m.key].length}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
@@ -301,22 +309,27 @@ export function AiSignalsPage({
           <p className="text-[13px] text-gray-400 text-center py-8">No signals in this market yet.</p>
         </GlassCard>
       ) : (
-        <div className="space-y-5">
+        <div className="space-y-4">
           {visibleMarkets.map((m) => {
-            const rows = grouped[m.key];
+            const rows = [...grouped[m.key]].sort((a, b) => a.ticker.localeCompare(b.ticker));
             if (!rows.length) return null;
             return (
-              <section key={m.key} className="space-y-2">
-                <div className="flex items-center justify-between gap-2 px-0.5">
-                  <p className="text-[10px] font-mono uppercase tracking-[0.16em] text-cyan-400">
-                    {m.label}
-                  </p>
-                  <span className="text-[10px] font-mono text-gray-500">{rows.length}</span>
+              <GlassCard key={m.key} padding="sm" className="border-cyan-500/20">
+                <div className="flex items-center justify-between gap-2 mb-3 px-0.5 border-b border-white/10 pb-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="inline-flex h-6 min-w-[2rem] items-center justify-center rounded-md bg-cyan-500/20 px-1.5 text-[11px] font-black text-cyan-300">
+                      {m.short}
+                    </span>
+                    <p className="text-[12px] font-semibold text-white truncate">{m.label}</p>
+                  </div>
+                  <span className="text-[11px] font-mono text-gray-400 shrink-0">
+                    {rows.length} signal{rows.length === 1 ? '' : 's'}
+                  </span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-2">
-                  {rows.map(renderCard)}
+                  {rows.map((s) => renderCard(s, m.key))}
                 </div>
-              </section>
+              </GlassCard>
             );
           })}
         </div>
