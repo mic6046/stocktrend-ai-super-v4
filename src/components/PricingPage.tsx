@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { Check, Loader2, Sparkles, Rocket, Zap, Newspaper, Info, Gem } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { startStripeCheckout, type SubscriptionPlan } from '../lib/subscription';
-import { PRICING_PLANS } from '../lib/pricingPlans';
+import { OVERAGE_OFFERS, PRICING_PLANS } from '../lib/pricingPlans';
+import { startOverageCheckout, type OverageProduct } from '../lib/usageApi';
 import { cn } from '../lib/utils';
 import { LegalLinks } from './LegalDocs';
 import { openLegalDoc } from '../lib/legal';
@@ -22,16 +23,6 @@ const QUOTA_COMPARE = [
   },
 ];
 
-const OVERAGES = [
-  { label: 'AI analysis mini reload', price: 'RM 5', note: '+5 analyses · Stripe MYR minimum' },
-  { label: 'AI news mini reload', price: 'RM 5', note: '+10 news summaries · Stripe MYR minimum' },
-  {
-    label: 'Reload pack',
-    price: 'RM 10',
-    note: '+10 analyses + 10 news · lasts until used (no daily reset)',
-  },
-];
-
 interface PricingPageProps {
   title?: string;
   subtitle?: string;
@@ -39,10 +30,11 @@ interface PricingPageProps {
 
 export function PricingPage({
   title = 'Quantum Node pricing',
-  subtitle = 'Basic or Pro — clear daily AI limits, fair overages when you need more.',
+  subtitle = 'Basic or Pro — clear daily AI limits, plus Reload pack when you need more.',
 }: PricingPageProps) {
   const { user, signOut } = useAuth();
   const [busyPlan, setBusyPlan] = useState<SubscriptionPlan | null>(null);
+  const [busyOverage, setBusyOverage] = useState<OverageProduct | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [acceptedLegal, setAcceptedLegal] = useState(false);
 
@@ -63,6 +55,22 @@ export function PricingPage({
     } catch (err: any) {
       setError(err?.message || 'Unable to start checkout.');
       setBusyPlan(null);
+    }
+  };
+
+  const handleOverage = async (product: OverageProduct) => {
+    if (!user?.email) {
+      setError('Please sign in with Google first.');
+      return;
+    }
+    setError(null);
+    setBusyOverage(product);
+    try {
+      const { url } = await startOverageCheckout(product, user.email);
+      window.location.href = url;
+    } catch (err: any) {
+      setError(err?.message || 'Unable to start reload checkout.');
+      setBusyOverage(null);
     }
   };
 
@@ -148,7 +156,6 @@ export function PricingPage({
           </span>
         </label>
 
-        {/* Subscription cards */}
         <div className="grid gap-6 md:grid-cols-2 max-w-4xl mx-auto">
           {PLANS.map((plan) => (
             <div
@@ -195,8 +202,8 @@ export function PricingPage({
               </ul>
               <button
                 type="button"
-                disabled={busyPlan !== null || !acceptedLegal}
-                onClick={() => handleCheckout(plan.id)}
+                disabled={busyPlan !== null || busyOverage !== null || !acceptedLegal}
+                onClick={() => void handleCheckout(plan.id)}
                 className={cn(
                   'flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-bold transition disabled:opacity-60',
                   plan.highlight
@@ -211,7 +218,6 @@ export function PricingPage({
           ))}
         </div>
 
-        {/* Quota comparison */}
         <div className="mt-10 grid gap-4 md:grid-cols-2">
           {QUOTA_COMPARE.map((row) => (
             <div
@@ -242,31 +248,52 @@ export function PricingPage({
           ))}
         </div>
 
-        {/* Overage / packs */}
-        <div className="mt-6 rounded-2xl border border-white/10 bg-[#0c0c0e] p-6">
-          <h3 className="text-sm font-bold text-white mb-1">Need more before reset?</h3>
+        <div className="mt-6 rounded-2xl border border-emerald-500/30 bg-[#0c0c0e] p-6">
+          <h3 className="text-sm font-bold text-white mb-1">Reload pack &amp; minis</h3>
           <p className="text-xs text-gray-500 mb-4">
-            Same overage rates for Basic and Pro. All plan quotas reset every day at{' '}
-            <span className="text-gray-300">midnight (Malaysia Time, MYT)</span>
-            {' '}— unused included credits do not roll over.
+            Same for Basic and Pro. Purchased credits last until used — they do not reset daily.
+            Daily plan quotas still reset at{' '}
+            <span className="text-gray-300">midnight (Malaysia Time, MYT)</span>.
           </p>
           <div className="grid gap-3 sm:grid-cols-3">
-            {OVERAGES.map((row) => (
+            {OVERAGE_OFFERS.map((row) => (
               <div
-                key={row.label}
-                className="rounded-xl border border-white/5 bg-black/40 px-4 py-3"
+                key={row.product}
+                className={cn(
+                  'rounded-xl border px-4 py-3 flex flex-col',
+                  row.highlight
+                    ? 'border-emerald-500/40 bg-emerald-500/10'
+                    : 'border-white/5 bg-black/40'
+                )}
               >
                 <div className="text-[10px] font-mono uppercase tracking-wider text-gray-500">
                   {row.label}
                 </div>
                 <div className="mt-1 text-xl font-bold text-emerald-400">{row.price}</div>
-                <div className="mt-0.5 text-[11px] text-gray-500">{row.note}</div>
+                <div className="mt-0.5 text-[11px] text-gray-500 flex-1 mb-3">{row.note}</div>
+                <button
+                  type="button"
+                  disabled={!user?.email || busyPlan !== null || busyOverage !== null}
+                  onClick={() => void handleOverage(row.product)}
+                  className={cn(
+                    'w-full min-h-[40px] rounded-xl text-[12px] font-bold disabled:opacity-50 cursor-pointer inline-flex items-center justify-center gap-1.5',
+                    row.highlight
+                      ? 'bg-emerald-500 text-black hover:bg-emerald-400'
+                      : 'border border-white/10 bg-white/5 text-white hover:bg-white/10'
+                  )}
+                >
+                  {busyOverage === row.product && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  {busyOverage === row.product
+                    ? 'Redirecting…'
+                    : user?.email
+                      ? `Buy · ${row.price}`
+                      : 'Sign in to buy'}
+                </button>
               </div>
             ))}
           </div>
         </div>
 
-        {/* Fine print */}
         <div className="mt-6 flex gap-2 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] p-4 text-[11px] leading-relaxed text-gray-400">
           <Info className="h-4 w-4 shrink-0 text-amber-400/80 mt-0.5" />
           <div className="space-y-2">
@@ -276,7 +303,7 @@ export function PricingPage({
               Decisions are yours alone.
             </p>
             <p className="text-gray-500">
-              Billing via Stripe · Basic RM 199/mo · Pro RM 349/mo · Cancel anytime before renewal.
+              Billing via Stripe · Basic RM 199/mo · Pro RM 349/mo · Reload pack RM 10 · Cancel anytime before renewal.
             </p>
             <LegalLinks />
           </div>

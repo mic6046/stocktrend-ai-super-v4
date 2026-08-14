@@ -1,4 +1,5 @@
 import type { SubscriptionPlan } from './subscription';
+import type { OverageProduct } from './usageApi';
 
 export type PricingPlanCard = {
   id: SubscriptionPlan;
@@ -11,6 +12,37 @@ export type PricingPlanCard = {
   badge?: string;
   icon: 'rocket' | 'gem';
 };
+
+/** One-time top-ups shown beside Basic / Pro. */
+export type OverageOffer = {
+  product: OverageProduct;
+  label: string;
+  price: string;
+  note: string;
+  highlight?: boolean;
+};
+
+export const OVERAGE_OFFERS: OverageOffer[] = [
+  {
+    product: 'analysis',
+    label: 'AI analysis mini',
+    price: 'RM 5',
+    note: '+5 analyses · lasts until used',
+  },
+  {
+    product: 'news',
+    label: 'AI news mini',
+    price: 'RM 5',
+    note: '+10 news summaries · lasts until used',
+  },
+  {
+    product: 'reload_pack',
+    label: 'Reload pack',
+    price: 'RM 10',
+    note: '+10 analyses + 10 news · lasts until used (no daily reset)',
+    highlight: true,
+  },
+];
 
 /** Public Basic / Pro cards — keep landing, sidebar, and PricingPage in sync. */
 export const PRICING_PLANS: PricingPlanCard[] = [
@@ -25,6 +57,7 @@ export const PRICING_PLANS: PricingPlanCard[] = [
       '20 AI stock analyses per day',
       '20 AI news summaries per day',
       'Each Search or Refresh uses 1 analysis credit',
+      'Reload pack RM 10 · +10 analyses +10 news (until used)',
       'Quotas reset every day (midnight MYT)',
       'Full charts, alerts, score & advisory',
       'Cloud sync across devices',
@@ -44,6 +77,7 @@ export const PRICING_PLANS: PricingPlanCard[] = [
       '30 AI stock analyses per day',
       '30 AI news summaries per day',
       'Each Search or Refresh uses 1 analysis credit',
+      'Reload pack RM 10 · +10 analyses +10 news (until used)',
       'Quotas reset every day (midnight MYT)',
       'Everything in Basic',
       'Same overage rates & Reload pack',

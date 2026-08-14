@@ -52,7 +52,7 @@ export function SubscriptionPlansSummary({
           <CreditCard className="h-3 w-3 shrink-0 text-gray-500" />
           <div className="min-w-0 flex-1 leading-tight">
             <p className="text-[10px] font-semibold text-emerald-400/90 truncate">{label}</p>
-            <p className="text-[8px] text-gray-600 truncate">199 · 349 /mo</p>
+            <p className="text-[8px] text-gray-600 truncate">199 · 349 · Reload 10</p>
           </div>
           {onCta && (
             <button

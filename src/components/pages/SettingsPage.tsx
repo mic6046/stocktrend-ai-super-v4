@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { Settings as SettingsIcon, Shield, CreditCard, Check, Loader2, Gem, Rocket } from 'lucide-react';
+import { Settings as SettingsIcon, Shield, CreditCard, Check, Loader2, Gem, Rocket, Zap } from 'lucide-react';
 import { GlassCard, SectionLabel } from '../analysis/GlassCard';
 import { MarketDataRefreshBar } from '../analysis/MarketDataRefreshBar';
 import type { MarketDataStatus, RefreshMode, AutoRefreshIntervalSec } from '../../lib/marketDataRefresh';
-import { PRICING_PLANS, planDisplayName } from '../../lib/pricingPlans';
+import { OVERAGE_OFFERS, PRICING_PLANS, planDisplayName } from '../../lib/pricingPlans';
 import { startStripeCheckout, type SubscriptionPlan } from '../../lib/subscription';
+import { startOverageCheckout, type OverageProduct } from '../../lib/usageApi';
 import { openLegalDoc } from '../../lib/legal';
 import { cn } from '../../lib/utils';
 
@@ -44,6 +45,7 @@ export function SettingsPage({
   quantTuningSlot,
 }: SettingsPageProps) {
   const [busyPlan, setBusyPlan] = useState<SubscriptionPlan | null>(null);
+  const [busyOverage, setBusyOverage] = useState<OverageProduct | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [acceptedLegal, setAcceptedLegal] = useState(false);
 
@@ -68,6 +70,22 @@ export function SettingsPage({
     } catch (err: any) {
       setError(err?.message || 'Unable to start checkout.');
       setBusyPlan(null);
+    }
+  };
+
+  const handleOverage = async (product: OverageProduct) => {
+    if (!userEmail) {
+      setError('Please sign in first.');
+      return;
+    }
+    setError(null);
+    setBusyOverage(product);
+    try {
+      const { url } = await startOverageCheckout(product, userEmail);
+      window.location.href = url;
+    } catch (err: any) {
+      setError(err?.message || 'Unable to start reload checkout.');
+      setBusyOverage(null);
     }
   };
 
@@ -174,7 +192,7 @@ export function SettingsPage({
                 <span className="text-xs font-normal text-gray-500">{plan.period}</span>
               </p>
               <ul className="mt-2 mb-3 space-y-1 flex-1">
-                {plan.features.slice(0, 3).map((f) => (
+                {plan.features.slice(0, 4).map((f) => (
                   <li key={f} className="flex items-start gap-1.5 text-[11px] text-gray-400">
                     <Check className="h-3 w-3 shrink-0 text-emerald-400 mt-0.5" />
                     {f}
@@ -183,7 +201,7 @@ export function SettingsPage({
               </ul>
               <button
                 type="button"
-                disabled={busyPlan !== null || !acceptedLegal || !userEmail}
+                disabled={busyPlan !== null || busyOverage !== null || !acceptedLegal || !userEmail}
                 onClick={() => void handleCheckout(plan.id)}
                 className={cn(
                   'w-full min-h-[40px] rounded-xl text-[12px] font-bold disabled:opacity-50 cursor-pointer inline-flex items-center justify-center gap-2',
@@ -197,6 +215,49 @@ export function SettingsPage({
               </button>
             </div>
           ))}
+        </div>
+
+        <div className="mt-5 rounded-xl border border-emerald-500/30 bg-emerald-500/[0.06] p-4">
+          <div className="flex items-center gap-2 mb-1">
+            <Zap className="h-3.5 w-3.5 text-emerald-400" />
+            <p className="text-[11px] font-mono uppercase tracking-[0.16em] text-emerald-400">
+              Need more credits?
+            </p>
+          </div>
+          <p className="text-[12px] text-gray-400 mb-3">
+            One-time Reload pack and minis — credits last until used (do not reset daily).
+          </p>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {OVERAGE_OFFERS.map((offer) => (
+              <div
+                key={offer.product}
+                className={cn(
+                  'rounded-lg border px-3 py-2.5 flex flex-col',
+                  offer.highlight
+                    ? 'border-emerald-500/40 bg-emerald-500/10'
+                    : 'border-white/10 bg-black/30'
+                )}
+              >
+                <p className="text-[12px] font-bold text-white">{offer.label}</p>
+                <p className="text-lg font-bold text-emerald-400">{offer.price}</p>
+                <p className="text-[10px] text-gray-500 mb-2 flex-1">{offer.note}</p>
+                <button
+                  type="button"
+                  disabled={!userEmail || busyPlan !== null || busyOverage !== null}
+                  onClick={() => void handleOverage(offer.product)}
+                  className={cn(
+                    'w-full min-h-[34px] rounded-lg text-[11px] font-bold disabled:opacity-50 cursor-pointer inline-flex items-center justify-center gap-1.5',
+                    offer.highlight
+                      ? 'bg-emerald-500 text-black hover:bg-emerald-400'
+                      : 'border border-white/10 bg-white/5 text-white hover:bg-white/10'
+                  )}
+                >
+                  {busyOverage === offer.product && <Loader2 className="h-3 w-3 animate-spin" />}
+                  {busyOverage === offer.product ? 'Redirecting…' : `Buy · ${offer.price}`}
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       </GlassCard>
 
