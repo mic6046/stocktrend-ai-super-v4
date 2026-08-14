@@ -58,12 +58,25 @@ export function filterIndicesByMarket<T extends { symbol?: string }>(
 
 const EU_SUFFIX = /\.(PA|DE|L|AS|BR|MI|MC)$/i;
 
+export type WatchlistMarket = 'US' | 'HK' | 'JP' | 'EU';
+
+export const WATCHLIST_MARKETS: { key: WatchlistMarket; label: string; short: string }[] = [
+  { key: 'US', label: 'United States', short: 'US' },
+  { key: 'HK', label: 'Hong Kong', short: 'HK' },
+  { key: 'JP', label: 'Japan', short: 'JP' },
+  { key: 'EU', label: 'Europe', short: 'EU' },
+];
+
+/** Classify a ticker into a listing market for watchlist grouping. */
+export function classifyTickerMarket(ticker: string): WatchlistMarket {
+  const t = ticker.toUpperCase();
+  if (t.endsWith('.HK') || /^\d{1,5}$/.test(t)) return 'HK';
+  if (t.endsWith('.T')) return 'JP';
+  if (EU_SUFFIX.test(t)) return 'EU';
+  return 'US';
+}
+
 export function tickerBelongsToMarket(ticker: string, market: DashboardMarket): boolean {
   if (market === 'ALL') return true;
-  const t = ticker.toUpperCase();
-  if (market === 'HK') return t.endsWith('.HK') || /^\d{1,5}$/.test(t);
-  if (market === 'JP') return t.endsWith('.T');
-  if (market === 'EU') return EU_SUFFIX.test(t);
-  // US: letter tickers / crypto — not HK/JP/EU
-  return !t.endsWith('.HK') && !t.endsWith('.T') && !EU_SUFFIX.test(t) && !/^\d{1,5}$/.test(t);
+  return classifyTickerMarket(ticker) === market;
 }
