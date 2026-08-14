@@ -162,12 +162,12 @@ export function AppSidebar({
 
         <div
           className={cn(
-            'border-t border-white/5 shrink-0 space-y-2 overflow-y-auto max-h-[55vh]',
-            isCollapsed ? 'p-2' : 'p-3'
+            'border-t border-white/5 shrink-0 flex flex-col min-h-0',
+            isCollapsed ? 'p-2 gap-2' : 'p-3 gap-2'
           )}
         >
           {!isCollapsed && userEmail && (
-            <div className="px-1 space-y-1.5">
+            <div className="px-1 space-y-1.5 shrink-0">
               <div className="flex items-center gap-2 min-w-0">
                 <Shield className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
                 <p className="text-[10px] text-gray-400 font-mono truncate" title={userEmail}>
@@ -178,89 +178,94 @@ export function AppSidebar({
             </div>
           )}
 
-          <SubscriptionPlansSummary
-            variant="sidebar"
-            collapsed={isCollapsed}
-            currentPlanLabel={planLabel}
-            currentPlanId={planId}
-            unlimited={planUnlimited}
-            onExpand={() => onCollapsedChange(false)}
-            onCta={() => {
-              onOpenPlans?.();
-              onMobileOpenChange(false);
-            }}
-            ctaLabel="Manage plan"
-          />
-
-          <SidebarAiChat
-            activePage={activePage}
-            collapsed={isCollapsed}
-            onExpandSidebar={() => onCollapsedChange(false)}
-            userEmail={userEmail}
-            onSignIn={() => {
-              onSignIn();
-              onMobileOpenChange(false);
-            }}
-            chatContext={chatContext}
-            onUsageUpdate={onChatUsageUpdate}
-          />
-
-          {!userEmail ? (
-            <button
-              type="button"
-              onClick={() => {
+          <div className="min-h-0 overflow-y-auto space-y-2">
+            <SidebarAiChat
+              activePage={activePage}
+              collapsed={isCollapsed}
+              onExpandSidebar={() => onCollapsedChange(false)}
+              userEmail={userEmail}
+              onSignIn={() => {
                 onSignIn();
                 onMobileOpenChange(false);
               }}
-              disabled={authLoading}
-              title="Sign in"
-              className={cn(
-                'w-full inline-flex items-center justify-center gap-2 min-h-[44px] rounded-xl border border-emerald-500/40 bg-emerald-500/15 font-bold text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50 cursor-pointer',
-                isCollapsed ? 'px-2' : 'px-3 text-[12px]'
-              )}
-            >
-              <LogIn className="h-4 w-4 shrink-0" />
-              {!isCollapsed && <span>Sign in</span>}
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => {
-                onSignOut();
+              chatContext={chatContext}
+              onUsageUpdate={onChatUsageUpdate}
+            />
+          </div>
+
+          {/* Sign bar — subscription always sits with Sign in/out */}
+          <div className="shrink-0 space-y-2 pt-1 border-t border-white/5">
+            <SubscriptionPlansSummary
+              variant="sidebar"
+              collapsed={isCollapsed}
+              currentPlanLabel={planLabel}
+              currentPlanId={planId}
+              unlimited={planUnlimited}
+              onExpand={() => onCollapsedChange(false)}
+              onCta={() => {
+                onOpenPlans?.();
                 onMobileOpenChange(false);
               }}
-              title="Sign out"
-              className={cn(
-                'w-full inline-flex items-center justify-center gap-2 min-h-[44px] rounded-xl border border-rose-500/30 bg-rose-500/10 font-bold text-rose-300 hover:bg-rose-500/20 cursor-pointer',
-                isCollapsed ? 'px-2' : 'px-3 text-[12px]'
-              )}
-            >
-              <LogOut className="h-4 w-4 shrink-0" />
-              {!isCollapsed && <span>Sign out</span>}
-            </button>
-          )}
+              ctaLabel="Manage plan"
+            />
 
-          {!isCollapsed && (
-            <div className="pt-1 px-0.5">
-              <p className="text-[9px] font-mono uppercase tracking-wider text-gray-600 mb-1.5">
+            {!userEmail ? (
+              <button
+                type="button"
+                onClick={() => {
+                  onSignIn();
+                  onMobileOpenChange(false);
+                }}
+                disabled={authLoading}
+                title="Sign in"
+                className={cn(
+                  'w-full inline-flex items-center justify-center gap-2 min-h-[44px] rounded-xl border border-emerald-500/40 bg-emerald-500/15 font-bold text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50 cursor-pointer',
+                  isCollapsed ? 'px-2' : 'px-3 text-[12px]'
+                )}
+              >
+                <LogIn className="h-4 w-4 shrink-0" />
+                {!isCollapsed && <span>Sign in</span>}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  onSignOut();
+                  onMobileOpenChange(false);
+                }}
+                title="Sign out"
+                className={cn(
+                  'w-full inline-flex items-center justify-center gap-2 min-h-[44px] rounded-xl border border-rose-500/30 bg-rose-500/10 font-bold text-rose-300 hover:bg-rose-500/20 cursor-pointer',
+                  isCollapsed ? 'px-2' : 'px-3 text-[12px]'
+                )}
+              >
+                <LogOut className="h-4 w-4 shrink-0" />
+                {!isCollapsed && <span>Sign out</span>}
+              </button>
+            )}
+
+            {!isCollapsed && (
+              <div className="pt-0.5 px-0.5">
+                <p className="text-[9px] font-mono uppercase tracking-wider text-gray-600 mb-1.5">
+                  Legal
+                </p>
+                <LegalLinks
+                  className="flex-col items-start gap-y-1.5 text-[10px]"
+                  linkClassName="text-gray-500 hover:text-emerald-400 underline-offset-2 hover:underline transition-colors cursor-pointer text-left"
+                />
+              </div>
+            )}
+            {isCollapsed && (
+              <button
+                type="button"
+                onClick={() => openLegalDoc('risk')}
+                className="w-full text-center text-[8px] text-gray-500 hover:text-emerald-400 leading-tight px-0.5 py-1 cursor-pointer"
+                title="Risk Warning · Terms of Use · Privacy Policy"
+              >
                 Legal
-              </p>
-              <LegalLinks
-                className="flex-col items-start gap-y-1.5 text-[10px]"
-                linkClassName="text-gray-500 hover:text-emerald-400 underline-offset-2 hover:underline transition-colors cursor-pointer text-left"
-              />
-            </div>
-          )}
-          {isCollapsed && (
-            <button
-              type="button"
-              onClick={() => openLegalDoc('risk')}
-              className="w-full text-center text-[8px] text-gray-500 hover:text-emerald-400 leading-tight px-0.5 py-1 cursor-pointer"
-              title="Risk Warning · Terms of Use · Privacy Policy"
-            >
-              Legal
-            </button>
-          )}
+              </button>
+            )}
+          </div>
         </div>
       </div>
     );

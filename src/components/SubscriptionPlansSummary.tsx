@@ -4,7 +4,7 @@ import { cn } from '../lib/utils';
 import { PRICING_PLANS, planDisplayName } from '../lib/pricingPlans';
 
 type SubscriptionPlansSummaryProps = {
-  variant: 'landing' | 'sidebar';
+  variant: 'landing' | 'landingInline' | 'sidebar';
   /** Current plan label from usage / subscription (sidebar). */
   currentPlanLabel?: string | null;
   currentPlanId?: string | null;
@@ -47,10 +47,10 @@ export function SubscriptionPlansSummary({
       ? 'Developer'
       : planDisplayName(currentPlanId, currentPlanLabel);
     return (
-      <div className="rounded-xl border border-white/10 bg-black/40 overflow-hidden">
-        <div className="px-2.5 py-1.5 border-b border-white/5 flex items-center gap-1.5">
+      <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 overflow-hidden">
+        <div className="px-2.5 py-1.5 border-b border-amber-500/20 flex items-center gap-1.5">
           <CreditCard className="h-3.5 w-3.5 text-amber-400 shrink-0" />
-          <p className="text-[10px] font-mono uppercase tracking-wider text-gray-400 truncate">
+          <p className="text-[10px] font-mono uppercase tracking-wider text-amber-200/90 truncate">
             Subscription
           </p>
         </div>
@@ -80,7 +80,7 @@ export function SubscriptionPlansSummary({
             <button
               type="button"
               onClick={onCta}
-              className="w-full min-h-[32px] rounded-lg border border-amber-500/35 bg-amber-500/10 text-[10px] font-bold uppercase tracking-wider text-amber-200 hover:bg-amber-500/20 cursor-pointer"
+              className="w-full min-h-[36px] rounded-lg border border-amber-500/40 bg-amber-500/15 text-[11px] font-bold uppercase tracking-wider text-amber-100 hover:bg-amber-500/25 cursor-pointer"
             >
               {ctaLabel || 'View plans'}
             </button>
@@ -90,7 +90,57 @@ export function SubscriptionPlansSummary({
     );
   }
 
-  // landing
+  if (variant === 'landingInline') {
+    return (
+      <div id="plans-inline" className="mt-4 rounded-2xl border border-emerald-500/25 bg-emerald-500/5 p-3 sm:p-4 text-left">
+        <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-emerald-400 mb-2">
+          Subscription · MYR
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          {PRICING_PLANS.map((plan) => (
+            <button
+              key={plan.id}
+              type="button"
+              onClick={onCta}
+              className={cn(
+                'rounded-xl border px-2.5 py-2.5 text-left cursor-pointer transition-colors',
+                plan.highlight
+                  ? 'border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20'
+                  : 'border-white/10 bg-black/40 hover:bg-white/5'
+              )}
+            >
+              <div className="flex items-center gap-1 mb-0.5">
+                {plan.icon === 'gem' ? (
+                  <Gem className="h-3 w-3 text-emerald-400" />
+                ) : (
+                  <Rocket className="h-3 w-3 text-blue-400" />
+                )}
+                <span className="text-[11px] font-bold text-white">{plan.name}</span>
+              </div>
+              <p className="text-sm font-extrabold text-white leading-tight">
+                {plan.price}
+                <span className="text-[10px] font-normal text-gray-500">{plan.period}</span>
+              </p>
+              <p className="mt-1 text-[10px] text-gray-500 leading-snug line-clamp-2">
+                {plan.features[0]}
+              </p>
+            </button>
+          ))}
+        </div>
+        {onCta && (
+          <button
+            type="button"
+            onClick={onCta}
+            className="mt-3 w-full min-h-[40px] rounded-xl bg-emerald-500 text-[12px] font-bold text-black hover:bg-emerald-400 cursor-pointer"
+          >
+            {ctaLabel || 'Sign in to subscribe'}
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  // landing (full section)
   return (
     <section id="plans" className="w-full scroll-mt-24" aria-label="Subscription plans">
       <div className="text-center mb-6 sm:mb-8">

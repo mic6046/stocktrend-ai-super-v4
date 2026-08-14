@@ -76,6 +76,12 @@ export function LandingPage() {
               </p>
               <AuthPanel variant="landing" />
             </div>
+
+            <SubscriptionPlansSummary
+              variant="landingInline"
+              onCta={scrollToSignIn}
+              ctaLabel="Sign in to subscribe"
+            />
           </div>
 
           <section className="w-full min-w-0" aria-label="Product preview">
