@@ -54,7 +54,12 @@ import {
   type DashboardMarket,
 } from './lib/dashboardMarket';
 import { useAuth } from './lib/auth';
-import { loadUserData, saveUserData } from './lib/userData';
+import {
+  subscribeUserData,
+  saveUserData,
+  accountSyncFingerprint,
+  type UserCloudData,
+} from './lib/userData';
 import { apiUrl, assertJsonResponse, loggedFetch, withMarketRefreshLock } from './lib/api';
 import {
   loadRefreshMode,
@@ -1101,6 +1106,10 @@ export default function App() {
   const [cloudSyncStatus, setCloudSyncStatus] = useState<'idle' | 'loading' | 'synced' | 'error'>('idle');
   const [cloudHydrated, setCloudHydrated] = useState(false);
   const cloudHydratedRef = useRef(false);
+  /** Skip cloud writes while applying a remote snapshot (avoids echo loops). */
+  const suppressCloudSaveRef = useRef(false);
+  /** Last applied/saved account payload hash — ignore identical Firestore echoes. */
+  const lastSyncFingerprintRef = useRef('');
   const [usage, setUsage] = useState<UsageSnapshot | null>(null);
   const [quotaBanner, setQuotaBanner] = useState<{ kind: 'analysis' | 'news'; message: string } | null>(null);
   const [ticker, setTicker] = useState('');
@@ -2572,31 +2581,45 @@ export default function App() {
     }
   }, [annotations]);
 
-  // Load user data from Firestore after sign-in (active subscribers only)
+  // Live same-account sync: watchlist, AI signals, portfolio, alerts, prefs across devices
   useEffect(() => {
     if (!user?.email || accessState !== 'active') {
       cloudHydratedRef.current = false;
       setCloudHydrated(false);
       setCloudSyncStatus('idle');
+      lastSyncFingerprintRef.current = '';
       return;
     }
 
-    let cancelled = false;
+    setCloudSyncStatus('loading');
     cloudHydratedRef.current = false;
     setCloudHydrated(false);
-    (async () => {
-      setCloudSyncStatus('loading');
-      try {
-        const cloud = await loadUserData(user.email!);
-        if (cancelled) return;
+    lastSyncFingerprintRef.current = '';
 
-        if (Array.isArray(cloud.alerts) && cloud.alerts.length > 0) {
+    const unsub = subscribeUserData(
+      user.email,
+      (snap) => {
+        const cloud = snap.data;
+        const fp = accountSyncFingerprint(cloud);
+        if (cloudHydratedRef.current && fp === lastSyncFingerprintRef.current) {
+          setCloudSyncStatus('synced');
+          return;
+        }
+
+        const isLiveRemote = cloudHydratedRef.current;
+        if (isLiveRemote) suppressCloudSaveRef.current = true;
+
+        // Cloud wins when field is present; null = never synced → keep local for first upload
+        if (Array.isArray(cloud.alerts)) {
           setAlerts(cloud.alerts as PriceAlert[]);
           localStorage.setItem('quantum_price_alerts', JSON.stringify(cloud.alerts));
         }
         if (typeof cloud.autoAlertRsiDivergence === 'boolean') {
           setAutoAlertRsiDivergence(cloud.autoAlertRsiDivergence);
-          localStorage.setItem('quantum_auto_alert_rsi_divergence', JSON.stringify(cloud.autoAlertRsiDivergence));
+          localStorage.setItem(
+            'quantum_auto_alert_rsi_divergence',
+            JSON.stringify(cloud.autoAlertRsiDivergence)
+          );
         }
         if (cloud.modelWeights) {
           setModelWeights((prev) => {
@@ -2656,20 +2679,28 @@ export default function App() {
           }
         }
 
+        lastSyncFingerprintRef.current = fp;
         cloudHydratedRef.current = true;
         setCloudHydrated(true);
         setCloudSyncStatus('synced');
-      } catch (err) {
-        console.warn('Firestore load failed:', err);
+        // Refresh Watchlist / Portfolio pages (and push local-only fields on first hydrate)
+        notifyAccountDataChanged('all');
+
+        if (isLiveRemote) {
+          window.setTimeout(() => {
+            suppressCloudSaveRef.current = false;
+          }, 900);
+        }
+      },
+      (err) => {
+        console.warn('Firestore sync failed:', err);
         cloudHydratedRef.current = true;
         setCloudHydrated(true);
         setCloudSyncStatus('error');
       }
-    })();
+    );
 
-    return () => {
-      cancelled = true;
-    };
+    return () => unsub();
   }, [user?.email, accessState]);
 
   const refreshUsage = async () => {
@@ -2706,33 +2737,45 @@ export default function App() {
     return () => window.removeEventListener('quantum:usage-refresh', onRefresh);
   }, [user?.email]);
 
-  // Persist user data to Firestore while signed in with active subscription
+  const buildAccountSyncPayload = (): Partial<UserCloudData> => ({
+    alerts,
+    autoAlertRsiDivergence,
+    modelWeights,
+    trendlines,
+    annotations,
+    watchlist: loadWatchlist(),
+    portfolio: loadPortfolio(),
+    signalCache: loadSignalCache(),
+    prefs: {
+      refreshMode,
+      autoRefreshIntervalSec,
+      dashboardMarket: loadDashboardMarket(),
+      sidebarCollapsed,
+      analysisHorizon,
+    },
+  });
+
+  const pushAccountSync = (payload: Partial<UserCloudData>) => {
+    if (!user?.email || suppressCloudSaveRef.current || !cloudHydratedRef.current) return;
+    const fp = accountSyncFingerprint(payload);
+    if (fp === lastSyncFingerprintRef.current) return;
+    lastSyncFingerprintRef.current = fp;
+    setCloudSyncStatus('loading');
+    saveUserData(user.email, payload)
+      .then(() => setCloudSyncStatus('synced'))
+      .catch((err) => {
+        console.warn('Firestore save failed:', err);
+        setCloudSyncStatus('error');
+      });
+  };
+
+  // Persist React-owned fields to Firestore (alerts, signals state, prefs, …)
   useEffect(() => {
     if (!user?.email || accessState !== 'active' || !cloudHydrated) return;
 
     const timer = window.setTimeout(() => {
-      saveUserData(user.email!, {
-        alerts,
-        autoAlertRsiDivergence,
-        modelWeights,
-        trendlines,
-        annotations,
-        watchlist: loadWatchlist(),
-        portfolio: loadPortfolio(),
-        signalCache: loadSignalCache(),
-        prefs: {
-          refreshMode,
-          autoRefreshIntervalSec,
-          dashboardMarket: loadDashboardMarket(),
-          sidebarCollapsed,
-          analysisHorizon,
-        },
-      })
-        .then(() => setCloudSyncStatus('synced'))
-        .catch((err) => {
-          console.warn('Firestore save failed:', err);
-          setCloudSyncStatus('error');
-        });
+      if (suppressCloudSaveRef.current) return;
+      pushAccountSync(buildAccountSyncPayload());
     }, 800);
 
     return () => window.clearTimeout(timer);
@@ -2752,13 +2795,18 @@ export default function App() {
     analysisHorizon,
   ]);
 
-  // Watchlist / portfolio / prefs local writes → push to cloud for same account
+  // Watchlist / portfolio / prefs localStorage writes → push full account blob
   useEffect(() => {
     if (!user?.email || accessState !== 'active' || !cloudHydrated) return;
     return subscribeAccountDataChanged(() => {
       window.setTimeout(() => {
-        if (!user?.email || !cloudHydratedRef.current) return;
-        saveUserData(user.email, {
+        if (suppressCloudSaveRef.current || !cloudHydratedRef.current) return;
+        pushAccountSync({
+          alerts,
+          autoAlertRsiDivergence,
+          modelWeights,
+          trendlines,
+          annotations,
           watchlist: loadWatchlist(),
           portfolio: loadPortfolio(),
           signalCache: loadSignalCache(),
@@ -2769,21 +2817,20 @@ export default function App() {
             sidebarCollapsed: loadSidebarCollapsed(),
             analysisHorizon,
           },
-        })
-          .then(() => setCloudSyncStatus('synced'))
-          .catch((err) => {
-            console.warn('Firestore account sync failed:', err);
-            setCloudSyncStatus('error');
-          });
+        });
       }, 500);
     });
-  }, [user?.email, accessState, cloudHydrated, analysisHorizon]);
-
-  // After hydrate: refresh pages that mirror localStorage (watchlist/portfolio)
-  useEffect(() => {
-    if (!cloudHydrated || !user?.email || accessState !== 'active') return;
-    notifyAccountDataChanged('all');
-  }, [cloudHydrated, user?.email, accessState]);
+  }, [
+    user?.email,
+    accessState,
+    cloudHydrated,
+    alerts,
+    autoAlertRsiDivergence,
+    modelWeights,
+    trendlines,
+    annotations,
+    analysisHorizon,
+  ]);
 
   const [selectedColor, setSelectedColor] = useState('#f59e0b'); // Amber default
   const [isDrawing, setIsDrawing] = useState(false);
