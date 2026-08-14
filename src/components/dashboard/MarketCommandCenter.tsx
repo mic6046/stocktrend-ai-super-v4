@@ -1,7 +1,8 @@
-import React, { useMemo } from 'react';
-import { TrendingUp, TrendingDown, Sparkles, Eye, ShieldAlert, ArrowRight } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { TrendingUp, TrendingDown, Sparkles, Eye, ShieldAlert, ArrowRight, Globe } from 'lucide-react';
 import { GlassCard, SectionLabel } from '../analysis/GlassCard';
 import { cn } from '../../lib/utils';
+import { POPULAR_UNIVERSE, type SuggestMarket } from '../../lib/suggestTradeUniverses';
 
 export type MarketIndex = {
   symbol?: string;
@@ -21,6 +22,8 @@ export type CommandStockRow = {
   note?: string;
 };
 
+type DashboardMarket = Exclude<SuggestMarket, never>; // US | HK | JP | EU | ALL
+
 type MarketCommandCenterProps = {
   indices: MarketIndex[];
   sentiment: any | null;
@@ -32,7 +35,74 @@ type MarketCommandCenterProps = {
   onGoFind: () => void;
 };
 
-const CORE_SYMBOLS = ['^GSPC', '^IXIC', '^DJI', '^RUT'];
+const MARKET_OPTS: { key: DashboardMarket; label: string }[] = [
+  { key: 'US', label: 'United States' },
+  { key: 'HK', label: 'Hong Kong' },
+  { key: 'JP', label: 'Japan' },
+  { key: 'EU', label: 'Europe' },
+  { key: 'ALL', label: 'All markets' },
+];
+
+const INDEX_BY_MARKET: Record<Exclude<DashboardMarket, 'ALL'>, string[]> = {
+  US: ['^GSPC', '^IXIC', '^DJI', '^RUT'],
+  HK: ['^HSI', '^KS11'],
+  JP: ['^N225', '^KS11'],
+  EU: ['^STOXX50E', '^FTSE', '^GDAXI', '^FCHI'],
+};
+
+const ALL_INDEX_SYMBOLS = ['^GSPC', '^HSI', '^N225', '^STOXX50E'];
+
+const INDEX_LABEL: Record<string, string> = {
+  '^GSPC': 'S&P 500',
+  '^IXIC': 'NASDAQ',
+  '^DJI': 'DOW 30',
+  '^RUT': 'RUSSELL 2000',
+  '^HSI': 'HANG SENG',
+  '^N225': 'NIKKEI',
+  '^FTSE': 'FTSE 100',
+  '^GDAXI': 'DAX',
+  '^STOXX50E': 'EURO STOXX 50',
+  '^FCHI': 'CAC 40',
+  '^KS11': 'KOSPI',
+};
+
+const STORAGE_KEY = 'qn-dashboard-market';
+
+const EU_TICKERS = new Set(
+  POPULAR_UNIVERSE.filter((u) => u.market === 'EU').map((u) => u.ticker.toUpperCase())
+);
+
+function loadMarket(): DashboardMarket {
+  try {
+    const v = localStorage.getItem(STORAGE_KEY);
+    if (v === 'US' || v === 'HK' || v === 'JP' || v === 'EU' || v === 'ALL') return v;
+  } catch {
+    /* ignore */
+  }
+  return 'US';
+}
+
+function tickerMarket(ticker: string): Exclude<DashboardMarket, 'ALL'> {
+  const t = ticker.toUpperCase();
+  if (t.endsWith('.HK') || /^\d{4}(\.HK)?$/.test(t)) return 'HK';
+  if (t.endsWith('.T')) return 'JP';
+  if (EU_TICKERS.has(t) || t.includes('.PA') || t.includes('.DE') || t.includes('.L')) return 'EU';
+  return 'US';
+}
+
+function rowMatchesMarket(ticker: string, market: DashboardMarket): boolean {
+  if (market === 'ALL') return true;
+  return tickerMarket(ticker) === market;
+}
+
+function formatPrice(price: number | undefined, market: DashboardMarket, ticker?: string): string {
+  if (price == null || !Number.isFinite(price)) return '—';
+  const m = market === 'ALL' && ticker ? tickerMarket(ticker) : market === 'ALL' ? 'US' : market;
+  if (m === 'HK') return `HK$${price.toFixed(2)}`;
+  if (m === 'JP') return `¥${price.toFixed(0)}`;
+  if (m === 'EU') return `€${price.toFixed(2)}`;
+  return `$${price.toFixed(2)}`;
+}
 
 function headlineText(raw: unknown): string | null {
   if (!raw) return null;
@@ -43,56 +113,104 @@ function headlineText(raw: unknown): string | null {
   return null;
 }
 
-function sentimentFromApi(sentiment: any | null): {
+function sentimentFromApi(
+  sentiment: any | null,
+  market: DashboardMarket
+): {
   label: 'BULLISH' | 'NEUTRAL' | 'BEARISH';
   confidence: number;
   why: string;
+  source: string;
 } {
-  if (!sentiment?.US) {
+  const pickKey = market === 'HK' ? 'HK' : market === 'US' || market === 'ALL' ? 'US' : 'US';
+  const block = sentiment?.[pickKey] || (market === 'ALL' ? sentiment?.US : null);
+
+  if (!block) {
     return {
       label: 'NEUTRAL',
       confidence: 50,
-      why: 'Waiting for market news feed to estimate sentiment.',
+      why:
+        market === 'JP' || market === 'EU'
+          ? 'Headline sentiment is strongest for US & HK feeds — outlook below uses the nearest available proxy.'
+          : 'Waiting for market news feed to estimate sentiment.',
+      source: pickKey,
     };
   }
-  const us = sentiment.US;
-  const total = Math.max(1, Number(us.total) || Number(us.good || 0) + Number(us.neutral || 0) + Number(us.bad || 0));
-  const good = Number(us.good || 0);
-  const bad = Number(us.bad || 0);
+
+  const total = Math.max(
+    1,
+    Number(block.total) || Number(block.good || 0) + Number(block.neutral || 0) + Number(block.bad || 0)
+  );
+  const good = Number(block.good || 0);
+  const bad = Number(block.bad || 0);
   const score = (good - bad) / total;
   const confidence = Math.round(Math.min(92, Math.max(45, 55 + Math.abs(score) * 40)));
-  const topHeadline = Array.isArray(us.headlines)
-    ? headlineText(us.headlines[0])
-    : headlineText(us.headlines);
+  const topHeadline = Array.isArray(block.headlines)
+    ? headlineText(block.headlines[0])
+    : headlineText(block.headlines);
+
+  const regionNote =
+    market === 'JP' || market === 'EU'
+      ? ` (${pickKey} news proxy for ${market})`
+      : market === 'ALL'
+        ? ' (global view weighted to US feed)'
+        : '';
+
   if (score > 0.12) {
     return {
       label: 'BULLISH',
       confidence,
-      why: topHeadline || 'Positive headlines outweigh negatives — risk appetite looks constructive.',
+      why: (topHeadline || 'Positive headlines outweigh negatives — risk appetite looks constructive.') + regionNote,
+      source: pickKey,
     };
   }
   if (score < -0.12) {
     return {
       label: 'BEARISH',
       confidence,
-      why: topHeadline || 'Negative headlines dominate — caution is warranted near support levels.',
+      why: (topHeadline || 'Negative headlines dominate — caution is warranted near support levels.') + regionNote,
+      source: pickKey,
     };
   }
   return {
     label: 'NEUTRAL',
     confidence,
-    why: topHeadline || 'Mixed headlines — markets lack a clear directional bias today.',
+    why: (topHeadline || 'Mixed headlines — markets lack a clear directional bias today.') + regionNote,
+    source: pickKey,
   };
+}
+
+function resolveIndices(indices: MarketIndex[], symbols: string[]): MarketIndex[] {
+  const list = Array.isArray(indices) ? indices.filter(Boolean) : [];
+  const bySym = new Map(list.map((i) => [i.symbol, i]));
+  return symbols.map((sym) => {
+    const hit = bySym.get(sym);
+    if (hit) {
+      return {
+        ...hit,
+        shortName: hit.shortName || INDEX_LABEL[sym] || sym,
+      };
+    }
+    // Stock proxies (e.g. 0700.HK) may appear in signal cache only — still show placeholder
+    return {
+      symbol: sym,
+      shortName: INDEX_LABEL[sym] || sym,
+      regularMarketPrice: undefined,
+      regularMarketChangePercent: undefined,
+    };
+  });
 }
 
 function StockTable({
   rows,
   onOpen,
   emptyHint,
+  market,
 }: {
   rows: CommandStockRow[];
   onOpen: (t: string) => void;
   emptyHint: string;
+  market: DashboardMarket;
 }) {
   if (!rows.length) {
     return <p className="text-[12px] text-gray-500 py-4 text-center">{emptyHint}</p>;
@@ -120,7 +238,7 @@ function StockTable({
               <td className="py-2.5 px-2 font-mono font-bold text-white text-[12px]">{r.ticker}</td>
               <td className="py-2.5 px-2 text-[11px] text-gray-400 truncate max-w-[140px]">{r.name || '—'}</td>
               <td className="py-2.5 px-2 font-mono text-[12px] text-white">
-                {r.price != null ? `$${r.price.toFixed(2)}` : '—'}
+                {formatPrice(r.price, market, r.ticker)}
               </td>
               <td
                 className={cn(
@@ -154,25 +272,31 @@ export function MarketCommandCenter({
   onOpenTicker,
   onGoFind,
 }: MarketCommandCenterProps) {
-  const core = useMemo(() => {
-    const list = Array.isArray(indices) ? indices.filter(Boolean) : [];
-    const bySym = new Map(list.map((i) => [i.symbol, i]));
-    return CORE_SYMBOLS.map((sym) => {
-      const hit = bySym.get(sym);
-      const fallback = list.find((i) =>
-        sym === '^GSPC'
-          ? /S&P|GSPC/i.test(i.shortName || '')
-          : sym === '^IXIC'
-            ? /NASDAQ|IXIC/i.test(i.shortName || '')
-            : sym === '^DJI'
-              ? /DOW|DJI/i.test(i.shortName || '')
-              : /RUSSELL|RUT/i.test(i.shortName || '')
-      );
-      return hit || fallback || { symbol: sym, shortName: sym, regularMarketPrice: undefined };
-    });
-  }, [indices]);
+  const [market, setMarket] = useState<DashboardMarket>(() => loadMarket());
 
-  const outlook = sentimentFromApi(sentiment);
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, market);
+    } catch {
+      /* ignore */
+    }
+  }, [market]);
+
+  const core = useMemo(() => {
+    const symbols = market === 'ALL' ? ALL_INDEX_SYMBOLS : INDEX_BY_MARKET[market];
+    return resolveIndices(indices, symbols).slice(0, 4);
+  }, [indices, market]);
+
+  const outlook = sentimentFromApi(sentiment, market);
+
+  const filterRows = (rows: CommandStockRow[]) =>
+    rows.filter((r) => rowMatchesMarket(r.ticker, market));
+
+  const opp = filterRows(opportunities);
+  const watchRows = filterRows(watch);
+  const riskRows = filterRows(riskAlerts);
+
+  const marketLabel = MARKET_OPTS.find((m) => m.key === market)?.label || market;
 
   return (
     <div className="space-y-5 min-w-0">
@@ -183,7 +307,7 @@ export function MarketCommandCenter({
             Market Today
           </h2>
           <p className="mt-1 text-[13px] text-gray-500 max-w-xl">
-            A quick read of major indices and AI-ranked opportunities — no chart jargon required.
+            A quick read of {marketLabel} indices and AI-ranked opportunities — no chart jargon required.
           </p>
         </div>
         <button
@@ -195,7 +319,36 @@ export function MarketCommandCenter({
         </button>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+        <div className="inline-flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider text-gray-500 shrink-0">
+          <Globe className="h-3.5 w-3.5 text-emerald-400" />
+          Market
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {MARKET_OPTS.map((m) => (
+            <button
+              key={m.key}
+              type="button"
+              onClick={() => setMarket(m.key)}
+              className={cn(
+                'min-h-[36px] rounded-full px-3 text-[11px] font-bold uppercase tracking-wide border cursor-pointer',
+                market === m.key
+                  ? 'bg-emerald-500 text-black border-emerald-400'
+                  : 'bg-white/5 text-gray-400 border-white/10 hover:text-white hover:border-white/20'
+              )}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div
+        className={cn(
+          'grid gap-3',
+          core.length <= 2 ? 'grid-cols-2' : 'grid-cols-2 lg:grid-cols-4'
+        )}
+      >
         {core.map((idx) => {
           const pct = idx.regularMarketChangePercent || 0;
           const up = pct >= 0;
@@ -224,7 +377,7 @@ export function MarketCommandCenter({
 
       <GlassCard className="border-cyan-500/20">
         <SectionLabel icon={<Sparkles className="w-3.5 h-3.5 text-cyan-400" />}>
-          AI Market Outlook
+          AI Market Outlook · {marketLabel}
         </SectionLabel>
         <div className="mt-3 flex flex-col sm:flex-row sm:items-center gap-4">
           <div className="shrink-0">
@@ -243,9 +396,7 @@ export function MarketCommandCenter({
               Confidence {outlook.confidence}%
             </p>
           </div>
-          <p className="text-[13px] text-gray-300 leading-relaxed flex-1">
-            {outlook.why}
-          </p>
+          <p className="text-[13px] text-gray-300 leading-relaxed flex-1">{outlook.why}</p>
         </div>
         <p className="mt-3 text-[11px] text-gray-500">
           Plain language: sentiment summarizes whether recent headlines lean positive, mixed, or negative — not a trade order.
@@ -258,17 +409,19 @@ export function MarketCommandCenter({
             Top AI Opportunities
           </SectionLabel>
           <StockTable
-            rows={opportunities}
+            rows={opp}
             onOpen={onOpenTicker}
-            emptyHint="Run Find Trades or Suggest to populate opportunities."
+            market={market}
+            emptyHint={`No ${marketLabel} opportunities yet. Run Find Trades for this market.`}
           />
         </GlassCard>
         <GlassCard className="min-w-0">
           <SectionLabel icon={<Eye className="w-3.5 h-3.5 text-cyan-400" />}>Watch</SectionLabel>
           <StockTable
-            rows={watch}
+            rows={watchRows}
             onOpen={onOpenTicker}
-            emptyHint="Near-miss setups appear here after a scan."
+            market={market}
+            emptyHint="Near-miss setups for this market appear here after a scan."
           />
         </GlassCard>
         <GlassCard className="min-w-0">
@@ -276,9 +429,10 @@ export function MarketCommandCenter({
             Risk Alerts
           </SectionLabel>
           <StockTable
-            rows={riskAlerts}
+            rows={riskRows}
             onOpen={onOpenTicker}
-            emptyHint="Bearish or high-risk names from your last scan show here."
+            market={market}
+            emptyHint="Bearish or high-risk names for this market show here."
           />
         </GlassCard>
       </div>
