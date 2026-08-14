@@ -354,7 +354,7 @@ export function AppSidebar({
     <>
       <aside
         className={cn(
-          'hidden lg:flex flex-col shrink-0 border-r border-white/[0.06] bg-[#070709] sticky top-0 h-screen max-h-screen overflow-hidden z-30 transition-[width] duration-200',
+          'hidden lg:flex flex-col shrink-0 border-r border-white/[0.06] bg-[color:var(--qn-bg-elevated)] sticky top-0 h-screen max-h-screen overflow-hidden z-30 transition-[width] duration-200',
           collapsed ? 'w-[4.25rem]' : 'w-[15.5rem]'
         )}
       >
@@ -369,7 +369,7 @@ export function AppSidebar({
             aria-label="Close sidebar backdrop"
             onClick={() => onMobileOpenChange(false)}
           />
-          <aside className="absolute left-0 top-0 bottom-0 w-[min(19rem,90vw)] bg-[#070709] border-r border-white/[0.08] shadow-2xl pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] overflow-hidden">
+          <aside className="absolute left-0 top-0 bottom-0 w-[min(19rem,90vw)] bg-[color:var(--qn-bg-elevated)] border-r border-white/[0.08] shadow-2xl pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] overflow-hidden">
             {navBody('mobile')}
           </aside>
         </div>

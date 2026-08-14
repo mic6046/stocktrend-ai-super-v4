@@ -57,7 +57,7 @@ export function AppHeader({
   const marketLive = marketDataStatus === 'idle' || marketDataStatus === 'updated';
 
   return (
-    <header className="relative z-40 border-b border-white/5 backdrop-blur-md sticky top-0 pt-[env(safe-area-inset-top)] bg-[#050505]/92">
+    <header className="relative z-40 border-b border-white/5 backdrop-blur-md sticky top-0 pt-[env(safe-area-inset-top)] bg-[color:var(--qn-bg)]/92">
       <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 min-w-0">
         {/* Left: menu + brand */}
         <div className="flex items-center gap-2 shrink-0 min-w-0">

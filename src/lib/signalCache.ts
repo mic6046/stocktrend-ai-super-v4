@@ -16,6 +16,9 @@ export type CachedSignalRow = {
   price?: number;
   changePct?: number;
   bucket?: 'opportunity' | 'watch' | 'risk';
+  /** Near Support / Near Resistance / Mid Range / … */
+  srSignal?: string;
+  srDetail?: string;
   /** Per-row freshness for cross-device merge */
   updatedAt?: number;
 };
@@ -42,6 +45,8 @@ export function normalizeSignalRow(raw: Partial<CachedSignalRow> | null | undefi
   if (typeof raw.price === 'number' && Number.isFinite(raw.price)) row.price = raw.price;
   if (typeof raw.changePct === 'number' && Number.isFinite(raw.changePct)) row.changePct = raw.changePct;
   if (raw.bucket === 'opportunity' || raw.bucket === 'watch' || raw.bucket === 'risk') row.bucket = raw.bucket;
+  if (raw.srSignal) row.srSignal = String(raw.srSignal);
+  if (raw.srDetail) row.srDetail = String(raw.srDetail);
   if (typeof raw.updatedAt === 'number' && Number.isFinite(raw.updatedAt)) row.updatedAt = raw.updatedAt;
   return row;
 }

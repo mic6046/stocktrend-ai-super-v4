@@ -42,6 +42,12 @@ import { SettingsPage } from './components/pages/SettingsPage';
 import { SelfLearningSettings } from './components/pages/SelfLearningSettings';
 import { AlertsPage } from './components/pages/AlertsPage';
 import { loadSignalCache, mergeSignalCache, removeSignalCache, saveSignalCache, type CachedSignalRow } from './lib/signalCache';
+import { srSignalFromEngine } from './lib/srProximity';
+import {
+  loadAppTheme,
+  saveAppTheme,
+  type AppTheme,
+} from './lib/themeStore';
 import { findATrade } from './lib/findATrade';
 import { POPULAR_UNIVERSE } from './lib/suggestTradeUniverses';
 import { loadWatchlist } from './lib/watchlistStore';
@@ -1173,6 +1179,7 @@ export default function App() {
   const [activePage, setActivePage] = useState<AppPage>('DASHBOARD');
   const [dashboardMarket, setDashboardMarket] = useState<DashboardMarket>(() => loadDashboardMarket());
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => loadSidebarCollapsed());
+  const [appTheme, setAppTheme] = useState<AppTheme>(() => loadAppTheme());
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [signalCache, setSignalCache] = useState<CachedSignalRow[]>(() => loadSignalCache());
   const [signalsUpdating, setSignalsUpdating] = useState(false);
@@ -2780,6 +2787,10 @@ export default function App() {
           if (typeof cloud.prefs.analysisHorizon === 'string' && cloud.prefs.analysisHorizon) {
             setAnalysisHorizon(cloud.prefs.analysisHorizon as HorizonKey);
           }
+          if (cloud.prefs.theme === 'light' || cloud.prefs.theme === 'dark') {
+            setAppTheme(cloud.prefs.theme);
+            saveAppTheme(cloud.prefs.theme, { silent: true });
+          }
         }
 
         lastSyncFingerprintRef.current = fp;
@@ -2825,6 +2836,7 @@ export default function App() {
                 autoRefreshIntervalSec: loadAutoRefreshIntervalSec(),
                 dashboardMarket: loadDashboardMarket(),
                 sidebarCollapsed: loadSidebarCollapsed(),
+                theme: loadAppTheme(),
                 ...(cloud.prefs || {}),
               },
             };
@@ -2938,6 +2950,7 @@ export default function App() {
           dashboardMarket: loadDashboardMarket(),
           sidebarCollapsed,
           analysisHorizon,
+          theme: appTheme,
         },
       });
     }, 800);
@@ -2955,6 +2968,7 @@ export default function App() {
     autoRefreshIntervalSec,
     sidebarCollapsed,
     analysisHorizon,
+    appTheme,
   ]);
 
   // Prefs localStorage writes → cloud (portfolio/alerts/watchlist/signals are dedicated)
@@ -2976,6 +2990,7 @@ export default function App() {
               dashboardMarket: loadDashboardMarket(),
               sidebarCollapsed: loadSidebarCollapsed(),
               analysisHorizon,
+              theme: loadAppTheme(),
             },
           });
         }, 400);
@@ -6239,6 +6254,7 @@ export default function App() {
       (data as any)?.quantum?.suggestedAction ||
       recommendation ||
       '—';
+    const sr = srSignalFromEngine((data as any)?.quantum);
     setPortfolioQuotes((prev) => ({
       ...prev,
       [t]: {
@@ -6262,6 +6278,8 @@ export default function App() {
           changePct: Number(data.quote?.regularMarketChangePercent) || undefined,
           risk: (data as any)?.quantum?.riskLevel,
           trend: (data as any)?.quantum?.chartStance,
+          srSignal: sr.label,
+          srDetail: sr.detail,
           bucket: /buy|add/i.test(String(rec))
             ? 'opportunity'
             : /sell/i.test(String(rec))
@@ -7452,6 +7470,8 @@ export default function App() {
     });
   }, [horizonView, data?.ticker, data?.quote?.shortName, data?.quote?.longName]);
 
+  const quantumSr = React.useMemo(() => srSignalFromEngine(horizonView), [horizonView]);
+
   React.useEffect(() => {
     if (!masterRecommendation || !horizonView) return;
     assertMatchesQuantumRecommendation(
@@ -7657,6 +7677,8 @@ export default function App() {
             rsi: board?.rsi != null && Number.isFinite(board.rsi) ? board.rsi : null,
             momentum: board?.momentum || 'Flat',
             technicalTrend: board?.technicalTrend || eng?.chartStance || 'flat',
+            srSignal: board?.srSignal || '—',
+            srDetail: board?.srDetail,
             bucket: /buy|add/i.test(rec)
               ? 'opportunity'
               : /sell|trim|reduce/i.test(rec)
@@ -7772,6 +7794,8 @@ export default function App() {
             rsi: s.boardMetrics?.rsi ?? null,
             momentum: s.boardMetrics?.momentum,
             technicalTrend: s.boardMetrics?.technicalTrend || eng?.chartStance,
+            srSignal: s.boardMetrics?.srSignal || '—',
+            srDetail: s.boardMetrics?.srDetail,
             bucket: /buy|add/i.test(rec)
               ? 'opportunity'
               : /sell|trim|reduce/i.test(rec)
@@ -7967,7 +7991,7 @@ export default function App() {
             <div className="flex flex-col md:items-end gap-2 text-center md:text-right">
               <span className="text-gray-500">
                 Quantum Node · Powered by Google Gemini ·{' '}
-                <span className="font-mono text-emerald-500/70">signals-mkt-0815</span>
+                <span className="font-mono text-emerald-500/70">theme-0815</span>
               </span>
               <LegalLinks className="justify-center md:justify-end" />
             </div>
@@ -8062,6 +8086,8 @@ export default function App() {
               risk: r.risk,
               price: r.price,
               changePct: r.changePct,
+              srSignal: r.srSignal,
+              srDetail: r.srDetail,
             }))}
             onOpenTicker={(sym) => {
               if (!assertAnalysisCredits()) return;
@@ -8154,6 +8180,11 @@ export default function App() {
             planLabel={usage?.planLabel || null}
             planId={usage?.plan || null}
             planUnlimited={!!usage?.unlimited}
+            theme={appTheme}
+            onThemeChange={(next) => {
+              setAppTheme(next);
+              saveAppTheme(next);
+            }}
             selfLearningSlot={
               <SelfLearningSettings
                 weights={modelWeights}
@@ -8605,6 +8636,8 @@ export default function App() {
                           ? 'bear'
                           : 'neutral'
                     }
+                    srSignal={quantumSr.label}
+                    srDetail={quantumSr.detail}
                   />
                   <DecisionBriefPanel decision={horizonView} />
                   <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">

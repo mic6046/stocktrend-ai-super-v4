@@ -15,6 +15,7 @@ import {
   type RecommendationLabel,
   type ZoneAction,
 } from './quantumRecommendationEngine';
+import { srSignalFromEngine, type SrSignalLabel } from './srProximity';
 
 /** Canonical recommendation object consumed by every screen. */
 export type StockRecommendation = {
@@ -48,6 +49,9 @@ export type StockRecommendation = {
     momentum: string;
     technicalTrend: string;
     changePct?: number | null;
+    /** Whether price is near / through support or resistance */
+    srSignal?: SrSignalLabel;
+    srDetail?: string;
   };
   error?: string;
 };
@@ -92,12 +96,16 @@ function buildBoardMetrics(
   const technicalTrend =
     typeof trendRaw === 'string' ? trendRaw.replace(/_/g, ' ') : String(trendRaw);
 
+  const sr = srSignalFromEngine(engine);
+
   return {
     rsi,
     smartMoney: smart,
     fundFlow: flow,
     momentum: mom,
     technicalTrend,
+    srSignal: sr.label,
+    srDetail: sr.detail,
   };
 }
 

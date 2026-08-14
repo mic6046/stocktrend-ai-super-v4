@@ -69,6 +69,7 @@ export const MANUAL_SECTIONS: ManualSection[] = [
         title: 'AI Signals',
         body: [
           'Stores recent scan rows (opportunity / watch / risk) for quick review, catalogued by market (US, Hong Kong, Japan, Europe).',
+          'Each card includes an S/R chip (Near Support / Near Resistance / Mid Range) from Quantum levels.',
           'Use the market chips to filter. Update refreshes prices and signals for listed names. Delete removes a row from the cache.',
           'AI Signals sync across devices on the same signed-in account (iPhone ↔ Android ↔ PC). Use the Sync button if a phone session was backgrounded.',
         ],
@@ -119,6 +120,7 @@ export const MANUAL_SECTIONS: ManualSection[] = [
     id: 'settings',
     title: 'Settings',
     body: [
+      'Appearance: switch Light or Dark mode. Preference syncs with your signed-in account.',
       'Choose Manual vs Auto market refresh and the auto interval. Manual is the credit-safe default.',
       'Manage subscription plans, Reload packs (+10 analyses and +10 news), and legal acceptance before checkout.',
       'Self-learning / calibration: adjust model factor weights, then press Save (or Balance / Defaults).',

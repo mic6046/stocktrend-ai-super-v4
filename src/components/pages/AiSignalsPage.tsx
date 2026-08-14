@@ -23,6 +23,8 @@ export type AiSignalRow = {
   risk?: string;
   price?: number;
   changePct?: number;
+  srSignal?: string;
+  srDetail?: string;
 };
 
 const EXPLAIN: Record<string, string> = {
@@ -32,6 +34,7 @@ const EXPLAIN: Record<string, string> = {
   momentum: 'How strongly price has been moving in one direction.',
   technicalTrend: 'Short-term chart direction from moving averages and structure.',
   risk: 'How volatile or fragile the setup looks for a typical investor.',
+  sr: 'Whether price is near support (possible bounce zone) or resistance (possible rejection / breakout zone).',
 };
 
 type MarketFilter = 'ALL' | WatchlistMarket;
@@ -142,6 +145,18 @@ export function AiSignalsPage({
           </div>
 
           <div className="mt-2 flex flex-wrap gap-1">
+            <Chip
+              label="S/R"
+              value={s.srSignal && s.srSignal !== '—' ? s.srSignal : 'Mid Range'}
+              tip={s.srDetail || EXPLAIN.sr}
+              tone={
+                /support/i.test(s.srSignal || '')
+                  ? 'bull'
+                  : /resistance/i.test(s.srSignal || '')
+                    ? 'bear'
+                    : undefined
+              }
+            />
             <Chip label="Trend" value={s.trend || 'Flat'} tip={EXPLAIN.technicalTrend} />
             <Chip
               label="SM"
@@ -338,6 +353,7 @@ export function AiSignalsPage({
       <GlassCard padding="sm" className="border-cyan-500/15">
         <SectionLabel icon={<Bot className="w-3.5 h-3.5 text-cyan-400" />}>How to read this</SectionLabel>
         <ul className="mt-1.5 space-y-0.5 text-[10px] text-gray-400">
+          <li>S/R — {EXPLAIN.sr}</li>
           <li>SM — {EXPLAIN.smartMoney}</li>
           <li>Flow — {EXPLAIN.fundFlow}</li>
           <li>Risk — {EXPLAIN.risk}</li>
@@ -352,20 +368,29 @@ function Chip({
   value,
   icon,
   tip,
+  tone,
 }: {
   label: string;
   value: string;
   icon?: React.ReactNode;
   tip?: string;
+  tone?: 'bull' | 'bear';
 }) {
   return (
     <span
       title={tip}
-      className="inline-flex items-center gap-0.5 rounded-md border border-white/5 bg-black/30 px-1.5 py-0.5 text-[9px] text-gray-300 max-w-full"
+      className={cn(
+        'inline-flex items-center gap-0.5 rounded-md border px-1.5 py-0.5 text-[9px] max-w-full',
+        tone === 'bull'
+          ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+          : tone === 'bear'
+            ? 'border-rose-500/30 bg-rose-500/10 text-rose-200'
+            : 'border-white/5 bg-black/30 text-gray-300'
+      )}
     >
       <span className="uppercase tracking-wider text-gray-500 shrink-0">{label}</span>
       {icon}
-      <span className="font-semibold text-gray-200 truncate">{value}</span>
+      <span className="font-semibold truncate">{value}</span>
     </span>
   );
 }

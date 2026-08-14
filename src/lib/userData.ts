@@ -12,6 +12,7 @@ export type AccountPrefs = {
   dashboardMarket?: DashboardMarket;
   sidebarCollapsed?: boolean;
   analysisHorizon?: string;
+  theme?: 'light' | 'dark';
 };
 
 export interface UserCloudData {

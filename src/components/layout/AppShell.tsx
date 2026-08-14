@@ -90,9 +90,9 @@ export function AppShell({
   const showMarketSelect = activePage === 'DASHBOARD' && !!onDashboardMarketChange;
 
   return (
-    <div className="min-h-screen bg-[#050505] text-[#e0e0e0] font-sans selection:bg-emerald-500 selection:text-black overflow-x-hidden relative flex">
-      <div className="fixed top-[-100px] left-[-100px] w-[500px] h-[500px] bg-emerald-500/10 rounded-full blur-[120px] pointer-events-none" />
-      <div className="fixed bottom-[-100px] right-[-100px] w-[600px] h-[600px] bg-blue-600/10 rounded-full blur-[150px] pointer-events-none" />
+    <div className="min-h-screen bg-[color:var(--qn-bg)] text-[color:var(--qn-fg)] font-sans selection:bg-emerald-500 selection:text-black overflow-x-hidden relative flex">
+      <div className="qn-shell-glow-a fixed top-[-100px] left-[-100px] w-[500px] h-[500px] bg-emerald-500/10 rounded-full blur-[120px] pointer-events-none" />
+      <div className="qn-shell-glow-b fixed bottom-[-100px] right-[-100px] w-[600px] h-[600px] bg-blue-600/10 rounded-full blur-[150px] pointer-events-none" />
 
       <AppSidebar
         activePage={activePage}

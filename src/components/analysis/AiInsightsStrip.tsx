@@ -29,6 +29,9 @@ type AiInsightsStripProps = {
   /** Master engine key reasons (must agree with recommendation) */
   keyReasons?: string[];
   recommendationTone?: 'bull' | 'bear' | 'neutral';
+  /** Support / resistance proximity from Quantum engine */
+  srSignal?: string | null;
+  srDetail?: string | null;
 };
 
 function cleanFactor(s: string): string {
@@ -51,6 +54,8 @@ export function AiInsightsStrip({
   horizonKey = '1M',
   keyReasons,
   recommendationTone = 'neutral',
+  srSignal,
+  srDetail,
 }: AiInsightsStripProps) {
   const [expanded, setExpanded] = useState(false);
 
@@ -61,6 +66,25 @@ export function AiInsightsStrip({
       items.push({
         id: 'horizon',
         text: `${horizonLabel} Investment Horizon active`,
+        tone: 'neutral',
+      });
+    }
+
+    if (srSignal && srSignal !== '—' && srSignal !== 'Mid Range') {
+      const tone: Insight['tone'] = /support/i.test(srSignal)
+        ? 'bull'
+        : /resistance/i.test(srSignal)
+          ? 'risk'
+          : 'neutral';
+      items.push({
+        id: 'sr',
+        text: (srDetail ? `${srSignal}: ${srDetail}` : `S/R · ${srSignal}`).slice(0, 72),
+        tone,
+      });
+    } else if (srSignal === 'Mid Range') {
+      items.push({
+        id: 'sr',
+        text: (srDetail || 'Price mid-range between support and resistance').slice(0, 72),
         tone: 'neutral',
       });
     }
@@ -158,6 +182,8 @@ export function AiInsightsStrip({
     horizonLabel,
     keyReasons,
     recommendationTone,
+    srSignal,
+    srDetail,
   ]);
 
   const narrative = [horizonLead, fullAnalysis].filter(Boolean).join('\n\n');

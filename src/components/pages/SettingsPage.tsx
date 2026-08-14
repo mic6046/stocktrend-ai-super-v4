@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Settings as SettingsIcon, Shield, CreditCard, Check, Loader2, Gem, Rocket, Zap, BookOpen } from 'lucide-react';
+import { Settings as SettingsIcon, Shield, CreditCard, Check, Loader2, Gem, Rocket, Zap, BookOpen, Sun, Moon } from 'lucide-react';
 import { GlassCard, SectionLabel } from '../analysis/GlassCard';
 import { MarketDataRefreshBar } from '../analysis/MarketDataRefreshBar';
 import type { MarketDataStatus, RefreshMode, AutoRefreshIntervalSec } from '../../lib/marketDataRefresh';
@@ -8,6 +8,7 @@ import { startStripeCheckout, type SubscriptionPlan } from '../../lib/subscripti
 import { startOverageCheckout, type OverageProduct } from '../../lib/usageApi';
 import { openLegalDoc } from '../../lib/legal';
 import { openUserManual } from '../../lib/userManual';
+import type { AppTheme } from '../../lib/themeStore';
 import { cn } from '../../lib/utils';
 
 type SettingsPageProps = {
@@ -26,6 +27,8 @@ type SettingsPageProps = {
   planUnlimited?: boolean;
   selfLearningSlot?: React.ReactNode;
   quantTuningSlot?: React.ReactNode;
+  theme?: AppTheme;
+  onThemeChange?: (theme: AppTheme) => void;
 };
 
 export function SettingsPage({
@@ -44,6 +47,8 @@ export function SettingsPage({
   planUnlimited,
   selfLearningSlot,
   quantTuningSlot,
+  theme = 'dark',
+  onThemeChange,
 }: SettingsPageProps) {
   const [busyPlan, setBusyPlan] = useState<SubscriptionPlan | null>(null);
   const [busyOverage, setBusyOverage] = useState<OverageProduct | null>(null);
@@ -96,7 +101,7 @@ export function SettingsPage({
         <p className="text-[10px] font-mono uppercase tracking-[0.22em] text-gray-400">Preferences</p>
         <h2 className="mt-1 text-2xl font-sans font-bold text-white">Settings</h2>
         <p className="mt-1 text-[13px] text-gray-500">
-          Market refresh, subscription, calibration, and account controls in one place.
+          Appearance, market refresh, subscription, calibration, and account controls.
         </p>
         <button
           type="button"
@@ -107,6 +112,43 @@ export function SettingsPage({
           Open User Manual
         </button>
       </div>
+
+      <GlassCard>
+        <SectionLabel icon={<Sun className="w-3.5 h-3.5 text-amber-400" />}>
+          Appearance
+        </SectionLabel>
+        <p className="mt-2 text-[12px] text-gray-400 leading-relaxed">
+          Choose light or dark mode for the terminal. Preference syncs with your account when signed in.
+        </p>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => onThemeChange?.('light')}
+            className={cn(
+              'min-h-[48px] rounded-xl border px-3 inline-flex items-center justify-center gap-2 text-[12px] font-bold cursor-pointer',
+              theme === 'light'
+                ? 'border-amber-400/50 bg-amber-400/15 text-amber-700'
+                : 'border-white/10 bg-white/5 text-gray-300 hover:bg-white/10'
+            )}
+          >
+            <Sun className="h-4 w-4" />
+            Light
+          </button>
+          <button
+            type="button"
+            onClick={() => onThemeChange?.('dark')}
+            className={cn(
+              'min-h-[48px] rounded-xl border px-3 inline-flex items-center justify-center gap-2 text-[12px] font-bold cursor-pointer',
+              theme === 'dark'
+                ? 'border-cyan-400/50 bg-cyan-500/15 text-cyan-200'
+                : 'border-white/10 bg-white/5 text-gray-300 hover:bg-white/10'
+            )}
+          >
+            <Moon className="h-4 w-4" />
+            Dark
+          </button>
+        </div>
+      </GlassCard>
 
       <GlassCard>
         <SectionLabel icon={<BookOpen className="w-3.5 h-3.5 text-emerald-400" />}>

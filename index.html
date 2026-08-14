@@ -1,21 +1,35 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark" class="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#050505" />
-    <meta name="color-scheme" content="dark" />
+    <meta name="color-scheme" content="dark light" />
     <meta name="description" content="Quantum Node — AI equity terminal for market analysis and trade decisions." />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="QuantumNode" />
     <meta name="application-name" content="Quantum Node" />
-    <meta name="qn-build" content="signals-mkt-0815" />
+    <meta name="qn-build" content="theme-0815" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="format-detection" content="telephone=no" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/pwa-192.png" />
     <title>Quantum Node</title>
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem('qn-app-theme');
+          if (t !== 'light' && t !== 'dark') t = 'dark';
+          document.documentElement.setAttribute('data-theme', t);
+          document.documentElement.classList.toggle('dark', t === 'dark');
+          document.documentElement.classList.toggle('light', t === 'light');
+          document.documentElement.style.colorScheme = t;
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.setAttribute('content', t === 'light' ? '#f4f6f8' : '#050505');
+        } catch (e) {}
+      })();
+    </script>
     <link rel="preconnect" href="https://stocktrend-ai-357117913612.us-central1.run.app" crossorigin />
     <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin />
     <link rel="preconnect" href="https://identitytoolkit.googleapis.com" crossorigin />

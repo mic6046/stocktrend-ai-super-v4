@@ -23,6 +23,7 @@ import {
   type ZoneAction,
 } from './quantumRecommendationEngine';
 import { computeTechnicalIndicators } from './technical';
+import { srSignalFromEngine } from './srProximity';
 import { toHkTickerIfNumeric } from './tickerNormalize';
 import {
   buildRealisticSuggestEntry,
@@ -221,6 +222,7 @@ async function scoutOneFind(
           ? 'Outflow'
           : rec.boardMetrics?.fundFlow || 'Flat';
 
+    const sr = srSignalFromEngine(rec.engine);
     rec.boardMetrics = {
       rsi: rsiRaw != null && Number.isFinite(Number(rsiRaw)) ? Number(rsiRaw) : null,
       smartMoney,
@@ -232,6 +234,8 @@ async function scoutOneFind(
         rec.engine?.chartStance ||
         'flat',
       changePct: rec.boardMetrics?.changePct ?? null,
+      srSignal: rec.boardMetrics?.srSignal || sr.label,
+      srDetail: rec.boardMetrics?.srDetail || sr.detail,
     };
 
     return rec;

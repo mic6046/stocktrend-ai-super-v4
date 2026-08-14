@@ -29,7 +29,10 @@ import { LegalHost } from './components/LegalDocs';
 import { ManualHost } from './components/UserManual';
 import { ProductAppPreview } from './components/ProductAppPreview';
 import { PwaInstallPrompt } from './components/PwaInstallPrompt';
+import { initAppTheme } from './lib/themeStore';
 import './index.css';
+
+initAppTheme();
 
 const App = lazy(() => import('./App.tsx'));
 
@@ -56,7 +59,7 @@ createRoot(document.getElementById('root')!).render(
             <SubscriptionGate>
               <Suspense
                 fallback={
-                  <div className="min-h-screen bg-[#050505] flex items-center justify-center text-gray-400">
+                  <div className="min-h-screen bg-[color:var(--qn-bg)] flex items-center justify-center text-gray-400">
                     <div className="h-6 w-6 animate-spin rounded-full border-2 border-emerald-400 border-t-transparent" />
                   </div>
                 }
