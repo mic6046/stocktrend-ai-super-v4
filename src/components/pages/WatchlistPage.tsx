@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Star, Plus, Trash2 } from 'lucide-react';
+import { Star, Plus, Trash2, RefreshCw } from 'lucide-react';
 import { GlassCard, SectionLabel } from '../analysis/GlassCard';
 import {
   addToWatchlist,
@@ -11,12 +11,25 @@ import { cn } from '../../lib/utils';
 import { toHkTickerIfNumeric } from '../../lib/tickerNormalize';
 
 type WatchlistPageProps = {
-  quotes?: Record<string, { price?: number; changePct?: number; name?: string; signal?: string; confidence?: number; trend?: string }>;
+  quotes?: Record<
+    string,
+    { price?: number; changePct?: number; name?: string; signal?: string; confidence?: number; trend?: string }
+  >;
   alertTickers?: Set<string> | string[];
   onOpenTicker: (ticker: string) => void;
+  onUpdate?: () => void;
+  updating?: boolean;
+  updateProgress?: { done: number; total: number } | null;
 };
 
-export function WatchlistPage({ quotes = {}, alertTickers, onOpenTicker }: WatchlistPageProps) {
+export function WatchlistPage({
+  quotes = {},
+  alertTickers,
+  onOpenTicker,
+  onUpdate,
+  updating = false,
+  updateProgress = null,
+}: WatchlistPageProps) {
   const alertSet = useMemo(() => {
     if (!alertTickers) return new Set<string>();
     return alertTickers instanceof Set ? alertTickers : new Set(alertTickers.map((t) => t.toUpperCase()));
@@ -34,10 +47,33 @@ export function WatchlistPage({ quotes = {}, alertTickers, onOpenTicker }: Watch
 
   return (
     <div className="space-y-4 min-w-0">
-      <div>
-        <p className="text-[10px] font-mono uppercase tracking-[0.22em] text-amber-300">Watch</p>
-        <h2 className="mt-1 text-2xl font-sans font-bold text-white">Watchlist</h2>
-        <p className="mt-1 text-[13px] text-gray-500">Track names you care about. Add a ticker, open it for full AI analysis.</p>
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
+        <div>
+          <p className="text-[10px] font-mono uppercase tracking-[0.22em] text-amber-300">Watch</p>
+          <h2 className="mt-1 text-2xl font-sans font-bold text-white">Watchlist</h2>
+          <p className="mt-1 text-[13px] text-gray-500">
+            Track names you care about. Update to refresh prices and AI signals.
+          </p>
+          {updating && updateProgress && updateProgress.total > 0 && (
+            <p className="mt-1.5 text-[11px] font-mono text-amber-300/90">
+              Updating {updateProgress.done}/{updateProgress.total}…
+            </p>
+          )}
+        </div>
+        {onUpdate && (
+          <button
+            type="button"
+            onClick={onUpdate}
+            disabled={updating || items.length === 0}
+            className={cn(
+              'min-h-[40px] inline-flex items-center gap-2 rounded-xl px-4 text-[11px] font-bold uppercase tracking-wide cursor-pointer shrink-0',
+              'bg-amber-400 text-black hover:bg-amber-300 disabled:opacity-50 disabled:cursor-not-allowed'
+            )}
+          >
+            <RefreshCw className={cn('h-3.5 w-3.5', updating && 'animate-spin')} />
+            {updating ? 'Updating…' : 'Update'}
+          </button>
+        )}
       </div>
 
       <GlassCard padding="sm">
@@ -86,7 +122,7 @@ export function WatchlistPage({ quotes = {}, alertTickers, onOpenTicker }: Watch
               </thead>
               <tbody>
                 {items.map((item) => {
-                  const q = quotes[item.ticker] || {};
+                  const q = quotes[item.ticker] || quotes[item.ticker.toUpperCase()] || {};
                   return (
                     <tr key={item.ticker} className="border-b border-white/[0.04] hover:bg-white/[0.03]">
                       <td className="py-2.5 px-2">

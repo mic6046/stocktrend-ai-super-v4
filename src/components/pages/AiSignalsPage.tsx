@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bot, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { Bot, TrendingUp, TrendingDown, Minus, RefreshCw, Trash2 } from 'lucide-react';
 import { GlassCard, SectionLabel } from '../analysis/GlassCard';
 import { cn } from '../../lib/utils';
 
@@ -31,21 +31,33 @@ const EXPLAIN: Record<string, string> = {
 type AiSignalsPageProps = {
   signals: AiSignalRow[];
   onOpenTicker: (ticker: string) => void;
+  onDeleteSignal?: (ticker: string) => void;
+  onUpdate?: () => void;
+  updating?: boolean;
+  updateProgress?: { done: number; total: number } | null;
   onRefreshHint?: () => void;
 };
 
 function DirIcon({ v }: { v?: string }) {
   const s = (v || '').toLowerCase();
   if (s.includes('up') || s.includes('bull') || s.includes('inflow') || s === '↑') {
-    return <TrendingUp className="h-3.5 w-3.5 text-emerald-400" />;
+    return <TrendingUp className="h-2.5 w-2.5 text-emerald-400 shrink-0" />;
   }
   if (s.includes('down') || s.includes('bear') || s.includes('outflow') || s === '↓') {
-    return <TrendingDown className="h-3.5 w-3.5 text-rose-400" />;
+    return <TrendingDown className="h-2.5 w-2.5 text-rose-400 shrink-0" />;
   }
-  return <Minus className="h-3.5 w-3.5 text-gray-500" />;
+  return <Minus className="h-2.5 w-2.5 text-gray-500 shrink-0" />;
 }
 
-export function AiSignalsPage({ signals, onOpenTicker, onRefreshHint }: AiSignalsPageProps) {
+export function AiSignalsPage({
+  signals,
+  onOpenTicker,
+  onDeleteSignal,
+  onUpdate,
+  updating = false,
+  updateProgress = null,
+  onRefreshHint,
+}: AiSignalsPageProps) {
   return (
     <div className="space-y-4 min-w-0">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
@@ -55,103 +67,136 @@ export function AiSignalsPage({ signals, onOpenTicker, onRefreshHint }: AiSignal
           <p className="mt-1 text-[13px] text-gray-500 max-w-2xl">
             Each card translates AI output into a clear recommendation. Tap a stock for the full analysis workspace.
           </p>
+          {updating && updateProgress && updateProgress.total > 0 && (
+            <p className="mt-1.5 text-[11px] font-mono text-cyan-300/90">
+              Updating {updateProgress.done}/{updateProgress.total}…
+            </p>
+          )}
         </div>
-        {onRefreshHint && (
-          <button
-            type="button"
-            onClick={onRefreshHint}
-            className="min-h-[40px] rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-4 text-[11px] font-bold uppercase tracking-wide text-cyan-300 hover:bg-cyan-500/20 cursor-pointer"
-          >
-            Open Find Trades
-          </button>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {onUpdate && (
+            <button
+              type="button"
+              onClick={onUpdate}
+              disabled={updating}
+              className={cn(
+                'min-h-[40px] inline-flex items-center gap-2 rounded-xl px-4 text-[11px] font-bold uppercase tracking-wide cursor-pointer',
+                'bg-cyan-500 text-black hover:bg-cyan-400 disabled:opacity-60 disabled:cursor-not-allowed'
+              )}
+            >
+              <RefreshCw className={cn('h-3.5 w-3.5', updating && 'animate-spin')} />
+              {updating ? 'Updating…' : 'Update'}
+            </button>
+          )}
+          {onRefreshHint && (
+            <button
+              type="button"
+              onClick={onRefreshHint}
+              disabled={updating}
+              className="min-h-[40px] rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-4 text-[11px] font-bold uppercase tracking-wide text-cyan-300 hover:bg-cyan-500/20 cursor-pointer disabled:opacity-50"
+            >
+              Open Find Trades
+            </button>
+          )}
+        </div>
       </div>
 
       {!signals.length ? (
         <GlassCard>
           <p className="text-[13px] text-gray-400 text-center py-8">
-            No cached signals yet. Run <span className="text-emerald-400 font-semibold">Find Trades</span> or{' '}
-            <span className="text-sky-400 font-semibold">Suggest</span> to populate AI recommendations.
+            No cached signals yet. Tap <span className="text-cyan-300 font-semibold">Update</span> to scan, or run{' '}
+            <span className="text-emerald-400 font-semibold">Find Trades</span> /{' '}
+            <span className="text-sky-400 font-semibold">Suggest</span>.
           </p>
         </GlassCard>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-2">
           {signals.map((s) => (
-            <button
-              key={s.ticker}
-              type="button"
-              onClick={() => onOpenTicker(s.ticker)}
-              className="text-left cursor-pointer"
-            >
-              <GlassCard hover className="h-full border-white/10">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="font-mono font-bold text-white text-[15px]">{s.ticker}</p>
-                    <p className="text-[11px] text-gray-500 truncate">{s.name || '—'}</p>
+            <div key={s.ticker} className="relative">
+              {onDeleteSignal && (
+                <button
+                  type="button"
+                  title={`Remove ${s.ticker}`}
+                  aria-label={`Delete ${s.ticker} signal`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onDeleteSignal(s.ticker);
+                  }}
+                  className="absolute top-1.5 right-1.5 z-10 h-7 w-7 inline-flex items-center justify-center rounded-md border border-rose-500/30 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 cursor-pointer"
+                >
+                  <Trash2 className="h-3 w-3" />
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => onOpenTicker(s.ticker)}
+                className="text-left cursor-pointer w-full"
+              >
+                <GlassCard hover padding="sm" className="h-full border-white/10 !p-2.5">
+                  <div className="flex items-center justify-between gap-2 pr-8 min-w-0">
+                    <div className="min-w-0 flex items-baseline gap-2">
+                      <p className="font-mono font-bold text-white text-[13px] shrink-0">{s.ticker}</p>
+                      <p className="text-[10px] text-gray-500 truncate hidden sm:block">{s.name || ''}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p
+                        className={cn(
+                          'text-[11px] font-black uppercase tracking-wide leading-tight',
+                          /buy|add/i.test(s.recommendation) && 'text-emerald-400',
+                          /sell|trim|reduce/i.test(s.recommendation) && 'text-rose-400',
+                          /wait|hold|indiffer|indecision/i.test(s.recommendation) && 'text-amber-300'
+                        )}
+                      >
+                        {s.recommendation}
+                      </p>
+                      <p className="text-[10px] font-mono text-cyan-300 leading-tight">
+                        {Math.round(s.confidence)}%
+                      </p>
+                    </div>
                   </div>
-                  <div className="text-right shrink-0">
-                    <p
-                      className={cn(
-                        'text-[13px] font-black uppercase tracking-wide',
-                        /buy|add/i.test(s.recommendation) && 'text-emerald-400',
-                        /sell|trim|reduce/i.test(s.recommendation) && 'text-rose-400',
-                        /wait|hold|indiffer|indecision/i.test(s.recommendation) && 'text-amber-300'
-                      )}
-                    >
-                      {s.recommendation}
-                    </p>
-                    <p className="text-[11px] font-mono text-cyan-300 mt-0.5">
-                      AI Confidence: {Math.round(s.confidence)}%
-                    </p>
-                  </div>
-                </div>
 
-                <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
-                  <Metric label="Trend" value={s.trend || '—'} />
-                  <Metric
-                    label="Smart Money"
-                    value={s.smartMoney || '—'}
-                    icon={<DirIcon v={s.smartMoney} />}
-                    tip={EXPLAIN.smartMoney}
-                  />
-                  <Metric
-                    label="Fund Flow"
-                    value={s.fundFlow || '—'}
-                    icon={<DirIcon v={s.fundFlow} />}
-                    tip={EXPLAIN.fundFlow}
-                  />
-                  <Metric
-                    label="RSI"
-                    value={s.rsi != null ? String(Math.round(s.rsi)) : '—'}
-                    tip={EXPLAIN.rsi}
-                  />
-                  <Metric label="Momentum" value={s.momentum || '—'} tip={EXPLAIN.momentum} />
-                  <Metric
-                    label="Technical Trend"
-                    value={s.technicalTrend || '—'}
-                    tip={EXPLAIN.technicalTrend}
-                  />
-                  <Metric label="Risk" value={s.risk || '—'} tip={EXPLAIN.risk} />
-                  <Metric
-                    label="Change"
-                    value={
-                      s.changePct != null
-                        ? `${s.changePct >= 0 ? '+' : ''}${s.changePct.toFixed(2)}%`
-                        : '—'
-                    }
-                  />
-                </div>
-              </GlassCard>
-            </button>
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    <Chip label="Trend" value={s.trend || '—'} tip={EXPLAIN.technicalTrend} />
+                    <Chip
+                      label="SM"
+                      value={s.smartMoney || '—'}
+                      icon={<DirIcon v={s.smartMoney} />}
+                      tip={EXPLAIN.smartMoney}
+                    />
+                    <Chip
+                      label="Flow"
+                      value={s.fundFlow || '—'}
+                      icon={<DirIcon v={s.fundFlow} />}
+                      tip={EXPLAIN.fundFlow}
+                    />
+                    <Chip
+                      label="RSI"
+                      value={s.rsi != null ? String(Math.round(s.rsi)) : '—'}
+                      tip={EXPLAIN.rsi}
+                    />
+                    <Chip label="Risk" value={s.risk || '—'} tip={EXPLAIN.risk} />
+                    <Chip
+                      label="Chg"
+                      value={
+                        s.changePct != null
+                          ? `${s.changePct >= 0 ? '+' : ''}${s.changePct.toFixed(1)}%`
+                          : '—'
+                      }
+                    />
+                  </div>
+                </GlassCard>
+              </button>
+            </div>
           ))}
         </div>
       )}
 
       <GlassCard padding="sm" className="border-cyan-500/15">
         <SectionLabel icon={<Bot className="w-3.5 h-3.5 text-cyan-400" />}>How to read this</SectionLabel>
-        <ul className="mt-2 space-y-1 text-[11px] text-gray-400">
-          <li>Smart Money ↑ — {EXPLAIN.smartMoney}</li>
-          <li>Fund Flow ↑ — {EXPLAIN.fundFlow}</li>
+        <ul className="mt-1.5 space-y-0.5 text-[10px] text-gray-400">
+          <li>SM — {EXPLAIN.smartMoney}</li>
+          <li>Flow — {EXPLAIN.fundFlow}</li>
           <li>Risk — {EXPLAIN.risk}</li>
         </ul>
       </GlassCard>
@@ -159,7 +204,7 @@ export function AiSignalsPage({ signals, onOpenTicker, onRefreshHint }: AiSignal
   );
 }
 
-function Metric({
+function Chip({
   label,
   value,
   icon,
@@ -171,12 +216,13 @@ function Metric({
   tip?: string;
 }) {
   return (
-    <div className="rounded-lg border border-white/5 bg-black/25 px-2 py-1.5 min-w-0" title={tip}>
-      <p className="text-[9px] uppercase tracking-wider text-gray-500">{label}</p>
-      <p className="mt-0.5 flex items-center gap-1 font-semibold text-gray-200 truncate">
-        {icon}
-        <span className="truncate">{value}</span>
-      </p>
-    </div>
+    <span
+      title={tip}
+      className="inline-flex items-center gap-0.5 rounded-md border border-white/5 bg-black/30 px-1.5 py-0.5 text-[9px] text-gray-300 max-w-full"
+    >
+      <span className="uppercase tracking-wider text-gray-500 shrink-0">{label}</span>
+      {icon}
+      <span className="font-semibold text-gray-200 truncate">{value}</span>
+    </span>
   );
 }

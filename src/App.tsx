@@ -40,7 +40,10 @@ import { WatchlistPage } from './components/pages/WatchlistPage';
 import { PortfolioPage } from './components/pages/PortfolioPage';
 import { SettingsPage } from './components/pages/SettingsPage';
 import { AlertsPage } from './components/pages/AlertsPage';
-import { loadSignalCache, mergeSignalCache, type CachedSignalRow } from './lib/signalCache';
+import { loadSignalCache, mergeSignalCache, removeSignalCache, type CachedSignalRow } from './lib/signalCache';
+import { findATrade } from './lib/findATrade';
+import { POPULAR_UNIVERSE } from './lib/suggestTradeUniverses';
+import { loadWatchlist } from './lib/watchlistStore';
 import { useAuth } from './lib/auth';
 import { loadUserData, saveUserData } from './lib/userData';
 import { apiUrl, assertJsonResponse, loggedFetch, withMarketRefreshLock } from './lib/api';
@@ -1162,6 +1165,15 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => loadSidebarCollapsed());
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [signalCache, setSignalCache] = useState<CachedSignalRow[]>(() => loadSignalCache());
+  const [signalsUpdating, setSignalsUpdating] = useState(false);
+  const [signalsUpdateProgress, setSignalsUpdateProgress] = useState<{ done: number; total: number } | null>(
+    null
+  );
+  const [watchlistUpdating, setWatchlistUpdating] = useState(false);
+  const [watchlistUpdateProgress, setWatchlistUpdateProgress] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
   const [portfolioQuotes, setPortfolioQuotes] = useState<
     Record<string, { price?: number; name?: string; signal?: string; risk?: string; changePct?: number; confidence?: number; trend?: string }>
   >({});
@@ -7300,6 +7312,176 @@ export default function App() {
     return true;
   };
 
+  const updateAiSignals = async () => {
+    if (signalsUpdating) return;
+    if (!assertAnalysisCredits()) return;
+
+    const fromCache = signalCache.map((r) => r.ticker.toUpperCase()).filter(Boolean);
+    const tickers =
+      fromCache.length > 0
+        ? fromCache.slice(0, 20)
+        : POPULAR_UNIVERSE.filter((u) => u.market === 'US')
+            .slice(0, 12)
+            .map((u) => u.ticker);
+
+    setSignalsUpdating(true);
+    setSignalsUpdateProgress({ done: 0, total: tickers.length });
+    try {
+      const out = await findATrade({
+        mode: 'find',
+        tickers,
+        horizon: analysisHorizon,
+        concurrency: 3,
+        bypassCache: true,
+        onProgress: (p) => setSignalsUpdateProgress({ done: p.done, total: p.total }),
+      });
+
+      const rows: CachedSignalRow[] = out.scanned
+        .filter((s) => !s.error)
+        .map((s) => {
+          const rec = String(s.recommendation || s.currentAction || 'WAIT');
+          const eng = s.engine;
+          return {
+            ticker: s.ticker.toUpperCase(),
+            name: s.companyName || s.ticker,
+            recommendation: rec,
+            confidence: typeof s.confidence === 'number' ? s.confidence : 50,
+            trend: eng?.chartStance,
+            risk: s.riskLabel,
+            price: eng?.currentPrice && eng.currentPrice > 0 ? eng.currentPrice : undefined,
+            smartMoney: undefined,
+            fundFlow: undefined,
+            bucket: /buy|add/i.test(rec)
+              ? 'opportunity'
+              : /sell|trim|reduce/i.test(rec)
+                ? 'risk'
+                : 'watch',
+          };
+        });
+
+      if (rows.length) {
+        setSignalCache(mergeSignalCache(rows));
+      }
+    } catch (err) {
+      console.warn('AI Signals update failed:', err);
+    } finally {
+      setSignalsUpdating(false);
+      setSignalsUpdateProgress(null);
+    }
+  };
+
+  const updateWatchlist = async () => {
+    if (watchlistUpdating) return;
+    if (!assertAnalysisCredits()) return;
+
+    const tickers = loadWatchlist()
+      .map((i) => i.ticker.toUpperCase())
+      .filter(Boolean)
+      .slice(0, 20);
+    if (!tickers.length) return;
+
+    setWatchlistUpdating(true);
+    setWatchlistUpdateProgress({ done: 0, total: tickers.length });
+    try {
+      const quoteByTicker = new Map<
+        string,
+        { price?: number; changePct?: number; name?: string }
+      >();
+
+      // Live quotes for price / change in parallel with AI scout
+      const quotePromise = Promise.all(
+        tickers.map(async (t) => {
+          try {
+            const res = await loggedFetch(apiUrl(`/api/quote?ticker=${encodeURIComponent(t)}`), {
+              __qnMeta: { reason: 'watchlist-update-quote', userAction: 'Watchlist Update' },
+            });
+            if (!res.ok) return;
+            const data = await res.json();
+            const q = data?.quote || data;
+            quoteByTicker.set(t, {
+              price:
+                typeof q.regularMarketPrice === 'number'
+                  ? q.regularMarketPrice
+                  : typeof q.price === 'number'
+                    ? q.price
+                    : undefined,
+              changePct:
+                typeof q.regularMarketChangePercent === 'number'
+                  ? q.regularMarketChangePercent
+                  : typeof q.changePercent === 'number'
+                    ? q.changePercent
+                    : undefined,
+              name: q.shortName || q.longName || q.name,
+            });
+          } catch {
+            /* ignore single quote failure */
+          }
+        })
+      );
+
+      const out = await findATrade({
+        mode: 'find',
+        tickers,
+        horizon: analysisHorizon,
+        concurrency: 3,
+        bypassCache: true,
+        onProgress: (p) => setWatchlistUpdateProgress({ done: p.done, total: p.total }),
+      });
+
+      await quotePromise;
+
+      const signalRows: CachedSignalRow[] = [];
+      setPortfolioQuotes((prev) => {
+        const next = { ...prev };
+        for (const s of out.scanned) {
+          if (s.error) continue;
+          const t = s.ticker.toUpperCase();
+          const rec = String(s.recommendation || s.currentAction || 'WAIT');
+          const eng = s.engine;
+          const q = quoteByTicker.get(t);
+          const price =
+            (q?.price != null && q.price > 0 ? q.price : undefined) ??
+            (eng?.currentPrice && eng.currentPrice > 0 ? eng.currentPrice : undefined) ??
+            next[t]?.price;
+          next[t] = {
+            ...next[t],
+            price,
+            changePct: q?.changePct ?? next[t]?.changePct,
+            name: q?.name || s.companyName || next[t]?.name,
+            signal: rec,
+            confidence: typeof s.confidence === 'number' ? s.confidence : next[t]?.confidence,
+            trend: eng?.chartStance || next[t]?.trend,
+          };
+          signalRows.push({
+            ticker: t,
+            name: next[t].name,
+            recommendation: rec,
+            confidence: next[t].confidence,
+            trend: next[t].trend,
+            price: next[t].price,
+            changePct: next[t].changePct,
+            risk: s.riskLabel,
+            bucket: /buy|add/i.test(rec)
+              ? 'opportunity'
+              : /sell|trim|reduce/i.test(rec)
+                ? 'risk'
+                : 'watch',
+          });
+        }
+        return next;
+      });
+
+      if (signalRows.length) {
+        setSignalCache(mergeSignalCache(signalRows));
+      }
+    } catch (err) {
+      console.warn('Watchlist update failed:', err);
+    } finally {
+      setWatchlistUpdating(false);
+      setWatchlistUpdateProgress(null);
+    }
+  };
+
   const assertNewsCredits = (): boolean => {
     if (!user?.email) {
       setQuotaBanner({
@@ -7561,6 +7743,10 @@ export default function App() {
               if (!assertAnalysisCredits()) return;
               runTickerSearch(sym);
             }}
+            onUpdate={() => void updateAiSignals()}
+            updating={signalsUpdating}
+            updateProgress={signalsUpdateProgress}
+            onDeleteSignal={(sym) => setSignalCache(removeSignalCache(sym))}
             onRefreshHint={() => setActivePage('FIND_TRADES')}
           />
         )}
@@ -7573,6 +7759,9 @@ export default function App() {
               if (!assertAnalysisCredits()) return;
               runTickerSearch(sym);
             }}
+            onUpdate={() => void updateWatchlist()}
+            updating={watchlistUpdating}
+            updateProgress={watchlistUpdateProgress}
           />
         )}
 

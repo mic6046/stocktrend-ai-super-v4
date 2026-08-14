@@ -48,3 +48,11 @@ export function mergeSignalCache(rows: CachedSignalRow[]) {
   saveSignalCache(next);
   return next;
 }
+
+export function removeSignalCache(ticker: string) {
+  const key = ticker.trim().toUpperCase();
+  if (!key) return loadSignalCache();
+  const next = loadSignalCache().filter((r) => r.ticker.toUpperCase() !== key);
+  saveSignalCache(next);
+  return next;
+}
