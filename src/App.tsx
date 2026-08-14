@@ -44,7 +44,8 @@ import { AlertsPage } from './components/pages/AlertsPage';
 import { loadSignalCache, mergeSignalCache, removeSignalCache, saveSignalCache, type CachedSignalRow } from './lib/signalCache';
 import { findATrade } from './lib/findATrade';
 import { POPULAR_UNIVERSE } from './lib/suggestTradeUniverses';
-import { loadWatchlist, saveWatchlist, normalizeWatchlist, watchlistFingerprint } from './lib/watchlistStore';
+import { loadWatchlist } from './lib/watchlistStore';
+import { startWatchlistCloudSync, type WatchlistSyncStatus } from './lib/watchlistCloudSync';
 import { loadPortfolio, savePortfolio } from './lib/portfolioStore';
 import { subscribeAccountDataChanged, notifyAccountDataChanged } from './lib/accountSync';
 import {
@@ -1112,7 +1113,8 @@ export default function App() {
   const lastSyncFingerprintRef = useRef('');
   /** Watchlist-only fingerprint so watchlist sync isn't blocked by other fields. */
   const lastWatchlistFpRef = useRef('');
-  const watchlistPushTimerRef = useRef<number | null>(null);
+  const [watchlistSyncStatus, setWatchlistSyncStatus] = useState<WatchlistSyncStatus>('idle');
+  const watchlistSyncRef = useRef<ReturnType<typeof startWatchlistCloudSync> | null>(null);
   const [usage, setUsage] = useState<UsageSnapshot | null>(null);
   const [quotaBanner, setQuotaBanner] = useState<{ kind: 'analysis' | 'news'; message: string } | null>(null);
   const [ticker, setTicker] = useState('');
@@ -2588,6 +2590,25 @@ export default function App() {
   // Always key by email so devices never split across uid vs email docs.
   const syncDocId = (user?.email || '').trim().toLowerCase();
 
+  // Dedicated watchlist sync (phone ↔ PC). Kept separate from full-account blob sync.
+  useEffect(() => {
+    if (!syncDocId || accessState !== 'active') {
+      watchlistSyncRef.current?.stop();
+      watchlistSyncRef.current = null;
+      setWatchlistSyncStatus('idle');
+      return;
+    }
+    const handles = startWatchlistCloudSync(syncDocId, {
+      onStatus: (s) => setWatchlistSyncStatus(s),
+    });
+    watchlistSyncRef.current = handles;
+    return () => {
+      handles.stop();
+      if (watchlistSyncRef.current === handles) watchlistSyncRef.current = null;
+    };
+  }, [syncDocId, accessState]);
+
+  // Watchlist cloud sync is handled by startWatchlistCloudSync (phone ↔ PC).
   useEffect(() => {
     if (!syncDocId || accessState !== 'active') {
       cloudHydratedRef.current = false;
@@ -2604,29 +2625,6 @@ export default function App() {
     lastSyncFingerprintRef.current = '';
     lastWatchlistFpRef.current = '';
 
-    const applyWatchlistFromCloud = (
-      cloudWatchlist: unknown,
-      isLiveRemote: boolean
-    ): 'applied' | 'kept-local' | 'same' => {
-      if (!Array.isArray(cloudWatchlist)) return 'same';
-      const remote = normalizeWatchlist(cloudWatchlist);
-      const local = loadWatchlist();
-      const remoteFp = watchlistFingerprint(remote);
-      const localFp = watchlistFingerprint(local);
-      if (remoteFp === localFp) {
-        lastWatchlistFpRef.current = remoteFp;
-        return 'same';
-      }
-      // First hydrate: empty cloud must not wipe a populated local list
-      if (!isLiveRemote && remote.length === 0 && local.length > 0) {
-        return 'kept-local';
-      }
-      saveWatchlist(remote, { silent: true });
-      lastWatchlistFpRef.current = remoteFp;
-      notifyAccountDataChanged('watchlist', 'remote');
-      return 'applied';
-    };
-
     const unsub = subscribeUserData(
       syncDocId,
       (snap) => {
@@ -2634,21 +2632,19 @@ export default function App() {
         const fp = accountSyncFingerprint(cloud);
         const isLiveRemote = cloudHydratedRef.current;
 
-        // Pure echo of what we already applied/saved — still merge watchlist
+        // Pure echo of what we already applied/saved
         if (fp === lastSyncFingerprintRef.current) {
           if (!cloudHydratedRef.current) {
             cloudHydratedRef.current = true;
             setCloudHydrated(true);
           }
-          applyWatchlistFromCloud(cloud.watchlist, isLiveRemote);
           setCloudSyncStatus('synced');
           return;
         }
 
-        // While a full-blob save is in flight, STILL apply watchlist/portfolio/signals.
-        // Skipping here previously dropped cross-device watchlist updates.
+        // While a full-blob save is in flight, still apply portfolio/signals.
+        // Watchlist is owned by startWatchlistCloudSync.
         if (suppressCloudSaveRef.current) {
-          applyWatchlistFromCloud(cloud.watchlist, true);
           if (Array.isArray(cloud.portfolio)) {
             savePortfolio(cloud.portfolio, { silent: true });
             notifyAccountDataChanged('portfolio', 'remote');
@@ -2716,7 +2712,7 @@ export default function App() {
           }
         }
 
-        const watchlistAction = applyWatchlistFromCloud(cloud.watchlist, isLiveRemote);
+        // Watchlist owned by startWatchlistCloudSync
 
         if (Array.isArray(cloud.portfolio)) {
           savePortfolio(cloud.portfolio, { silent: true });
@@ -2771,20 +2767,7 @@ export default function App() {
         window.setTimeout(() => {
           suppressCloudSaveRef.current = false;
           if (!isLiveRemote && syncDocId) {
-            if (watchlistAction === 'kept-local' || !Array.isArray(cloud.watchlist)) {
-              const wl = loadWatchlist();
-              lastWatchlistFpRef.current = '';
-              setCloudSyncStatus('loading');
-              saveUserData(syncDocId, { watchlist: wl })
-                .then(() => {
-                  lastWatchlistFpRef.current = watchlistFingerprint(wl);
-                  setCloudSyncStatus('synced');
-                })
-                .catch((err) => {
-                  console.error('Firestore watchlist seed upload failed:', err);
-                  setCloudSyncStatus('error');
-                });
-            }
+            // Watchlist uploads are handled by startWatchlistCloudSync
 
             let storedAlerts: unknown[] = [];
             let storedAutoRsi = false;
@@ -2815,7 +2798,6 @@ export default function App() {
               modelWeights: cloud.modelWeights || storedWeights,
               trendlines: Array.isArray(cloud.trendlines) ? cloud.trendlines : storedTrends,
               annotations: Array.isArray(cloud.annotations) ? cloud.annotations : storedAnnotations,
-              watchlist: loadWatchlist(),
               portfolio: Array.isArray(cloud.portfolio) ? cloud.portfolio : loadPortfolio(),
               signalCache: Array.isArray(cloud.signalCache) ? cloud.signalCache : loadSignalCache(),
               prefs: {
@@ -2895,24 +2877,6 @@ export default function App() {
   const syncDocIdRef = useRef(syncDocId);
   syncDocIdRef.current = syncDocId;
 
-  const pushWatchlistToCloud = () => {
-    const docId = syncDocIdRef.current;
-    if (!docId || !cloudHydratedRef.current) return;
-    const watchlist = loadWatchlist();
-    const fp = watchlistFingerprint(watchlist);
-    if (fp === lastWatchlistFpRef.current) return;
-    lastWatchlistFpRef.current = fp;
-    setCloudSyncStatus('loading');
-    // Field-only write — must not be blocked by full-blob suppress / fingerprint
-    saveUserData(docId, { watchlist })
-      .then(() => setCloudSyncStatus('synced'))
-      .catch((err) => {
-        console.error('Firestore watchlist save failed:', err);
-        lastWatchlistFpRef.current = '';
-        setCloudSyncStatus('error');
-      });
-  };
-
   const pushAccountSync = (payload: Partial<UserCloudData>) => {
     const docId = syncDocIdRef.current;
     if (!docId || suppressCloudSaveRef.current || !cloudHydratedRef.current) return;
@@ -2920,9 +2884,6 @@ export default function App() {
     if (fp === lastSyncFingerprintRef.current) return;
     const prevFp = lastSyncFingerprintRef.current;
     lastSyncFingerprintRef.current = fp;
-    if (Array.isArray(payload.watchlist)) {
-      lastWatchlistFpRef.current = watchlistFingerprint(normalizeWatchlist(payload.watchlist));
-    }
     suppressCloudSaveRef.current = true;
     setCloudSyncStatus('loading');
     saveUserData(docId, payload)
@@ -2951,7 +2912,6 @@ export default function App() {
         modelWeights,
         trendlines,
         annotations,
-        watchlist: loadWatchlist(),
         portfolio: loadPortfolio(),
         signalCache: loadSignalCache(),
         prefs: {
@@ -2988,12 +2948,7 @@ export default function App() {
       // Remote applies already wrote localStorage — refresh UI only, do not echo back
       if (source === 'remote') return;
 
-      if (kind === 'watchlist' || kind === 'all') {
-        if (watchlistPushTimerRef.current) window.clearTimeout(watchlistPushTimerRef.current);
-        watchlistPushTimerRef.current = window.setTimeout(() => {
-          pushWatchlistToCloud();
-        }, 250);
-      }
+      // Watchlist cloud push is owned by startWatchlistCloudSync
       if (kind === 'portfolio' || kind === 'signals' || kind === 'prefs' || kind === 'all') {
         window.setTimeout(() => {
           if (suppressCloudSaveRef.current || !cloudHydratedRef.current) return;
@@ -3003,7 +2958,7 @@ export default function App() {
             modelWeights,
             trendlines,
             annotations,
-            watchlist: loadWatchlist(),
+            // omit watchlist — dedicated sync owns it
             portfolio: loadPortfolio(),
             signalCache: loadSignalCache(),
             prefs: {
@@ -8004,7 +7959,7 @@ export default function App() {
             <div className="flex flex-col md:items-end gap-2 text-center md:text-right">
               <span className="text-gray-500">
                 Quantum Node · Powered by Google Gemini ·{' '}
-                <span className="font-mono text-emerald-500/70">wl-fix-0814b</span>
+                <span className="font-mono text-emerald-500/70">wl-phone-0814c</span>
               </span>
               <LegalLinks className="justify-center md:justify-end" />
             </div>
@@ -8116,6 +8071,8 @@ export default function App() {
           <WatchlistPage
             quotes={portfolioQuotes}
             alertTickers={alerts.map((a) => a.ticker)}
+            cloudSyncStatus={watchlistSyncStatus}
+            onSyncNow={() => void watchlistSyncRef.current?.pullNow()}
             onOpenTicker={(sym) => {
               if (!assertAnalysisCredits()) return;
               runTickerSearch(sym);

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Star, Plus, Trash2, RefreshCw } from 'lucide-react';
+import { Star, Plus, Trash2, RefreshCw, Cloud, CloudOff, Loader2 } from 'lucide-react';
 import { GlassCard } from '../analysis/GlassCard';
 import {
   addToWatchlist,
@@ -8,6 +8,7 @@ import {
   type WatchlistItem,
 } from '../../lib/watchlistStore';
 import { subscribeAccountDataChanged } from '../../lib/accountSync';
+import type { WatchlistSyncStatus } from '../../lib/watchlistCloudSync';
 import { cn } from '../../lib/utils';
 import { toHkTickerIfNumeric } from '../../lib/tickerNormalize';
 import {
@@ -26,6 +27,8 @@ type WatchlistPageProps = {
   onUpdate?: () => void;
   updating?: boolean;
   updateProgress?: { done: number; total: number } | null;
+  cloudSyncStatus?: WatchlistSyncStatus;
+  onSyncNow?: () => void;
 };
 
 type MarketFilter = 'ALL' | WatchlistMarket;
@@ -45,6 +48,8 @@ export function WatchlistPage({
   onUpdate,
   updating = false,
   updateProgress = null,
+  cloudSyncStatus = 'idle',
+  onSyncNow,
 }: WatchlistPageProps) {
   const alertSet = useMemo(() => {
     if (!alertTickers) return new Set<string>();
@@ -163,26 +168,68 @@ export function WatchlistPage({
             <h2 className="text-lg font-sans font-bold text-white tracking-tight">Watchlist</h2>
             <span className="text-[10px] font-mono text-gray-500">{items.length}</span>
           </div>
+          <p
+            className={cn(
+              'mt-0.5 text-[10px] font-mono inline-flex items-center gap-1',
+              cloudSyncStatus === 'synced'
+                ? 'text-emerald-400/90'
+                : cloudSyncStatus === 'error'
+                  ? 'text-rose-400'
+                  : cloudSyncStatus === 'saving' || cloudSyncStatus === 'connecting'
+                    ? 'text-cyan-300'
+                    : 'text-gray-500'
+            )}
+          >
+            {cloudSyncStatus === 'error' ? (
+              <CloudOff className="h-3 w-3" />
+            ) : cloudSyncStatus === 'saving' || cloudSyncStatus === 'connecting' ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Cloud className="h-3 w-3" />
+            )}
+            {cloudSyncStatus === 'synced'
+              ? 'Cloud sync on · same account on phone & PC'
+              : cloudSyncStatus === 'saving'
+                ? 'Saving to cloud…'
+                : cloudSyncStatus === 'connecting'
+                  ? 'Connecting cloud…'
+                  : cloudSyncStatus === 'error'
+                    ? 'Cloud sync error — tap Sync'
+                    : 'Cloud sync idle — sign in with active plan'}
+          </p>
           {updating && updateProgress && updateProgress.total > 0 && (
             <p className="mt-0.5 text-[10px] font-mono text-amber-300/90">
               Updating {updateProgress.done}/{updateProgress.total}…
             </p>
           )}
         </div>
-        {onUpdate && (
-          <button
-            type="button"
-            onClick={onUpdate}
-            disabled={updating || items.length === 0}
-            className={cn(
-              'min-h-[32px] inline-flex items-center gap-1.5 rounded-lg px-3 text-[10px] font-bold uppercase tracking-wide cursor-pointer shrink-0',
-              'bg-amber-400 text-black hover:bg-amber-300 disabled:opacity-50 disabled:cursor-not-allowed'
-            )}
-          >
-            <RefreshCw className={cn('h-3 w-3', updating && 'animate-spin')} />
-            {updating ? 'Updating…' : 'Update'}
-          </button>
-        )}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {onSyncNow && (
+            <button
+              type="button"
+              onClick={onSyncNow}
+              disabled={cloudSyncStatus === 'saving' || cloudSyncStatus === 'connecting'}
+              className="min-h-[32px] inline-flex items-center gap-1.5 rounded-lg px-3 text-[10px] font-bold uppercase tracking-wide cursor-pointer border border-emerald-500/35 text-emerald-200 hover:bg-emerald-500/10 disabled:opacity-50"
+            >
+              <Cloud className="h-3 w-3" />
+              Sync
+            </button>
+          )}
+          {onUpdate && (
+            <button
+              type="button"
+              onClick={onUpdate}
+              disabled={updating || items.length === 0}
+              className={cn(
+                'min-h-[32px] inline-flex items-center gap-1.5 rounded-lg px-3 text-[10px] font-bold uppercase tracking-wide cursor-pointer shrink-0',
+                'bg-amber-400 text-black hover:bg-amber-300 disabled:opacity-50 disabled:cursor-not-allowed'
+              )}
+            >
+              <RefreshCw className={cn('h-3 w-3', updating && 'animate-spin')} />
+              {updating ? 'Updating…' : 'Update'}
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex gap-1.5">
