@@ -39,6 +39,7 @@ import { AiSignalsPage } from './components/pages/AiSignalsPage';
 import { WatchlistPage } from './components/pages/WatchlistPage';
 import { PortfolioPage } from './components/pages/PortfolioPage';
 import { SettingsPage } from './components/pages/SettingsPage';
+import { SelfLearningSettings } from './components/pages/SelfLearningSettings';
 import { AlertsPage } from './components/pages/AlertsPage';
 import { loadSignalCache, mergeSignalCache, removeSignalCache, type CachedSignalRow } from './lib/signalCache';
 import { findATrade } from './lib/findATrade';
@@ -7831,33 +7832,15 @@ export default function App() {
             planId={usage?.plan || null}
             planUnlimited={!!usage?.unlimited}
             selfLearningSlot={
-              <div className="space-y-3">
-                {(Object.keys(modelWeights) as (keyof typeof modelWeights)[]).map((key) => (
-                  <label key={String(key)} className="block">
-                    <div className="flex justify-between text-[11px] text-gray-400 mb-1">
-                      <span className="capitalize">{String(key).replace(/([A-Z])/g, ' $1')}</span>
-                      <span className="font-mono text-emerald-300">{modelWeights[key]}</span>
-                    </div>
-                    <input
-                      type="range"
-                      min={0}
-                      max={40}
-                      value={modelWeights[key]}
-                      onChange={(e) => {
-                        const next = { ...modelWeights, [key]: Number(e.target.value) };
-                        setModelWeights(next);
-                        try {
-                          localStorage.setItem('quantum_model_weights', JSON.stringify(next));
-                        } catch {}
-                      }}
-                      className="w-full"
-                    />
-                  </label>
-                ))}
-                <p className="text-[11px] text-gray-500">
-                  Higher weight = that factor matters more in the AI score. Changes apply on the next analysis.
-                </p>
-              </div>
+              <SelfLearningSettings
+                weights={modelWeights}
+                onSave={(next) => {
+                  setModelWeights(next);
+                  try {
+                    localStorage.setItem('quantum_model_weights', JSON.stringify(next));
+                  } catch {}
+                }}
+              />
             }
           />
         )}

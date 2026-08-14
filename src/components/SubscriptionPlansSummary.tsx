@@ -47,25 +47,23 @@ export function SubscriptionPlansSummary({
       ? 'Developer'
       : planDisplayName(currentPlanId, currentPlanLabel);
     return (
-      <div className="rounded-md border border-white/[0.06] bg-white/[0.02] px-2.5 py-2">
-        <div className="flex items-center justify-between gap-2 min-w-0">
-          <p className="text-[9px] font-mono uppercase tracking-[0.16em] text-gray-600">
-            Subscription
-          </p>
-          <span className="text-[10px] font-semibold text-emerald-400/90 truncate">{label}</span>
+      <div className="rounded-md border border-white/[0.06] bg-white/[0.02] px-2 py-1.5">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <CreditCard className="h-3 w-3 shrink-0 text-gray-500" />
+          <div className="min-w-0 flex-1 leading-tight">
+            <p className="text-[10px] font-semibold text-emerald-400/90 truncate">{label}</p>
+            <p className="text-[8px] text-gray-600 truncate">199 · 349 /mo</p>
+          </div>
+          {onCta && (
+            <button
+              type="button"
+              onClick={onCta}
+              className="shrink-0 h-6 px-1.5 rounded border border-white/[0.08] text-[9px] font-medium text-gray-400 hover:text-white hover:bg-white/[0.04] cursor-pointer"
+            >
+              {ctaLabel || 'Manage'}
+            </button>
+          )}
         </div>
-        <p className="mt-1 text-[9px] text-gray-500 leading-tight">
-          Basic RM 199 · Pro RM 349
-        </p>
-        {onCta && (
-          <button
-            type="button"
-            onClick={onCta}
-            className="mt-2 w-full min-h-[30px] rounded-md border border-white/[0.08] text-[10px] font-medium tracking-wide text-gray-300 hover:text-white hover:bg-white/[0.04] cursor-pointer"
-          >
-            {ctaLabel || 'Manage plan'}
-          </button>
-        )}
       </div>
     );
   }

@@ -272,7 +272,7 @@ export function AppSidebar({
               onOpenPlans?.();
               onMobileOpenChange(false);
             }}
-            ctaLabel="Manage plan"
+            ctaLabel="Manage"
           />
 
           {!userEmail ? (

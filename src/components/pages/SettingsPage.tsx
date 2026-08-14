@@ -246,7 +246,7 @@ export function SettingsPage({
         <GlassCard>
           <SectionLabel>Self-learning / calibration</SectionLabel>
           <p className="mt-1 text-[11px] text-gray-500 mb-3">
-            Adjust how much weight the AI gives to trend, smart money, and other factors. Plain language: higher weight = that factor matters more in the score.
+            Adjust how much weight the AI gives to trend, smart money, and other factors. Use Save when you are done — unsaved slider moves do not apply yet.
           </p>
           <div className="mt-2">{selfLearningSlot}</div>
         </GlassCard>
