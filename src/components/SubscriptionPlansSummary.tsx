@@ -35,9 +35,9 @@ export function SubscriptionPlansSummary({
           onExpand?.();
           onCta?.();
         }}
-        className="w-full inline-flex h-10 items-center justify-center rounded-xl border border-amber-500/35 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 cursor-pointer"
+        className="w-full inline-flex h-9 items-center justify-center rounded-md border border-white/[0.08] text-gray-400 hover:text-white hover:bg-white/[0.04] cursor-pointer"
       >
-        <CreditCard className="h-4 w-4" />
+        <CreditCard className="h-3.5 w-3.5" />
       </button>
     );
   }
@@ -47,13 +47,12 @@ export function SubscriptionPlansSummary({
       ? 'Developer'
       : planDisplayName(currentPlanId, currentPlanLabel);
     return (
-      <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 px-2.5 py-2">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <CreditCard className="h-3.5 w-3.5 text-amber-400 shrink-0" />
-          <p className="text-[10px] text-gray-300 truncate min-w-0">
-            <span className="font-mono uppercase tracking-wider text-amber-200/80">Plan</span>{' '}
-            <span className="font-bold text-emerald-300">{label}</span>
+      <div className="rounded-md border border-white/[0.06] bg-white/[0.02] px-2.5 py-2">
+        <div className="flex items-center justify-between gap-2 min-w-0">
+          <p className="text-[9px] font-mono uppercase tracking-[0.16em] text-gray-600">
+            Subscription
           </p>
+          <span className="text-[10px] font-semibold text-emerald-400/90 truncate">{label}</span>
         </div>
         <p className="mt-1 text-[9px] text-gray-500 leading-tight">
           Basic RM 199 · Pro RM 349
@@ -62,7 +61,7 @@ export function SubscriptionPlansSummary({
           <button
             type="button"
             onClick={onCta}
-            className="mt-1.5 w-full min-h-[32px] rounded-lg border border-amber-500/35 bg-amber-500/10 text-[10px] font-bold uppercase tracking-wider text-amber-100 hover:bg-amber-500/20 cursor-pointer"
+            className="mt-2 w-full min-h-[30px] rounded-md border border-white/[0.08] text-[10px] font-medium tracking-wide text-gray-300 hover:text-white hover:bg-white/[0.04] cursor-pointer"
           >
             {ctaLabel || 'Manage plan'}
           </button>

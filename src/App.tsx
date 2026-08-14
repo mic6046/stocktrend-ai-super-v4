@@ -7672,7 +7672,7 @@ export default function App() {
             <div className="flex flex-col md:items-end gap-2 text-center md:text-right">
               <span className="text-gray-500">
                 Quantum Node · Powered by Google Gemini ·{' '}
-                <span className="font-mono text-emerald-500/70">no-ask-ai-0814</span>
+                <span className="font-mono text-emerald-500/70">sidebar-pro-0814</span>
               </span>
               <LegalLinks className="justify-center md:justify-end" />
             </div>
