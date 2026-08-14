@@ -83,7 +83,25 @@ function headlineText(raw: unknown): string | null {
   return null;
 }
 
-function sentimentFromApi(
+/** Primary benchmark for each dashboard market — trend follows this index's day move. */
+const MARKET_TREND_SYMBOL: Record<DashboardMarket, string> = {
+  US: '^GSPC',
+  HK: '^HSI',
+  JP: '^N225',
+  EU: '^STOXX50E',
+  ALL: '^GSPC',
+};
+
+function averageChangePct(indices: MarketIndex[]): number | null {
+  const vals = indices
+    .map((i) => i.regularMarketChangePercent)
+    .filter((n): n is number => typeof n === 'number' && Number.isFinite(n));
+  if (!vals.length) return null;
+  return vals.reduce((a, b) => a + b, 0) / vals.length;
+}
+
+function marketTrendOutlook(
+  indices: MarketIndex[],
   sentiment: any | null,
   market: DashboardMarket
 ): {
@@ -91,57 +109,62 @@ function sentimentFromApi(
   confidence: number;
   why: string;
 } {
+  const primarySym = MARKET_TREND_SYMBOL[market];
+  const primary =
+    market === 'ALL'
+      ? null
+      : indices.find((i) => i.symbol === primarySym) || null;
+
+  const pct =
+    market === 'ALL'
+      ? averageChangePct(indices)
+      : primary?.regularMarketChangePercent != null &&
+          Number.isFinite(primary.regularMarketChangePercent)
+        ? primary.regularMarketChangePercent
+        : averageChangePct(indices);
+
+  const name =
+    market === 'ALL'
+      ? 'global benchmarks'
+      : primary?.shortName || INDEX_LABEL[primarySym] || primarySym;
+
   const pickKey = market === 'HK' ? 'HK' : 'US';
   const block = sentiment?.[pickKey];
+  const topHeadline = Array.isArray(block?.headlines)
+    ? headlineText(block.headlines[0])
+    : headlineText(block?.headlines);
 
-  if (!block) {
+  if (pct == null) {
     return {
       label: 'NEUTRAL',
       confidence: 50,
-      why:
-        market === 'JP' || market === 'EU'
-          ? 'Headline sentiment is strongest for US & HK feeds — outlook uses the nearest available proxy.'
-          : 'Waiting for market news feed to estimate sentiment.',
+      why: 'Waiting for live index quotes to determine market trend.',
     };
   }
 
-  const total = Math.max(
-    1,
-    Number(block.total) || Number(block.good || 0) + Number(block.neutral || 0) + Number(block.bad || 0)
-  );
-  const good = Number(block.good || 0);
-  const bad = Number(block.bad || 0);
-  const score = (good - bad) / total;
-  const confidence = Math.round(Math.min(92, Math.max(45, 55 + Math.abs(score) * 40)));
-  const topHeadline = Array.isArray(block.headlines)
-    ? headlineText(block.headlines[0])
-    : headlineText(block.headlines);
+  const abs = Math.abs(pct);
+  const confidence = Math.round(Math.min(92, Math.max(52, 55 + abs * 12)));
+  const pctStr = `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
+  const newsBit = topHeadline ? ` News lean: ${topHeadline}` : '';
 
-  const regionNote =
-    market === 'JP' || market === 'EU'
-      ? ` (${pickKey} news proxy for ${market})`
-      : market === 'ALL'
-        ? ' (global view weighted to US feed)'
-        : '';
-
-  if (score > 0.12) {
+  if (pct > 0.15) {
     return {
       label: 'BULLISH',
       confidence,
-      why: (topHeadline || 'Positive headlines outweigh negatives — risk appetite looks constructive.') + regionNote,
+      why: `${name} is up ${pctStr} today — market trend is positive.${newsBit}`,
     };
   }
-  if (score < -0.12) {
+  if (pct < -0.15) {
     return {
       label: 'BEARISH',
       confidence,
-      why: (topHeadline || 'Negative headlines dominate — caution is warranted near support levels.') + regionNote,
+      why: `${name} is down ${pctStr} today — market trend is negative.${newsBit}`,
     };
   }
   return {
     label: 'NEUTRAL',
-    confidence,
-    why: (topHeadline || 'Mixed headlines — markets lack a clear directional bias today.') + regionNote,
+    confidence: Math.min(confidence, 62),
+    why: `${name} is roughly flat (${pctStr}) — no strong directional trend today.${newsBit}`,
   };
 }
 
@@ -239,7 +262,10 @@ export function MarketCommandCenter({
     return resolveIndices(indices, symbols).slice(0, 4);
   }, [indices, market]);
 
-  const outlook = sentimentFromApi(sentiment, market);
+  const outlook = useMemo(
+    () => marketTrendOutlook(core, sentiment, market),
+    [core, sentiment, market]
+  );
 
   const filterRows = (rows: CommandStockRow[]) =>
     rows.filter((r) => tickerBelongsToMarket(r.ticker, market));
@@ -306,11 +332,11 @@ export function MarketCommandCenter({
 
       <GlassCard className="border-cyan-500/20">
         <SectionLabel icon={<Sparkles className="w-3.5 h-3.5 text-cyan-400" />}>
-          AI Market Outlook · {marketLabel}
+          Market Outlook · {marketLabel}
         </SectionLabel>
         <div className="mt-3 flex flex-col sm:flex-row sm:items-center gap-4">
           <div className="shrink-0">
-            <p className="text-[10px] uppercase tracking-wider text-gray-500">AI Market Sentiment</p>
+            <p className="text-[10px] uppercase tracking-wider text-gray-500">Market Trend</p>
             <p
               className={cn(
                 'mt-1 text-2xl font-black tracking-wide',
@@ -319,15 +345,15 @@ export function MarketCommandCenter({
                 outlook.label === 'NEUTRAL' && 'text-amber-300'
               )}
             >
-              {loadingSentiment ? '…' : outlook.label}
+              {outlook.label}
             </p>
             <p className="mt-1 text-[12px] font-mono text-cyan-300">Confidence {outlook.confidence}%</p>
           </div>
           <p className="text-[13px] text-gray-300 leading-relaxed flex-1">{outlook.why}</p>
         </div>
         <p className="mt-3 text-[11px] text-gray-500">
-          Plain language: sentiment summarizes whether recent headlines lean positive, mixed, or negative — not a trade
-          order.
+          Plain language: trend follows the main index day move for this market (e.g. Hang Seng for HK) — not a trade
+          order. Headlines are secondary context only.
         </p>
       </GlassCard>
 
