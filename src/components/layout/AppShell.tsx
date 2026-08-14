@@ -1,9 +1,14 @@
 import React from 'react';
+import { Globe } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { AppSidebar } from './AppSidebar';
 import { AppHeader } from './AppHeader';
 import type { AppPage } from './navTypes';
 import type { MarketDataStatus } from '../../lib/marketDataRefresh';
+import {
+  DASHBOARD_MARKETS,
+  type DashboardMarket,
+} from '../../lib/dashboardMarket';
 
 type IndexQuote = {
   symbol?: string;
@@ -22,6 +27,9 @@ type AppShellProps = {
   onMobileOpenChange: (v: boolean) => void;
   alertCount?: number;
   indices: IndexQuote[];
+  /** Shown above the market pulse on Dashboard */
+  dashboardMarket?: DashboardMarket;
+  onDashboardMarketChange?: (m: DashboardMarket) => void;
   // header
   searchQuery: string;
   onSearchQueryChange: (v: string) => void;
@@ -50,6 +58,8 @@ export function AppShell({
   onMobileOpenChange,
   alertCount = 0,
   indices,
+  dashboardMarket,
+  onDashboardMarketChange,
   searchQuery,
   onSearchQueryChange,
   onSearchSubmit,
@@ -67,6 +77,8 @@ export function AppShell({
   children,
   footer,
 }: AppShellProps) {
+  const showMarketSelect = activePage === 'DASHBOARD' && !!onDashboardMarketChange;
+
   return (
     <div className="min-h-screen bg-[#050505] text-[#e0e0e0] font-sans selection:bg-emerald-500 selection:text-black overflow-x-hidden relative flex">
       <div className="fixed top-[-100px] left-[-100px] w-[500px] h-[500px] bg-emerald-500/10 rounded-full blur-[120px] pointer-events-none" />
@@ -107,6 +119,35 @@ export function AppShell({
           onGoDashboard={() => onNavigate('DASHBOARD')}
         />
 
+        {showMarketSelect && (
+          <div className="relative z-20 border-b border-emerald-500/25 bg-[#0a1210]">
+            <div className="px-3 sm:px-4 py-2.5 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+              <div className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.14em] text-emerald-400 shrink-0">
+                <Globe className="h-4 w-4" />
+                Select market
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {DASHBOARD_MARKETS.map((m) => (
+                  <button
+                    key={m.key}
+                    type="button"
+                    onClick={() => onDashboardMarketChange(m.key)}
+                    className={cn(
+                      'min-h-[40px] rounded-xl px-3.5 text-[12px] font-bold tracking-wide border cursor-pointer',
+                      dashboardMarket === m.key
+                        ? 'bg-emerald-500 text-black border-emerald-400 shadow-[0_0_16px_rgba(16,185,129,0.35)]'
+                        : 'bg-black/40 text-gray-300 border-white/10 hover:text-white hover:border-emerald-500/40'
+                    )}
+                  >
+                    <span className="sm:hidden">{m.short}</span>
+                    <span className="hidden sm:inline">{m.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Market pulse */}
         <div className="relative z-10 bg-[#0A0A0C] border-b border-white/5 py-1.5 sm:py-2">
           <div className="px-3 sm:px-4 flex items-center gap-x-4 sm:gap-x-6 overflow-x-auto no-scrollbar lg:flex-wrap lg:justify-center lg:overflow-visible [-webkit-overflow-scrolling:touch]">
@@ -118,7 +159,7 @@ export function AppShell({
                 >
                   <span className="text-gray-500">{idx.shortName || idx.symbol}</span>
                   <span className="text-white font-semibold">
-                    ${idx.regularMarketPrice?.toFixed(2) || '---'}
+                    {idx.regularMarketPrice?.toFixed(2) || '---'}
                   </span>
                   <span
                     className={cn(

@@ -44,6 +44,12 @@ import { loadSignalCache, mergeSignalCache, removeSignalCache, type CachedSignal
 import { findATrade } from './lib/findATrade';
 import { POPULAR_UNIVERSE } from './lib/suggestTradeUniverses';
 import { loadWatchlist } from './lib/watchlistStore';
+import {
+  filterIndicesByMarket,
+  loadDashboardMarket,
+  saveDashboardMarket,
+  type DashboardMarket,
+} from './lib/dashboardMarket';
 import { useAuth } from './lib/auth';
 import { loadUserData, saveUserData } from './lib/userData';
 import { apiUrl, assertJsonResponse, loggedFetch, withMarketRefreshLock } from './lib/api';
@@ -1162,6 +1168,7 @@ export default function App() {
   
   // === App shell pages (sidebar navigation) ===
   const [activePage, setActivePage] = useState<AppPage>('DASHBOARD');
+  const [dashboardMarket, setDashboardMarket] = useState<DashboardMarket>(() => loadDashboardMarket());
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => loadSidebarCollapsed());
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [signalCache, setSignalCache] = useState<CachedSignalRow[]>(() => loadSignalCache());
@@ -7619,7 +7626,14 @@ export default function App() {
         mobileOpen={mobileSidebarOpen}
         onMobileOpenChange={setMobileSidebarOpen}
         alertCount={alerts.filter((a) => a.isTriggered).length}
-        indices={indices}
+        indices={
+          activePage === 'DASHBOARD' ? filterIndicesByMarket(indices, dashboardMarket) : indices
+        }
+        dashboardMarket={dashboardMarket}
+        onDashboardMarketChange={(m) => {
+          setDashboardMarket(m);
+          saveDashboardMarket(m);
+        }}
         searchQuery={searchQuery}
         onSearchQueryChange={setSearchQuery}
         onSearchSubmit={(raw) => runTickerSearch(raw)}
@@ -7644,7 +7658,7 @@ export default function App() {
             <div className="flex flex-col md:items-end gap-2 text-center md:text-right">
               <span className="text-gray-500">
                 Quantum Node · Powered by Google Gemini ·{' '}
-                <span className="font-mono text-emerald-500/70">ui-fix-black-0813</span>
+                <span className="font-mono text-emerald-500/70">dash-market-0814</span>
               </span>
               <LegalLinks className="justify-center md:justify-end" />
             </div>
@@ -7667,6 +7681,7 @@ export default function App() {
             indices={indices}
             sentiment={marketSentiment}
             loadingSentiment={loadingSentiment}
+            market={dashboardMarket}
             opportunities={signalCache
               .filter((r) => r.bucket === 'opportunity' || (!r.bucket && /buy|add/i.test(r.recommendation || '')))
               .slice(0, 8)
