@@ -20,10 +20,7 @@ import { cn } from '../../lib/utils';
 import { LegalLinks } from '../LegalDocs';
 import { openLegalDoc } from '../../lib/legal';
 import type { AppPage } from './navTypes';
-import { SidebarAiChat } from './SidebarAiChat';
 import { SubscriptionPlansSummary } from '../SubscriptionPlansSummary';
-import type { AssistantChatContext } from '../../lib/assistantChatApi';
-import type { UsageSnapshot } from '../../lib/usageApi';
 
 const NAV_ITEMS: { id: AppPage; label: string; icon: React.ElementType }[] = [
   { id: 'DASHBOARD', label: 'Dashboard', icon: LayoutDashboard },
@@ -50,8 +47,6 @@ type AppSidebarProps = {
   onSignOut: () => void;
   authLoading?: boolean;
   usageSlot?: React.ReactNode;
-  chatContext: AssistantChatContext;
-  onChatUsageUpdate?: (usage: UsageSnapshot) => void;
   planLabel?: string | null;
   planId?: string | null;
   planUnlimited?: boolean;
@@ -71,8 +66,6 @@ export function AppSidebar({
   onSignOut,
   authLoading,
   usageSlot,
-  chatContext,
-  onChatUsageUpdate,
   planLabel,
   planId,
   planUnlimited,
@@ -159,12 +152,11 @@ export function AppSidebar({
           })}
         </nav>
 
-        {/* Bottom stack — compact, scrolls if viewport is short */}
         <div
           className={cn(
             'border-t border-white/5 shrink-0 overflow-y-auto overscroll-contain space-y-2',
             isCollapsed ? 'p-2' : 'p-2.5',
-            'max-h-[min(46vh,22rem)]'
+            'max-h-[min(40vh,18rem)]'
           )}
         >
           {!isCollapsed && userEmail && (
@@ -191,19 +183,6 @@ export function AppSidebar({
               onMobileOpenChange(false);
             }}
             ctaLabel="Manage plan"
-          />
-
-          <SidebarAiChat
-            activePage={activePage}
-            collapsed={isCollapsed}
-            onExpandSidebar={() => onCollapsedChange(false)}
-            userEmail={userEmail}
-            onSignIn={() => {
-              onSignIn();
-              onMobileOpenChange(false);
-            }}
-            chatContext={chatContext}
-            onUsageUpdate={onChatUsageUpdate}
           />
 
           {!userEmail ? (

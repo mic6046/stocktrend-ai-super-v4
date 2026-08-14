@@ -2,6 +2,30 @@ import { apiUrl, loggedFetch } from './api';
 import type { UsageSnapshot } from './usageApi';
 import type { AppPage } from '../components/layout/navTypes';
 
+export type AnalysisAskSnapshot = {
+  ticker?: string | null;
+  name?: string | null;
+  price?: number | null;
+  changePct?: number | null;
+  score?: number | null;
+  rating?: string | null;
+  action?: string | null;
+  actionReason?: string | null;
+  confidence?: number | null;
+  risk?: string | null;
+  rsi?: number | null;
+  macdBullish?: boolean | null;
+  trend?: string | null;
+  volatility?: string | null;
+  targetPrice?: number | null;
+  expectedReturn?: number | null;
+  horizon?: string | null;
+  keyRisks?: string[];
+  bullishFactors?: string[];
+  bearishFactors?: string[];
+  summaryLead?: string | null;
+};
+
 export type AssistantChatContext = {
   page: AppPage;
   pageLabel: string;
@@ -9,6 +33,8 @@ export type AssistantChatContext = {
   dashboardMarket?: string | null;
   watchlistTickers?: string[];
   signalTickers?: string[];
+  /** Rich snapshot when chatting from the Analysis page */
+  analysis?: AnalysisAskSnapshot | null;
 };
 
 export type AssistantChatMessage = {
@@ -37,7 +63,7 @@ export async function postAssistantChat(params: {
       context: params.context,
       history: (params.history || []).slice(-6),
     }),
-    __qnMeta: { reason: 'assistant-chat', userAction: 'Sidebar Ask AI' },
+    __qnMeta: { reason: 'assistant-chat', userAction: 'Analysis Ask AI' },
   });
 
   const data = await res.json().catch(() => ({}));

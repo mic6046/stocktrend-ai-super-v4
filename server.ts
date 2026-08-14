@@ -2074,7 +2074,7 @@ const PAGE_ASSISTANT_GUIDES: Record<string, string> = {
   PORTFOLIO:
     'User is on Portfolio: positions and performance tracking. Explain how portfolio views relate to analysis.',
   ANALYSIS:
-    'User is on Analysis: deep ticker analysis (charts, indicators, AI predict). Explain reading indicators and running Predict (uses analysis credits).',
+    'User is on Analysis for a specific ticker. Use the ANALYSIS SNAPSHOT below to explain scores, current action, RSI/MACD/trend, risk, and what the panels mean. Answer from that page data; do not invent prices or signals not in the snapshot.',
   NEWS_CENTER:
     'User is on News Center: headlines and AI news summaries (news credits). Explain how to load news and summarize.',
   ALERTS:
@@ -2143,6 +2143,42 @@ app.post('/api/assistant-chat', async (req, res) => {
     ? context.signalTickers.map((t: any) => String(t).toUpperCase()).filter(Boolean).slice(0, 20)
     : [];
 
+  const analysis =
+    context.analysis && typeof context.analysis === 'object' ? context.analysis : null;
+  const analysisLines: string[] = [];
+  if (analysis) {
+    const push = (label: string, val: unknown) => {
+      if (val === null || val === undefined || val === '') return;
+      if (Array.isArray(val)) {
+        const joined = val.map((x) => String(x)).filter(Boolean).slice(0, 6).join('; ');
+        if (joined) analysisLines.push(`- ${label}: ${joined}`);
+        return;
+      }
+      analysisLines.push(`- ${label}: ${String(val)}`);
+    };
+    push('Ticker', analysis.ticker);
+    push('Name', analysis.name);
+    push('Price', analysis.price);
+    push('Day change %', analysis.changePct);
+    push('Score', analysis.score);
+    push('Rating', analysis.rating);
+    push('Current action', analysis.action);
+    push('Action reason', analysis.actionReason);
+    push('Confidence', analysis.confidence);
+    push('Risk', analysis.risk);
+    push('RSI', analysis.rsi);
+    push('MACD bullish', analysis.macdBullish);
+    push('Trend', analysis.trend);
+    push('Volatility', analysis.volatility);
+    push('Target price', analysis.targetPrice);
+    push('Expected return', analysis.expectedReturn);
+    push('Horizon', analysis.horizon);
+    push('Summary', analysis.summaryLead);
+    push('Key risks', analysis.keyRisks);
+    push('Bullish factors', analysis.bullishFactors);
+    push('Bearish factors', analysis.bearishFactors);
+  }
+
   const historyLines = prior
     .slice(-6)
     .map((m: any) => {
@@ -2153,10 +2189,12 @@ app.post('/api/assistant-chat', async (req, res) => {
     .filter(Boolean)
     .join('\n');
 
-  const prompt = `You are the Quantum Node in-app assistant in the left sidebar.
-Help the user with questions related to the CURRENT page and product UI only.
-Be concise (2–4 short sentences or a few bullets). No markdown tables. No investment advice or buy/sell recommendations — educational UI guidance only.
-If the question is off-topic, refuse briefly and steer back to this page.
+  const prompt = `You are the Quantum Node Analysis assistant on the Analysis page.
+Help the user understand the CURRENT ticker analysis shown on screen.
+Be concise (2–5 short sentences or a few bullets). No markdown tables.
+Explain scores, indicators, action labels, and risks using the ANALYSIS SNAPSHOT when present.
+Do NOT invent numbers not in the snapshot. Do NOT give personalized investment advice or tell the user to buy/sell — educational interpretation of on-page data only.
+If the question is off-topic, refuse briefly and steer back to this analysis.
 Always end with this exact one-line disclaimer on its own line: "Not financial advice."
 
 CURRENT PAGE: ${pageLabel} (${page})
@@ -2167,6 +2205,7 @@ CONTEXT SNAPSHOT:
 - Watchlist (sample): ${watchlistTickers.length ? watchlistTickers.join(', ') : 'none'}
 - AI signal tickers (sample): ${signalTickers.length ? signalTickers.join(', ') : 'none'}
 
+${analysisLines.length ? `ANALYSIS SNAPSHOT:\n${analysisLines.join('\n')}\n` : 'ANALYSIS SNAPSHOT: (not provided — answer about Analysis UI generally)\n'}
 ${historyLines ? `RECENT CHAT:\n${historyLines}\n` : ''}USER QUESTION:
 ${message}
 `;
