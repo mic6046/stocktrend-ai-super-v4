@@ -40,8 +40,55 @@ export type StockRecommendation = {
   isBuyCandidate: boolean;
   /** Full engine payload for panels that need zones / committee / factors. Absent on scout errors. */
   engine: QuantumEngineOutput | null;
+  /** Compact board fields for AI Signals / Watchlist cards. */
+  boardMetrics?: {
+    rsi: number | null;
+    smartMoney: string;
+    fundFlow: string;
+    momentum: string;
+    technicalTrend: string;
+    changePct?: number | null;
+  };
   error?: string;
 };
+
+function dirFromScore(score: number | null | undefined, up: string, down: string, mid = 'Neutral'): string {
+  if (score == null || !Number.isFinite(score)) return '—';
+  if (score >= 60) return up;
+  if (score < 40) return down;
+  return mid;
+}
+
+function buildBoardMetrics(
+  input: QuantumEngineInput,
+  engine: QuantumEngineOutput
+): NonNullable<StockRecommendation['boardMetrics']> {
+  const rsi = input.technical?.rsi != null && Number.isFinite(input.technical.rsi) ? Number(input.technical.rsi) : null;
+  const smart =
+    input.smartMoneyScore != null
+      ? dirFromScore(input.smartMoneyScore, '↑', '↓')
+      : dirFromScore(input.whaleScore ?? engine.componentScores.whale, '↑', '↓');
+  const flow =
+    input.fundFlowBias === 'inflow'
+      ? '↑ Inflow'
+      : input.fundFlowBias === 'outflow'
+        ? '↓ Outflow'
+        : dirFromScore(input.institutionalScore, '↑ Inflow', '↓ Outflow');
+  const mom = dirFromScore(engine.componentScores.momentum, 'Bullish', 'Bearish');
+  const trendRaw = input.technical?.trend || engine.chartStance || '—';
+  const technicalTrend =
+    typeof trendRaw === 'string'
+      ? trendRaw.replace(/_/g, ' ')
+      : String(trendRaw);
+
+  return {
+    rsi,
+    smartMoney: smart,
+    fundFlow: flow,
+    momentum: mom,
+    technicalTrend,
+  };
+}
 
 export type DisplayRecommendationSlice = {
   recommendation?: string | null;
@@ -130,13 +177,18 @@ export function toStockRecommendation(
 /** Evaluate a stock once via AI Quantum Score → StockRecommendation. */
 export function evaluateStockRecommendation(
   input: QuantumEngineInput,
-  meta: { ticker: string; companyName?: string; dataTimestamp?: number }
+  meta: { ticker: string; companyName?: string; dataTimestamp?: number; changePct?: number | null }
 ): StockRecommendation {
   const engine = runQuantumRecommendationEngine({
     ...input,
     ticker: meta.ticker || input.ticker,
   });
-  return toStockRecommendation(engine, meta);
+  const rec = toStockRecommendation(engine, meta);
+  const boardMetrics = buildBoardMetrics(input, engine);
+  if (meta.changePct != null && Number.isFinite(meta.changePct)) {
+    boardMetrics.changePct = Number(meta.changePct);
+  }
+  return { ...rec, boardMetrics };
 }
 
 /**

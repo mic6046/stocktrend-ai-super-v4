@@ -196,6 +196,10 @@ async function scoutOneFind(
       ticker: sym,
       companyName,
       dataTimestamp: Date.now(),
+      changePct:
+        data?.quote?.regularMarketChangePercent != null
+          ? Number(data.quote.regularMarketChangePercent)
+          : null,
     });
   } catch (err: any) {
     return errorRecommendation(ticker, err?.message || 'Scout failed');

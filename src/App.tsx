@@ -7348,22 +7348,27 @@ export default function App() {
         .map((s) => {
           const rec = String(s.recommendation || s.currentAction || 'WAIT');
           const eng = s.engine;
+          const board = s.boardMetrics;
           return {
             ticker: s.ticker.toUpperCase(),
             name: s.companyName || s.ticker,
             recommendation: rec,
             confidence: typeof s.confidence === 'number' ? s.confidence : 50,
-            trend: eng?.chartStance,
+            trend: eng?.chartStance || board?.technicalTrend,
             risk: s.riskLabel,
             price: eng?.currentPrice && eng.currentPrice > 0 ? eng.currentPrice : undefined,
-            smartMoney: undefined,
-            fundFlow: undefined,
+            changePct: board?.changePct ?? undefined,
+            smartMoney: board?.smartMoney,
+            fundFlow: board?.fundFlow,
+            rsi: board?.rsi ?? null,
+            momentum: board?.momentum,
+            technicalTrend: board?.technicalTrend || eng?.chartStance,
             bucket: /buy|add/i.test(rec)
               ? 'opportunity'
               : /sell|trim|reduce/i.test(rec)
                 ? 'risk'
                 : 'watch',
-          };
+          } satisfies CachedSignalRow;
         });
 
       if (rows.length) {
@@ -7466,8 +7471,13 @@ export default function App() {
             confidence: next[t].confidence,
             trend: next[t].trend,
             price: next[t].price,
-            changePct: next[t].changePct,
+            changePct: next[t].changePct ?? s.boardMetrics?.changePct ?? undefined,
             risk: s.riskLabel,
+            smartMoney: s.boardMetrics?.smartMoney,
+            fundFlow: s.boardMetrics?.fundFlow,
+            rsi: s.boardMetrics?.rsi ?? null,
+            momentum: s.boardMetrics?.momentum,
+            technicalTrend: s.boardMetrics?.technicalTrend || eng?.chartStance,
             bucket: /buy|add/i.test(rec)
               ? 'opportunity'
               : /sell|trim|reduce/i.test(rec)
