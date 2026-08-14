@@ -31,9 +31,18 @@ export function loadDashboardMarket(): DashboardMarket {
   return 'US';
 }
 
-export function saveDashboardMarket(market: DashboardMarket) {
+export function saveDashboardMarket(market: DashboardMarket, opts?: { silent?: boolean }) {
   try {
     localStorage.setItem(STORAGE_KEY, market);
+  } catch {
+    /* ignore */
+  }
+  if (opts?.silent) return;
+  try {
+    // Dynamic import avoided — notify via custom event string to keep this module light
+    window.dispatchEvent(
+      new CustomEvent('qn-account-data', { detail: { kind: 'prefs', at: Date.now() } })
+    );
   } catch {
     /* ignore */
   }

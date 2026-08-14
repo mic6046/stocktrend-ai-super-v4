@@ -1,3 +1,5 @@
+import { notifyAccountDataChanged } from './accountSync';
+
 export type PortfolioHolding = {
   ticker: string;
   name?: string;
@@ -29,7 +31,7 @@ export function loadPortfolio(): PortfolioHolding[] {
   }
 }
 
-export function savePortfolio(items: PortfolioHolding[]) {
+export function savePortfolio(items: PortfolioHolding[], opts?: { silent?: boolean }) {
   try {
     localStorage.setItem(KEY, JSON.stringify(items));
   } catch {
@@ -43,6 +45,7 @@ export function savePortfolio(items: PortfolioHolding[]) {
   } catch {
     /* ignore */
   }
+  if (!opts?.silent) notifyAccountDataChanged('portfolio');
 }
 
 export function upsertHolding(

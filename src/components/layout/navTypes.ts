@@ -19,9 +19,17 @@ export function loadSidebarCollapsed(): boolean {
   }
 }
 
-export function saveSidebarCollapsed(collapsed: boolean) {
+export function saveSidebarCollapsed(collapsed: boolean, opts?: { silent?: boolean }) {
   try {
     localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? '1' : '0');
+  } catch {
+    /* ignore */
+  }
+  if (opts?.silent) return;
+  try {
+    window.dispatchEvent(
+      new CustomEvent('qn-account-data', { detail: { kind: 'prefs', at: Date.now() } })
+    );
   } catch {
     /* ignore */
   }

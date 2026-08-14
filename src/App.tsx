@@ -41,10 +41,12 @@ import { PortfolioPage } from './components/pages/PortfolioPage';
 import { SettingsPage } from './components/pages/SettingsPage';
 import { SelfLearningSettings } from './components/pages/SelfLearningSettings';
 import { AlertsPage } from './components/pages/AlertsPage';
-import { loadSignalCache, mergeSignalCache, removeSignalCache, type CachedSignalRow } from './lib/signalCache';
+import { loadSignalCache, mergeSignalCache, removeSignalCache, saveSignalCache, type CachedSignalRow } from './lib/signalCache';
 import { findATrade } from './lib/findATrade';
 import { POPULAR_UNIVERSE } from './lib/suggestTradeUniverses';
-import { loadWatchlist } from './lib/watchlistStore';
+import { loadWatchlist, saveWatchlist } from './lib/watchlistStore';
+import { loadPortfolio, savePortfolio } from './lib/portfolioStore';
+import { subscribeAccountDataChanged, notifyAccountDataChanged } from './lib/accountSync';
 import {
   filterIndicesByMarket,
   loadDashboardMarket,
@@ -1097,6 +1099,7 @@ export default function App() {
   const { user, loading: authLoading, accessState, signOut } = useAuth();
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [cloudSyncStatus, setCloudSyncStatus] = useState<'idle' | 'loading' | 'synced' | 'error'>('idle');
+  const [cloudHydrated, setCloudHydrated] = useState(false);
   const cloudHydratedRef = useRef(false);
   const [usage, setUsage] = useState<UsageSnapshot | null>(null);
   const [quotaBanner, setQuotaBanner] = useState<{ kind: 'analysis' | 'news'; message: string } | null>(null);
@@ -2573,11 +2576,14 @@ export default function App() {
   useEffect(() => {
     if (!user?.email || accessState !== 'active') {
       cloudHydratedRef.current = false;
+      setCloudHydrated(false);
       setCloudSyncStatus('idle');
       return;
     }
 
     let cancelled = false;
+    cloudHydratedRef.current = false;
+    setCloudHydrated(false);
     (async () => {
       setCloudSyncStatus('loading');
       try {
@@ -2607,12 +2613,56 @@ export default function App() {
           setAnnotations(cloud.annotations);
           localStorage.setItem('quantum_annotations', JSON.stringify(cloud.annotations));
         }
+        if (Array.isArray(cloud.watchlist)) {
+          saveWatchlist(cloud.watchlist, { silent: true });
+        }
+        if (Array.isArray(cloud.portfolio)) {
+          savePortfolio(cloud.portfolio, { silent: true });
+        }
+        if (Array.isArray(cloud.signalCache)) {
+          saveSignalCache(cloud.signalCache, { silent: true });
+          setSignalCache(cloud.signalCache);
+        }
+        if (cloud.prefs) {
+          if (cloud.prefs.refreshMode === 'auto' || cloud.prefs.refreshMode === 'manual') {
+            setRefreshMode(cloud.prefs.refreshMode);
+            saveRefreshMode(cloud.prefs.refreshMode, { silent: true });
+          }
+          if (
+            cloud.prefs.autoRefreshIntervalSec === 30 ||
+            cloud.prefs.autoRefreshIntervalSec === 60 ||
+            cloud.prefs.autoRefreshIntervalSec === 300 ||
+            cloud.prefs.autoRefreshIntervalSec === 900
+          ) {
+            setAutoRefreshIntervalSec(cloud.prefs.autoRefreshIntervalSec);
+            saveAutoRefreshIntervalSec(cloud.prefs.autoRefreshIntervalSec, { silent: true });
+          }
+          if (
+            cloud.prefs.dashboardMarket === 'US' ||
+            cloud.prefs.dashboardMarket === 'HK' ||
+            cloud.prefs.dashboardMarket === 'JP' ||
+            cloud.prefs.dashboardMarket === 'EU' ||
+            cloud.prefs.dashboardMarket === 'ALL'
+          ) {
+            setDashboardMarket(cloud.prefs.dashboardMarket);
+            saveDashboardMarket(cloud.prefs.dashboardMarket, { silent: true });
+          }
+          if (typeof cloud.prefs.sidebarCollapsed === 'boolean') {
+            setSidebarCollapsed(cloud.prefs.sidebarCollapsed);
+            saveSidebarCollapsed(cloud.prefs.sidebarCollapsed, { silent: true });
+          }
+          if (typeof cloud.prefs.analysisHorizon === 'string' && cloud.prefs.analysisHorizon) {
+            setAnalysisHorizon(cloud.prefs.analysisHorizon as HorizonKey);
+          }
+        }
 
         cloudHydratedRef.current = true;
+        setCloudHydrated(true);
         setCloudSyncStatus('synced');
       } catch (err) {
         console.warn('Firestore load failed:', err);
         cloudHydratedRef.current = true;
+        setCloudHydrated(true);
         setCloudSyncStatus('error');
       }
     })();
@@ -2658,7 +2708,7 @@ export default function App() {
 
   // Persist user data to Firestore while signed in with active subscription
   useEffect(() => {
-    if (!user?.email || accessState !== 'active' || !cloudHydratedRef.current) return;
+    if (!user?.email || accessState !== 'active' || !cloudHydrated) return;
 
     const timer = window.setTimeout(() => {
       saveUserData(user.email!, {
@@ -2667,6 +2717,16 @@ export default function App() {
         modelWeights,
         trendlines,
         annotations,
+        watchlist: loadWatchlist(),
+        portfolio: loadPortfolio(),
+        signalCache: loadSignalCache(),
+        prefs: {
+          refreshMode,
+          autoRefreshIntervalSec,
+          dashboardMarket: loadDashboardMarket(),
+          sidebarCollapsed,
+          analysisHorizon,
+        },
       })
         .then(() => setCloudSyncStatus('synced'))
         .catch((err) => {
@@ -2676,7 +2736,54 @@ export default function App() {
     }, 800);
 
     return () => window.clearTimeout(timer);
-  }, [user?.email, accessState, alerts, autoAlertRsiDivergence, modelWeights, trendlines, annotations]);
+  }, [
+    user?.email,
+    accessState,
+    cloudHydrated,
+    alerts,
+    autoAlertRsiDivergence,
+    modelWeights,
+    trendlines,
+    annotations,
+    signalCache,
+    refreshMode,
+    autoRefreshIntervalSec,
+    sidebarCollapsed,
+    analysisHorizon,
+  ]);
+
+  // Watchlist / portfolio / prefs local writes → push to cloud for same account
+  useEffect(() => {
+    if (!user?.email || accessState !== 'active' || !cloudHydrated) return;
+    return subscribeAccountDataChanged(() => {
+      window.setTimeout(() => {
+        if (!user?.email || !cloudHydratedRef.current) return;
+        saveUserData(user.email, {
+          watchlist: loadWatchlist(),
+          portfolio: loadPortfolio(),
+          signalCache: loadSignalCache(),
+          prefs: {
+            refreshMode: loadRefreshMode(),
+            autoRefreshIntervalSec: loadAutoRefreshIntervalSec(),
+            dashboardMarket: loadDashboardMarket(),
+            sidebarCollapsed: loadSidebarCollapsed(),
+            analysisHorizon,
+          },
+        })
+          .then(() => setCloudSyncStatus('synced'))
+          .catch((err) => {
+            console.warn('Firestore account sync failed:', err);
+            setCloudSyncStatus('error');
+          });
+      }, 500);
+    });
+  }, [user?.email, accessState, cloudHydrated, analysisHorizon]);
+
+  // After hydrate: refresh pages that mirror localStorage (watchlist/portfolio)
+  useEffect(() => {
+    if (!cloudHydrated || !user?.email || accessState !== 'active') return;
+    notifyAccountDataChanged('all');
+  }, [cloudHydrated, user?.email, accessState]);
 
   const [selectedColor, setSelectedColor] = useState('#f59e0b'); // Amber default
   const [isDrawing, setIsDrawing] = useState(false);

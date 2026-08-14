@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Star, Plus, Trash2, RefreshCw } from 'lucide-react';
 import { GlassCard } from '../analysis/GlassCard';
 import {
@@ -7,6 +7,7 @@ import {
   removeFromWatchlist,
   type WatchlistItem,
 } from '../../lib/watchlistStore';
+import { subscribeAccountDataChanged } from '../../lib/accountSync';
 import { cn } from '../../lib/utils';
 import { toHkTickerIfNumeric } from '../../lib/tickerNormalize';
 import {
@@ -53,6 +54,14 @@ export function WatchlistPage({
   const [items, setItems] = useState<WatchlistItem[]>(() => loadWatchlist());
   const [draft, setDraft] = useState('');
   const [marketFilter, setMarketFilter] = useState<MarketFilter>('ALL');
+
+  useEffect(() => {
+    return subscribeAccountDataChanged((kind) => {
+      if (kind === 'watchlist' || kind === 'all') {
+        setItems(loadWatchlist());
+      }
+    });
+  }, []);
 
   const add = () => {
     const t = toHkTickerIfNumeric(draft);

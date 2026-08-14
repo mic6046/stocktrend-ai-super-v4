@@ -1,3 +1,5 @@
+import { notifyAccountDataChanged } from './accountSync';
+
 /** Persist lightweight AI scan rows for Dashboard / AI Signals pages. */
 export type CachedSignalRow = {
   ticker: string;
@@ -29,12 +31,13 @@ export function loadSignalCache(): CachedSignalRow[] {
   }
 }
 
-export function saveSignalCache(rows: CachedSignalRow[]) {
+export function saveSignalCache(rows: CachedSignalRow[], opts?: { silent?: boolean }) {
   try {
     localStorage.setItem(KEY, JSON.stringify(rows.slice(0, 60)));
   } catch {
     /* ignore */
   }
+  if (!opts?.silent) notifyAccountDataChanged('signals');
 }
 
 export function mergeSignalCache(rows: CachedSignalRow[]) {

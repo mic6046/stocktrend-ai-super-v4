@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Briefcase, Plus, Trash2 } from 'lucide-react';
 import { GlassCard, SectionLabel } from '../analysis/GlassCard';
 import {
@@ -7,6 +7,7 @@ import {
   upsertHolding,
   type PortfolioHolding,
 } from '../../lib/portfolioStore';
+import { subscribeAccountDataChanged } from '../../lib/accountSync';
 import { cn } from '../../lib/utils';
 import { toHkTickerIfNumeric } from '../../lib/tickerNormalize';
 
@@ -27,6 +28,14 @@ export function PortfolioPage({ quotes = {}, onOpenTicker }: PortfolioPageProps)
   const [ticker, setTicker] = useState('');
   const [qty, setQty] = useState('10');
   const [avg, setAvg] = useState('');
+
+  useEffect(() => {
+    return subscribeAccountDataChanged((kind) => {
+      if (kind === 'portfolio' || kind === 'all') {
+        setHoldings(loadPortfolio());
+      }
+    });
+  }, []);
 
   const rows = useMemo(() => {
     return holdings.map((h) => {

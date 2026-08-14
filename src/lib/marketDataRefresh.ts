@@ -1,3 +1,5 @@
+import { notifyAccountDataChanged } from './accountSync';
+
 /**
  * Market Data Refresh — manual-first API policy.
  * Default is always Manual Refresh; no background market requests unless Auto is enabled.
@@ -25,7 +27,6 @@ export function loadRefreshMode(): RefreshMode {
   try {
     const mode = localStorage.getItem(MODE_KEY);
     if (mode === 'auto' || mode === 'manual') return mode;
-    // Migrate legacy checkbox storage
     if (localStorage.getItem(LEGACY_AUTO_KEY) === '1') return 'auto';
   } catch {
     /* ignore */
@@ -33,13 +34,14 @@ export function loadRefreshMode(): RefreshMode {
   return 'manual';
 }
 
-export function saveRefreshMode(mode: RefreshMode) {
+export function saveRefreshMode(mode: RefreshMode, opts?: { silent?: boolean }) {
   try {
     localStorage.setItem(MODE_KEY, mode);
     localStorage.setItem(LEGACY_AUTO_KEY, mode === 'auto' ? '1' : '0');
   } catch {
     /* ignore */
   }
+  if (!opts?.silent) notifyAccountDataChanged('prefs');
 }
 
 /** @deprecated Prefer loadRefreshMode — kept for App.tsx compatibility during transition */
@@ -62,12 +64,13 @@ export function loadAutoRefreshIntervalSec(): AutoRefreshIntervalSec {
   return 60;
 }
 
-export function saveAutoRefreshIntervalSec(sec: AutoRefreshIntervalSec) {
+export function saveAutoRefreshIntervalSec(sec: AutoRefreshIntervalSec, opts?: { silent?: boolean }) {
   try {
     localStorage.setItem(INTERVAL_KEY, String(sec));
   } catch {
     /* ignore */
   }
+  if (!opts?.silent) notifyAccountDataChanged('prefs');
 }
 
 export function formatLastUpdated(ts: number | null | undefined): string {

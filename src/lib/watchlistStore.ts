@@ -1,3 +1,5 @@
+import { notifyAccountDataChanged } from './accountSync';
+
 export type WatchlistItem = {
   ticker: string;
   name?: string;
@@ -24,12 +26,13 @@ export function loadWatchlist(): WatchlistItem[] {
   }
 }
 
-export function saveWatchlist(items: WatchlistItem[]) {
+export function saveWatchlist(items: WatchlistItem[], opts?: { silent?: boolean }) {
   try {
     localStorage.setItem(KEY, JSON.stringify(items));
   } catch {
     /* ignore */
   }
+  if (!opts?.silent) notifyAccountDataChanged('watchlist');
 }
 
 export function addToWatchlist(ticker: string, name?: string): WatchlistItem[] {
