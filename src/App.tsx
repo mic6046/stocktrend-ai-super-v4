@@ -47,7 +47,9 @@ import { POPULAR_UNIVERSE } from './lib/suggestTradeUniverses';
 import { loadWatchlist } from './lib/watchlistStore';
 import { startWatchlistCloudSync, type WatchlistSyncStatus } from './lib/watchlistCloudSync';
 import { startSignalCloudSync, type SignalSyncStatus } from './lib/signalCloudSync';
-import { loadPortfolio, savePortfolio } from './lib/portfolioStore';
+import { startPortfolioCloudSync, type PortfolioSyncStatus } from './lib/portfolioCloudSync';
+import { startAlertsCloudSync, type AlertsSyncStatus } from './lib/alertsCloudSync';
+import { loadAlerts, saveAlerts, type PriceAlert } from './lib/alertsStore';
 import { subscribeAccountDataChanged, notifyAccountDataChanged } from './lib/accountSync';
 import {
   filterIndicesByMarket,
@@ -139,23 +141,6 @@ interface StockData {
   ticker: string;
   quote: any;
   history: any[];
-}
-
-interface PriceAlert {
-  id: string;
-  ticker: string;
-  targetPrice: number;
-  condition: 'ABOVE' | 'BELOW';
-  currentPriceAtCreation: number;
-  createdAt: number;
-  isTriggered: boolean;
-  triggeredAt?: number;
-  triggeredPrice?: number;
-  alertType?: 'PRICE' | 'RSI' | 'RSI_DIVERGENCE';
-  rsiTargetType?: 'VALUE' | 'TREND' | 'DIVERGENCE';
-  soundEffect?: string;
-  consecutiveBars?: number;
-  divergenceType?: 'BULLISH' | 'BEARISH';
 }
 
 // Client-side helper to decompose merged compound symbols (e.g. GOOGTSLA -> GOOG, TSMGOOG -> TSM)
@@ -1118,6 +1103,10 @@ export default function App() {
   const watchlistSyncRef = useRef<ReturnType<typeof startWatchlistCloudSync> | null>(null);
   const [signalSyncStatus, setSignalSyncStatus] = useState<SignalSyncStatus>('idle');
   const signalSyncRef = useRef<ReturnType<typeof startSignalCloudSync> | null>(null);
+  const [portfolioSyncStatus, setPortfolioSyncStatus] = useState<PortfolioSyncStatus>('idle');
+  const portfolioSyncRef = useRef<ReturnType<typeof startPortfolioCloudSync> | null>(null);
+  const [alertsSyncStatus, setAlertsSyncStatus] = useState<AlertsSyncStatus>('idle');
+  const alertsSyncRef = useRef<ReturnType<typeof startAlertsCloudSync> | null>(null);
   const [usage, setUsage] = useState<UsageSnapshot | null>(null);
   const [quotaBanner, setQuotaBanner] = useState<{ kind: 'analysis' | 'news'; message: string } | null>(null);
   const [ticker, setTicker] = useState('');
@@ -1129,15 +1118,8 @@ export default function App() {
   const [chartHistory, setChartHistory] = useState<any[]>([]);
   const [indicatorHistory, setIndicatorHistory] = useState<any[]>([]);
   
-  // Real-time Stock Alerts State
-  const [alerts, setAlerts] = useState<PriceAlert[]>(() => {
-    try {
-      const saved = localStorage.getItem('quantum_price_alerts');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
+  // Real-time Stock Alerts State (cloud-synced via startAlertsCloudSync)
+  const [alerts, setAlerts] = useState<PriceAlert[]>(() => loadAlerts());
 
   const [autoAlertRsiDivergence, setAutoAlertRsiDivergence] = useState<boolean>(() => {
     try {
@@ -2629,17 +2611,56 @@ export default function App() {
     };
   }, [syncDocId, accessState]);
 
-  // Keep React signalCache in sync when cloud applies remote rows
+  // Dedicated Portfolio sync (iPhone ↔ Android ↔ PC).
+  useEffect(() => {
+    if (!syncDocId || accessState !== 'active') {
+      portfolioSyncRef.current?.stop();
+      portfolioSyncRef.current = null;
+      setPortfolioSyncStatus('idle');
+      return;
+    }
+    const handles = startPortfolioCloudSync(syncDocId, {
+      onStatus: (s) => setPortfolioSyncStatus(s),
+    });
+    portfolioSyncRef.current = handles;
+    return () => {
+      handles.stop();
+      if (portfolioSyncRef.current === handles) portfolioSyncRef.current = null;
+    };
+  }, [syncDocId, accessState]);
+
+  // Dedicated Alerts sync (iPhone ↔ Android ↔ PC).
+  useEffect(() => {
+    if (!syncDocId || accessState !== 'active') {
+      alertsSyncRef.current?.stop();
+      alertsSyncRef.current = null;
+      setAlertsSyncStatus('idle');
+      return;
+    }
+    const handles = startAlertsCloudSync(syncDocId, {
+      onStatus: (s) => setAlertsSyncStatus(s),
+    });
+    alertsSyncRef.current = handles;
+    return () => {
+      handles.stop();
+      if (alertsSyncRef.current === handles) alertsSyncRef.current = null;
+    };
+  }, [syncDocId, accessState]);
+
+  // Keep React state in sync when dedicated modules apply remote rows
   useEffect(() => {
     return subscribeAccountDataChanged((kind, source) => {
       if (source !== 'remote') return;
       if (kind === 'signals' || kind === 'all') {
         setSignalCache(loadSignalCache());
       }
+      if (kind === 'alerts' || kind === 'all') {
+        setAlerts(loadAlerts());
+      }
     });
   }, []);
 
-  // Watchlist cloud sync is handled by startWatchlistCloudSync (phone ↔ PC).
+  // Prefs / drawings / weights cloud sync (watchlist, signals, portfolio, alerts are dedicated).
   useEffect(() => {
     if (!syncDocId || accessState !== 'active') {
       cloudHydratedRef.current = false;
@@ -2673,13 +2694,9 @@ export default function App() {
           return;
         }
 
-        // While a full-blob save is in flight, still apply portfolio.
-        // Watchlist + AI Signals have dedicated sync modules.
+        // While a full-blob save is in flight, skip applying prefs/drawings.
+        // Watchlist, signals, portfolio, and alerts have dedicated sync modules.
         if (suppressCloudSaveRef.current) {
-          if (Array.isArray(cloud.portfolio)) {
-            savePortfolio(cloud.portfolio, { silent: true });
-            notifyAccountDataChanged('portfolio', 'remote');
-          }
           lastSyncFingerprintRef.current = fp;
           if (!cloudHydratedRef.current) {
             cloudHydratedRef.current = true;
@@ -2691,14 +2708,6 @@ export default function App() {
 
         suppressCloudSaveRef.current = true;
 
-        if (Array.isArray(cloud.alerts)) {
-          setAlerts(cloud.alerts as PriceAlert[]);
-          try {
-            localStorage.setItem('quantum_price_alerts', JSON.stringify(cloud.alerts));
-          } catch {
-            /* ignore */
-          }
-        }
         if (typeof cloud.autoAlertRsiDivergence === 'boolean') {
           setAutoAlertRsiDivergence(cloud.autoAlertRsiDivergence);
           try {
@@ -2738,12 +2747,8 @@ export default function App() {
           }
         }
 
-        // Watchlist + AI Signals owned by dedicated cloud sync modules
+        // Watchlist / AI Signals / Portfolio / Alerts owned by dedicated cloud sync modules
 
-        if (Array.isArray(cloud.portfolio)) {
-          savePortfolio(cloud.portfolio, { silent: true });
-          if (isLiveRemote) notifyAccountDataChanged('portfolio', 'remote');
-        }
         if (cloud.prefs) {
           if (cloud.prefs.refreshMode === 'auto' || cloud.prefs.refreshMode === 'manual') {
             setRefreshMode(cloud.prefs.refreshMode);
@@ -2788,16 +2793,13 @@ export default function App() {
         window.setTimeout(() => {
           suppressCloudSaveRef.current = false;
           if (!isLiveRemote && syncDocId) {
-            // Watchlist uploads are handled by startWatchlistCloudSync
+            // Watchlist / signals / portfolio / alerts uploads are dedicated modules
 
-            let storedAlerts: unknown[] = [];
             let storedAutoRsi = false;
             let storedWeights: Record<string, number> | null = null;
             let storedTrends: unknown = [];
             let storedAnnotations: unknown = [];
             try {
-              const a = localStorage.getItem('quantum_price_alerts');
-              if (a) storedAlerts = JSON.parse(a);
               const r = localStorage.getItem('quantum_auto_alert_rsi_divergence');
               if (r) storedAutoRsi = JSON.parse(r);
               const w = localStorage.getItem('quantum_model_weights');
@@ -2811,7 +2813,6 @@ export default function App() {
             }
 
             const payload: Partial<UserCloudData> = {
-              alerts: Array.isArray(cloud.alerts) ? cloud.alerts : storedAlerts,
               autoAlertRsiDivergence:
                 typeof cloud.autoAlertRsiDivergence === 'boolean'
                   ? cloud.autoAlertRsiDivergence
@@ -2819,7 +2820,6 @@ export default function App() {
               modelWeights: cloud.modelWeights || storedWeights,
               trendlines: Array.isArray(cloud.trendlines) ? cloud.trendlines : storedTrends,
               annotations: Array.isArray(cloud.annotations) ? cloud.annotations : storedAnnotations,
-              portfolio: Array.isArray(cloud.portfolio) ? cloud.portfolio : loadPortfolio(),
               prefs: {
                 refreshMode: loadRefreshMode(),
                 autoRefreshIntervalSec: loadAutoRefreshIntervalSec(),
@@ -2920,19 +2920,18 @@ export default function App() {
       });
   };
 
-  // Persist React-owned fields to Firestore (alerts, signals state, prefs, …)
+  // Persist React-owned prefs/drawings/weights to Firestore
+  // (watchlist, signals, portfolio, alerts use dedicated sync modules)
   useEffect(() => {
     if (!syncDocId || accessState !== 'active' || !cloudHydrated) return;
 
     const timer = window.setTimeout(() => {
       if (suppressCloudSaveRef.current) return;
       pushAccountSync({
-        alerts,
         autoAlertRsiDivergence,
         modelWeights,
         trendlines,
         annotations,
-        portfolio: loadPortfolio(),
         prefs: {
           refreshMode,
           autoRefreshIntervalSec,
@@ -2948,7 +2947,6 @@ export default function App() {
     syncDocId,
     accessState,
     cloudHydrated,
-    alerts,
     autoAlertRsiDivergence,
     modelWeights,
     trendlines,
@@ -2959,24 +2957,19 @@ export default function App() {
     analysisHorizon,
   ]);
 
-  // Watchlist / portfolio / prefs localStorage writes → cloud
+  // Prefs localStorage writes → cloud (portfolio/alerts/watchlist/signals are dedicated)
   useEffect(() => {
     if (!syncDocId || accessState !== 'active' || !cloudHydrated) return;
     return subscribeAccountDataChanged((kind, source) => {
-      // Remote applies already wrote localStorage — refresh UI only, do not echo back
       if (source === 'remote') return;
-
-      // Watchlist + AI Signals cloud push owned by dedicated sync modules
-      if (kind === 'portfolio' || kind === 'prefs' || kind === 'all') {
+      if (kind === 'prefs' || kind === 'all') {
         window.setTimeout(() => {
           if (suppressCloudSaveRef.current || !cloudHydratedRef.current) return;
           pushAccountSync({
-            alerts,
             autoAlertRsiDivergence,
             modelWeights,
             trendlines,
             annotations,
-            portfolio: loadPortfolio(),
             prefs: {
               refreshMode: loadRefreshMode(),
               autoRefreshIntervalSec: loadAutoRefreshIntervalSec(),
@@ -2992,7 +2985,6 @@ export default function App() {
     syncDocId,
     accessState,
     cloudHydrated,
-    alerts,
     autoAlertRsiDivergence,
     modelWeights,
     trendlines,
@@ -5842,7 +5834,7 @@ export default function App() {
         return prevAlerts; // Return original array reference to prevent infinite loop
       }
       
-      localStorage.setItem('quantum_price_alerts', JSON.stringify(updated));
+      saveAlerts(updated);
 
       // Trigger side-effects asynchronously outside the state updater
       setTimeout(() => {
@@ -5913,7 +5905,7 @@ export default function App() {
 
     const updated = [newAlert, ...alerts];
     setAlerts(updated);
-    localStorage.setItem('quantum_price_alerts', JSON.stringify(updated));
+    saveAlerts(updated);
 
     // Reset target price field
     setAlertTargetPrice('');
@@ -5929,13 +5921,13 @@ export default function App() {
   const handleDeleteAlert = (alertId: string) => {
     const updated = alerts.filter(a => a.id !== alertId);
     setAlerts(updated);
-    localStorage.setItem('quantum_price_alerts', JSON.stringify(updated));
+    saveAlerts(updated);
   };
 
   const handleClearTriggeredAlerts = () => {
     const updated = alerts.filter(a => !a.isTriggered);
     setAlerts(updated);
-    localStorage.setItem('quantum_price_alerts', JSON.stringify(updated));
+    saveAlerts(updated);
   };
 
   const checkRsiAlerts = (t: string, currentRsi: number) => {
@@ -5989,7 +5981,7 @@ export default function App() {
         return prevAlerts;
       }
 
-      localStorage.setItem('quantum_price_alerts', JSON.stringify(updated));
+      saveAlerts(updated);
 
       // Trigger side-effects asynchronously
       setTimeout(() => {
@@ -6062,7 +6054,7 @@ export default function App() {
 
     const updated = [newAlert, ...alerts];
     setAlerts(updated);
-    localStorage.setItem('quantum_price_alerts', JSON.stringify(updated));
+    saveAlerts(updated);
 
     setShowRsiAlertCreator(false);
 
@@ -7975,7 +7967,7 @@ export default function App() {
             <div className="flex flex-col md:items-end gap-2 text-center md:text-right">
               <span className="text-gray-500">
                 Quantum Node · Powered by Google Gemini ·{' '}
-                <span className="font-mono text-emerald-500/70">sig-phone-0814d</span>
+                <span className="font-mono text-emerald-500/70">cross-dev-0814e</span>
               </span>
               <LegalLinks className="justify-center md:justify-end" />
             </div>
@@ -8108,6 +8100,8 @@ export default function App() {
               if (!assertAnalysisCredits()) return;
               runTickerSearch(sym);
             }}
+            cloudSyncStatus={portfolioSyncStatus}
+            onSyncNow={() => void portfolioSyncRef.current?.pullNow()}
           />
         )}
 
@@ -8134,6 +8128,8 @@ export default function App() {
               if (!assertAnalysisCredits()) return;
               runTickerSearch(sym);
             }}
+            cloudSyncStatus={alertsSyncStatus}
+            onSyncNow={() => void alertsSyncRef.current?.pullNow()}
           />
         )}
 

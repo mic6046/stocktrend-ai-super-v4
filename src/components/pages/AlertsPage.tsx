@@ -1,7 +1,8 @@
 import React from 'react';
-import { Bell, Plus, Trash2, Volume2, BellRing } from 'lucide-react';
+import { Bell, Plus, Trash2, Volume2, BellRing, Cloud, CloudOff, Loader2 } from 'lucide-react';
 import { GlassCard, SectionLabel } from '../analysis/GlassCard';
 import { cn } from '../../lib/utils';
+import type { AlertsSyncStatus } from '../../lib/alertsCloudSync';
 
 export type AlertRow = {
   id: string;
@@ -31,6 +32,8 @@ type AlertsPageProps = {
   currentTicker?: string | null;
   currentPrice?: number | null;
   onOpenTicker: (ticker: string) => void;
+  cloudSyncStatus?: AlertsSyncStatus;
+  onSyncNow?: () => void;
 };
 
 export function AlertsPage({
@@ -52,18 +55,62 @@ export function AlertsPage({
   currentTicker,
   currentPrice,
   onOpenTicker,
+  cloudSyncStatus = 'idle',
+  onSyncNow,
 }: AlertsPageProps) {
   const active = alerts.filter((a) => !a.isTriggered);
   const triggered = alerts.filter((a) => a.isTriggered);
 
   return (
     <div className="space-y-4 min-w-0">
-      <div>
-        <p className="text-[10px] font-mono uppercase tracking-[0.22em] text-cyan-400">Notifications</p>
-        <h2 className="mt-1 text-2xl font-sans font-bold text-white">Alerts</h2>
-        <p className="mt-1 text-[13px] text-gray-500 max-w-2xl">
-          Get notified when price enters a level you care about — for example, when a stock enters your buy zone.
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[10px] font-mono uppercase tracking-[0.22em] text-cyan-400">Notifications</p>
+          <h2 className="mt-1 text-2xl font-sans font-bold text-white">Alerts</h2>
+          <p className="mt-1 text-[13px] text-gray-500 max-w-2xl">
+            Get notified when price enters a level you care about — for example, when a stock enters your buy zone.
+          </p>
+          <p
+            className={cn(
+              'mt-0.5 text-[10px] font-mono inline-flex items-center gap-1',
+              cloudSyncStatus === 'synced'
+                ? 'text-emerald-400/90'
+                : cloudSyncStatus === 'error'
+                  ? 'text-rose-400'
+                  : cloudSyncStatus === 'saving' || cloudSyncStatus === 'connecting'
+                    ? 'text-cyan-300'
+                    : 'text-gray-500'
+            )}
+          >
+            {cloudSyncStatus === 'error' ? (
+              <CloudOff className="h-3 w-3" />
+            ) : cloudSyncStatus === 'saving' || cloudSyncStatus === 'connecting' ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Cloud className="h-3 w-3" />
+            )}
+            {cloudSyncStatus === 'synced'
+              ? 'Cloud sync on · iPhone, Android & PC'
+              : cloudSyncStatus === 'saving'
+                ? 'Saving to cloud…'
+                : cloudSyncStatus === 'connecting'
+                  ? 'Connecting cloud…'
+                  : cloudSyncStatus === 'error'
+                    ? 'Cloud sync error — tap Sync'
+                    : 'Cloud sync idle — sign in with active plan'}
+          </p>
+        </div>
+        {onSyncNow && (
+          <button
+            type="button"
+            onClick={onSyncNow}
+            disabled={cloudSyncStatus === 'saving' || cloudSyncStatus === 'connecting'}
+            className="min-h-[32px] shrink-0 inline-flex items-center gap-1.5 rounded-lg px-3 text-[10px] font-bold uppercase tracking-wide cursor-pointer border border-cyan-500/35 text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
+          >
+            <Cloud className="h-3 w-3" />
+            Sync
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

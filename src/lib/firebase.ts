@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { initializeFirestore } from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyBOwzWjs4eGoqrFfb5mLaM1rtWaYsuovew',
@@ -13,4 +13,11 @@ const firebaseConfig = {
 
 export const firebaseApp = initializeApp(firebaseConfig);
 export const auth = getAuth(firebaseApp);
-export const db = getFirestore(firebaseApp);
+
+/**
+ * Long polling is more reliable than WebChannel on iOS Safari, Android Chrome PWAs,
+ * and flaky mobile networks — critical for same-account sync across devices.
+ */
+export const db = initializeFirestore(firebaseApp, {
+  experimentalForceLongPolling: true,
+});

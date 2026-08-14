@@ -128,9 +128,10 @@ export const MANUAL_SECTIONS: ManualSection[] = [
     id: 'sync',
     title: 'Cloud sync across devices',
     body: [
-      'With the same active account signed in, these sync via Firestore: Watchlist, Portfolio, AI Signals cache, Alerts, chart drawings, model weights, and preferences (refresh mode, market filter, sidebar, analysis horizon).',
-      'Look for the Cloud pill in the header — green means synced; Sync err means a write failed (check connection and reload).',
-      'Hard-refresh both devices after a deploy if a phone still shows an old PWA build. Changes usually appear within a few seconds on the other open session.',
+      'With the same active account signed in on iPhone, Android, and PC, these sync via Firestore: Watchlist, Portfolio, AI Signals, Alerts, chart drawings, model weights, and preferences.',
+      'Watchlist, Portfolio, AI Signals, and Alerts use dedicated live sync (resume when you reopen the app). Use the Sync button on those pages if a phone was backgrounded.',
+      'Look for the Cloud pill in the header — green means prefs/drawings synced; Sync err means a write failed (check connection and reload).',
+      'Hard-refresh or re-open the PWA after a deploy until the footer build id matches (e.g. cross-dev-0814e). Use the same email account on every device.',
     ],
   },
   {

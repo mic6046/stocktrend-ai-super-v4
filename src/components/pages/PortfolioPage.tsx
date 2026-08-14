@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Briefcase, Plus, Trash2 } from 'lucide-react';
+import { Briefcase, Plus, Trash2, Cloud, CloudOff, Loader2 } from 'lucide-react';
 import { GlassCard, SectionLabel } from '../analysis/GlassCard';
 import {
   loadPortfolio,
@@ -8,6 +8,7 @@ import {
   type PortfolioHolding,
 } from '../../lib/portfolioStore';
 import { subscribeAccountDataChanged } from '../../lib/accountSync';
+import type { PortfolioSyncStatus } from '../../lib/portfolioCloudSync';
 import { cn } from '../../lib/utils';
 import { toHkTickerIfNumeric } from '../../lib/tickerNormalize';
 
@@ -21,9 +22,16 @@ type QuoteInfo = {
 type PortfolioPageProps = {
   quotes?: Record<string, QuoteInfo>;
   onOpenTicker: (ticker: string) => void;
+  cloudSyncStatus?: PortfolioSyncStatus;
+  onSyncNow?: () => void;
 };
 
-export function PortfolioPage({ quotes = {}, onOpenTicker }: PortfolioPageProps) {
+export function PortfolioPage({
+  quotes = {},
+  onOpenTicker,
+  cloudSyncStatus = 'idle',
+  onSyncNow,
+}: PortfolioPageProps) {
   const [holdings, setHoldings] = useState<PortfolioHolding[]>(() => loadPortfolio());
   const [ticker, setTicker] = useState('');
   const [qty, setQty] = useState('10');
@@ -78,12 +86,54 @@ export function PortfolioPage({ quotes = {}, onOpenTicker }: PortfolioPageProps)
 
   return (
     <div className="space-y-4 min-w-0">
-      <div>
-        <p className="text-[10px] font-mono uppercase tracking-[0.22em] text-emerald-400">Holdings</p>
-        <h2 className="mt-1 text-2xl font-sans font-bold text-white">Portfolio</h2>
-        <p className="mt-1 text-[13px] text-gray-500">
-          Enter what you own. We calculate value and unrealised P/L automatically.
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[10px] font-mono uppercase tracking-[0.22em] text-emerald-400">Holdings</p>
+          <h2 className="mt-1 text-2xl font-sans font-bold text-white">Portfolio</h2>
+          <p className="mt-1 text-[13px] text-gray-500">
+            Enter what you own. We calculate value and unrealised P/L automatically.
+          </p>
+          <p
+            className={cn(
+              'mt-0.5 text-[10px] font-mono inline-flex items-center gap-1',
+              cloudSyncStatus === 'synced'
+                ? 'text-emerald-400/90'
+                : cloudSyncStatus === 'error'
+                  ? 'text-rose-400'
+                  : cloudSyncStatus === 'saving' || cloudSyncStatus === 'connecting'
+                    ? 'text-cyan-300'
+                    : 'text-gray-500'
+            )}
+          >
+            {cloudSyncStatus === 'error' ? (
+              <CloudOff className="h-3 w-3" />
+            ) : cloudSyncStatus === 'saving' || cloudSyncStatus === 'connecting' ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Cloud className="h-3 w-3" />
+            )}
+            {cloudSyncStatus === 'synced'
+              ? 'Cloud sync on · iPhone, Android & PC'
+              : cloudSyncStatus === 'saving'
+                ? 'Saving to cloud…'
+                : cloudSyncStatus === 'connecting'
+                  ? 'Connecting cloud…'
+                  : cloudSyncStatus === 'error'
+                    ? 'Cloud sync error — tap Sync'
+                    : 'Cloud sync idle — sign in with active plan'}
+          </p>
+        </div>
+        {onSyncNow && (
+          <button
+            type="button"
+            onClick={onSyncNow}
+            disabled={cloudSyncStatus === 'saving' || cloudSyncStatus === 'connecting'}
+            className="min-h-[32px] shrink-0 inline-flex items-center gap-1.5 rounded-lg px-3 text-[10px] font-bold uppercase tracking-wide cursor-pointer border border-emerald-500/35 text-emerald-200 hover:bg-emerald-500/10 disabled:opacity-50"
+          >
+            <Cloud className="h-3 w-3" />
+            Sync
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

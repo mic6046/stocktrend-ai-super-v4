@@ -188,7 +188,7 @@ export function WatchlistPage({
               <Cloud className="h-3 w-3" />
             )}
             {cloudSyncStatus === 'synced'
-              ? 'Cloud sync on · same account on phone & PC'
+              ? 'Cloud sync on · iPhone, Android & PC'
               : cloudSyncStatus === 'saving'
                 ? 'Saving to cloud…'
                 : cloudSyncStatus === 'connecting'
