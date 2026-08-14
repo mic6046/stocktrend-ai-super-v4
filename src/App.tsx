@@ -63,8 +63,6 @@ import {
   type RefreshMode,
 } from './lib/marketDataRefresh';
 import { fetchUsage, type UsageSnapshot } from './lib/usageApi';
-import { PAGE_LABELS, type AssistantChatContext } from './lib/assistantChatApi';
-import { AnalysisAskAi } from './components/analysis/AnalysisAskAi';
 import { buildInstitutionalFlowNarrative, formatSignedMillions } from './lib/institutionalFlow';
 import { getRecommendationTheme } from './utils/recommendationTheme';
 import { toHkTickerIfNumeric } from './lib/tickerNormalize';
@@ -7608,90 +7606,6 @@ export default function App() {
     }
   };
 
-  const assistantChatContext: AssistantChatContext = React.useMemo(() => {
-    const watchlistTickers = loadWatchlist()
-      .map((w) => w.ticker)
-      .filter(Boolean)
-      .slice(0, 20);
-    const signalTickers = signalCache
-      .map((r) => r.ticker)
-      .filter(Boolean)
-      .slice(0, 20);
-
-    const action =
-      masterRecommendation?.engine?.currentAction?.displayLabel ||
-      masterRecommendation?.currentAction ||
-      horizonView?.currentAction?.displayLabel ||
-      horizonView?.currentAction?.action ||
-      null;
-
-    return {
-      page: 'ANALYSIS' as const,
-      pageLabel: PAGE_LABELS.ANALYSIS,
-      ticker: data?.ticker || null,
-      dashboardMarket: null,
-      watchlistTickers,
-      signalTickers,
-      analysis: data
-        ? {
-            ticker: data.ticker,
-            name: data.quote?.shortName || data.quote?.longName || null,
-            price:
-              Number(
-                data.quote?.regularMarketPrice ?? data.quote?.price ?? null
-              ) || null,
-            changePct:
-              typeof data.quote?.regularMarketChangePercent === 'number'
-                ? data.quote.regularMarketChangePercent
-                : null,
-            score: masterRecommendation?.overallScore ?? horizonView?.score ?? null,
-            rating: masterRecommendation
-              ? formatRecommendationDisplay(masterRecommendation)
-              : horizonView?.ratingLabel ?? null,
-            action: action ? String(action) : null,
-            actionReason:
-              masterRecommendation?.currentActionReason ??
-              horizonView?.currentAction?.reason ??
-              null,
-            confidence: masterRecommendation?.confidence ?? horizonView?.confidence ?? null,
-            risk: horizonView?.riskLabel ?? null,
-            rsi: technicalBreakdown?.indicators?.rsi ?? null,
-            macdBullish:
-              technicalBreakdown?.indicators?.macd != null
-                ? technicalBreakdown.indicators.macd.macdLine >
-                  technicalBreakdown.indicators.macd.signalLine
-                : null,
-            trend: technicalBreakdown?.quantumRefinement?.trendStrength?.status ?? null,
-            volatility: horizonView?.volatility ?? null,
-            targetPrice: masterRecommendation?.targetPrice ?? horizonView?.targetPrice ?? null,
-            expectedReturn:
-              masterRecommendation?.expectedReturn ?? horizonView?.expectedReturn ?? null,
-            horizon: horizonView?.horizonLabel ?? analysisHorizon ?? null,
-            keyRisks: Array.isArray(keyRisks) ? keyRisks.slice(0, 6).map(String) : [],
-            bullishFactors: (horizonView?.bullishFactors || [])
-              .map((f: any) => f?.label || f)
-              .filter(Boolean)
-              .slice(0, 5)
-              .map(String),
-            bearishFactors: (horizonView?.bearishFactors || [])
-              .map((f: any) => f?.label || f)
-              .filter(Boolean)
-              .slice(0, 5)
-              .map(String),
-            summaryLead: horizonView?.summaryLead ?? null,
-          }
-        : null,
-    };
-  }, [
-    data,
-    signalCache,
-    masterRecommendation,
-    horizonView,
-    technicalBreakdown,
-    keyRisks,
-    analysisHorizon,
-  ]);
-
   return (
     <>
       {showAuthModal && (
@@ -7758,7 +7672,7 @@ export default function App() {
             <div className="flex flex-col md:items-end gap-2 text-center md:text-right">
               <span className="text-gray-500">
                 Quantum Node · Powered by Google Gemini ·{' '}
-                <span className="font-mono text-emerald-500/70">ask-ai-analysis-0814</span>
+                <span className="font-mono text-emerald-500/70">no-ask-ai-0814</span>
               </span>
               <LegalLinks className="justify-center md:justify-end" />
             </div>
@@ -8365,13 +8279,6 @@ export default function App() {
                       null
                     }
                     userHasPosition={userHasPosition}
-                  />
-                  <AnalysisAskAi
-                    userEmail={user?.email}
-                    onSignIn={() => setShowAuthModal(true)}
-                    chatContext={assistantChatContext}
-                    onUsageUpdate={(snap) => setUsage(snap)}
-                    ticker={data.ticker}
                   />
                   <AiInsightsStrip
                     keyRisks={keyRisks}
