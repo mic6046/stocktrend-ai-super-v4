@@ -49,8 +49,8 @@ export function MarketDataRefreshBar({
             ? 'border-white/10 text-gray-600'
             : 'border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10'
         )}
-        title={`Refresh market data · last ${formatLastUpdated(lastUpdatedAt)} · ${statusLabel(status)}`}
-        aria-label="Refresh market data"
+        title={`Refresh analysis · uses 1 AI credit · last ${formatLastUpdated(lastUpdatedAt)} · ${statusLabel(status)}`}
+        aria-label="Refresh analysis (uses 1 credit)"
       >
         {status === 'loading' ? (
           <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -72,7 +72,7 @@ export function MarketDataRefreshBar({
                   ? 'bg-emerald-500/20 text-emerald-300'
                   : 'text-gray-500 hover:text-gray-300'
               )}
-              title="Manual refresh — credits only on demand"
+              title="Manual refresh — each Refresh uses 1 analysis credit"
             >
               Man
             </button>

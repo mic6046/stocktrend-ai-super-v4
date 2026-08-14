@@ -90,7 +90,7 @@ export function SettingsPage({
           <span className="font-bold text-emerald-300">{currentName}</span>
         </p>
         <p className="mt-1 text-[11px] text-gray-500">
-          Basic RM 199/mo · Pro RM 349/mo · Quotas reset midnight MYT.
+          Basic RM 199/mo · 20 analyses + 20 news/day · Pro RM 349/mo · Each Search/Refresh = 1 credit · Quotas reset every day (midnight MYT).
         </p>
 
         <label className="mt-4 flex items-start gap-3 rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 cursor-pointer">
@@ -204,6 +204,9 @@ export function SettingsPage({
         <SectionLabel icon={<SettingsIcon className="w-3.5 h-3.5 text-emerald-400" />}>
           Market data refresh
         </SectionLabel>
+        <p className="mt-2 text-[11px] text-amber-200/90 leading-relaxed">
+          Warning: each manual Search or Refresh uses 1 AI analysis credit. Auto mode only updates the live quote and does not spend analysis credits.
+        </p>
         <div className="mt-3">
           <MarketDataRefreshBar
             lastUpdatedAt={lastUpdatedAt}

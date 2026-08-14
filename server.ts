@@ -2434,17 +2434,18 @@ app.post('/api/predict', async (req, res) => {
   if (!(global as any).predictionCache) (global as any).predictionCache = {};
   const cachedEarly = (global as any).predictionCache[cacheKeyEarly];
   if (bypassCache !== true && cachedEarly && (Date.now() - cachedEarly.timestamp < 1800000)) {
+    // Cache hit still consumes 1 analysis credit (Search / Refresh always bill).
     if (email) {
-      const usageSnap = await getUsageSnapshot(String(email)).catch(() => null);
-      if (usageSnap && !usageSnap.unlimited && usageSnap.analysesRemaining <= 0) {
-        return res.status(402).json({
-          error: 'Daily AI search/analysis usage is out. Please reload credits (+5 RM5 or Pack RM10) to continue.',
-          code: 'analysis_quota_exceeded',
-          usage: usageSnap,
+      const billed = await consumeUsageCredit(String(email), 'analysis');
+      if (!billed.ok) {
+        return res.status(billed.status).json({
+          error: billed.error,
+          code: billed.code,
+          usage: billed.usage,
         });
       }
-      console.log(`Serving cached prediction for ${ticker} (early hit)`);
-      return res.json({ ...cachedEarly.data, cached: true, usage: usageSnap || undefined });
+      console.log(`Serving cached prediction for ${ticker} (early hit, billed)`);
+      return res.json({ ...cachedEarly.data, cached: true, usage: billed.usage });
     }
     console.log(`Serving cached prediction for ${ticker} (early hit)`);
     return res.json({ ...cachedEarly.data, cached: true });
@@ -2455,7 +2456,7 @@ app.post('/api/predict', async (req, res) => {
     const usageSnapPre = await getUsageSnapshot(String(email)).catch(() => null);
     if (usageSnapPre && !usageSnapPre.unlimited && usageSnapPre.analysesRemaining <= 0) {
       return res.status(402).json({
-        error: 'Daily AI search/analysis usage is out. Please reload credits (+5 RM5 or Pack RM10) to continue.',
+        error: 'Daily AI search/analysis usage is out. Please reload credits (+5 RM5 or Reload pack RM10) to continue.',
         code: 'analysis_quota_exceeded',
         usage: usageSnapPre,
       });
@@ -2577,17 +2578,18 @@ app.post('/api/predict', async (req, res) => {
   const cachedResult = (global as any).predictionCache[cacheKey];
   
   if (bypassCache !== true && cachedResult && (Date.now() - cachedResult.timestamp < 1800000)) { // 30 mins cache
+    // Cache hit still consumes 1 analysis credit (Search / Refresh always bill).
     if (email) {
-      const usageSnap = await getUsageSnapshot(String(email)).catch(() => null);
-      if (usageSnap && !usageSnap.unlimited && usageSnap.analysesRemaining <= 0) {
-        return res.status(402).json({
-          error: 'Daily AI search/analysis usage is out. Please reload credits (+5 RM5 or Pack RM10) to continue.',
-          code: 'analysis_quota_exceeded',
-          usage: usageSnap,
+      const billed = await consumeUsageCredit(String(email), 'analysis');
+      if (!billed.ok) {
+        return res.status(billed.status).json({
+          error: billed.error,
+          code: billed.code,
+          usage: billed.usage,
         });
       }
-      console.log(`Serving cached prediction for ${ticker}`);
-      return res.json({ ...cachedResult.data, cached: true, usage: usageSnap || undefined });
+      console.log(`Serving cached prediction for ${ticker} (billed)`);
+      return res.json({ ...cachedResult.data, cached: true, usage: billed.usage });
     }
     console.log(`Serving cached prediction for ${ticker}`);
     return res.json({ ...cachedResult.data, cached: true });

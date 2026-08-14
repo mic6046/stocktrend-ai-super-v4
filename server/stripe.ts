@@ -5,7 +5,7 @@ import { getFirestore, Timestamp, FieldValue } from 'firebase-admin/firestore';
 import { addBonusCredits } from './usageQuota';
 
 type Plan = 'monthly' | 'yearly' | 'pro_monthly';
-type OverageProduct = 'analysis' | 'news' | 'analysis_pack';
+type OverageProduct = 'analysis' | 'news' | 'analysis_pack' | 'reload_pack';
 
 function getStripe(): Stripe | null {
   const key = process.env.STRIPE_SECRET_KEY?.trim();
@@ -25,8 +25,25 @@ function getPriceId(plan: Plan): string | null {
 }
 
 function overageLineItem(product: OverageProduct): Stripe.Checkout.SessionCreateParams.LineItem {
-  // Pack may use a Stripe Dashboard price id; mini top-ups always use inline
-  // MYR amounts (Stripe MYR minimum is RM 2 — we sell minis at RM 5).
+  // Prefer Dashboard price ids when set; otherwise inline MYR amounts
+  // (Stripe MYR minimum is RM 2 — we sell minis at RM 5, packs at RM 10).
+  if (product === 'reload_pack') {
+    const packPrice = process.env.STRIPE_PRICE_RELOAD_PACK;
+    if (packPrice) {
+      return { price: packPrice, quantity: 1 };
+    }
+    return {
+      quantity: 1,
+      price_data: {
+        currency: 'myr',
+        unit_amount: 1000,
+        product_data: {
+          name: 'Reload pack',
+          description: '+10 AI analyses + 10 AI news summaries (last until used)',
+        },
+      },
+    };
+  }
   if (product === 'analysis_pack') {
     const packPrice = process.env.STRIPE_PRICE_ANALYSIS_PACK;
     if (packPrice) {
@@ -150,6 +167,9 @@ async function applyOveragePurchase(
   product: OverageProduct,
   sessionId?: string
 ) {
+  if (product === 'reload_pack') {
+    return addBonusCredits(email, 'reload_pack', 10, sessionId);
+  }
   if (product === 'analysis_pack') {
     return addBonusCredits(email, 'analysis_pack', 12, sessionId);
   }
@@ -370,9 +390,14 @@ export function registerStripeRoutes(app: express.Express) {
       if (!email) {
         return res.status(400).json({ error: 'Email is required' });
       }
-      if (product !== 'analysis' && product !== 'news' && product !== 'analysis_pack') {
+      if (
+        product !== 'analysis' &&
+        product !== 'news' &&
+        product !== 'analysis_pack' &&
+        product !== 'reload_pack'
+      ) {
         return res.status(400).json({
-          error: 'product must be analysis, news, or analysis_pack',
+          error: 'product must be analysis, news, analysis_pack, or reload_pack',
         });
       }
 

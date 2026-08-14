@@ -148,8 +148,8 @@ export function AppHeader({
             disabled={loading || marketDataStatus === 'loading'}
             onClick={onRefresh}
             className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 text-gray-300 hover:bg-white/5 disabled:opacity-50 cursor-pointer"
-            aria-label="Refresh market data"
-            title="Refresh"
+            aria-label="Refresh analysis (uses 1 credit)"
+            title="Refresh analysis · uses 1 AI credit"
           >
             {marketDataStatus === 'loading' || loading ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-400" />

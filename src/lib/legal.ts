@@ -84,8 +84,8 @@ export const LEGAL_SECTIONS: Record<LegalDocId, Section[]> = {
       heading: 'Subscriptions, quotas, and overages',
       body: [
         'Paid plans (for example Basic and Pro) are billed in Malaysian Ringgit (MYR) via Stripe on a recurring basis unless cancelled.',
-        'Daily AI analysis and news quotas reset according to the product rules (midnight Malaysia time). Cached results may not consume an extra credit.',
-        'Optional mini reloads and packs are one-time purchases that add bonus credits. Prices and credit amounts may change; the checkout page shows the amount due before you pay.',
+        'Daily AI analysis and news quotas reset every day at midnight Malaysia time. Unused included credits do not roll over. Each Search or Refresh uses 1 AI analysis credit, including the same ticker again.',
+        'Optional mini reloads and the Reload pack (RM 10 for +10 AI analyses and +10 AI news) are one-time purchases that add bonus credits. Purchased credits last until used and do not reset daily. Prices and credit amounts may change; the checkout page shows the amount due before you pay.',
         'Unless required by law, fees are non-refundable once charged. Cancel anytime to stop future renewals; access continues until the end of the paid period unless otherwise stated.',
       ],
     },

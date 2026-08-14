@@ -14,7 +14,7 @@ interface UsageQuotaBarProps {
   compact?: boolean;
 }
 
-/** Resolve what the meter should show: daily included OR total credit units. */
+/** Resolve what the meter should show: daily included OR pack credits after daily is out. */
 function meterValues(
   usage: UsageSnapshot,
   kind: 'analysis' | 'news'
@@ -23,10 +23,18 @@ function meterValues(
     if (usage.unlimited) {
       return { used: 0, total: 0, remaining: 9999, mode: 'daily' };
     }
-    if (usage.analysesOnBonus || (usage.bonusAnalyses || 0) > 0) {
+    const dailyRem = Math.max(0, usage.analysesLimit - usage.analysesUsed);
+    if (dailyRem > 0) {
+      return {
+        used: usage.analysesUsed,
+        total: usage.analysesLimit,
+        remaining: dailyRem,
+        mode: 'daily',
+      };
+    }
+    if ((usage.bonusAnalyses || 0) > 0 || usage.analysesOnBonus) {
       const rem = Math.max(0, usage.bonusAnalyses || 0);
       const used = Math.max(0, usage.bonusAnalysesUsed || 0);
-      // Total units in the credit pool (after purchase = full balance).
       const total = Math.max(usage.bonusAnalysesPackSize || 0, used + rem, rem);
       if (total <= 0) {
         return { used: usage.analysesLimit, total: usage.analysesLimit, remaining: 0, mode: 'out' };
@@ -34,18 +42,26 @@ function meterValues(
       return { used: Math.min(used, total), total, remaining: rem, mode: 'pack' };
     }
     return {
-      used: usage.analysesUsed,
+      used: usage.analysesLimit,
       total: usage.analysesLimit,
-      remaining: Math.max(0, usage.analysesLimit - usage.analysesUsed),
-      mode: 'daily',
+      remaining: 0,
+      mode: 'out',
     };
   }
 
   if (usage.unlimited) {
     return { used: 0, total: 0, remaining: 9999, mode: 'daily' };
   }
-  // Purchased news credits must always show on the meter (not only after daily is out).
-  if (usage.newsOnBonus || (usage.bonusNews || 0) > 0) {
+  const dailyRem = Math.max(0, usage.newsLimit - usage.newsUsed);
+  if (dailyRem > 0) {
+    return {
+      used: usage.newsUsed,
+      total: usage.newsLimit,
+      remaining: dailyRem,
+      mode: 'daily',
+    };
+  }
+  if ((usage.bonusNews || 0) > 0 || usage.newsOnBonus) {
     const rem = Math.max(0, usage.bonusNews || 0);
     const used = Math.max(0, usage.bonusNewsUsed || 0);
     const total = Math.max(usage.bonusNewsPackSize || 0, used + rem, rem);
@@ -55,10 +71,10 @@ function meterValues(
     return { used: Math.min(used, total), total, remaining: rem, mode: 'pack' };
   }
   return {
-    used: usage.newsUsed,
+    used: usage.newsLimit,
     total: usage.newsLimit,
-    remaining: Math.max(0, usage.newsLimit - usage.newsUsed),
-    mode: 'daily',
+    remaining: 0,
+    mode: 'out',
   };
 }
 
@@ -263,11 +279,11 @@ export function UsageQuotaBar({ usage, email, onRefresh, compact }: UsageQuotaBa
           <button
             type="button"
             disabled={busy !== null}
-            onClick={() => buy('analysis_pack')}
+            onClick={() => buy('reload_pack')}
             className="inline-flex items-center gap-0.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[8px] uppercase tracking-wide text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-50 shrink-0"
-            title="Buy +12 searches · RM 10"
+            title="Reload pack · RM 10 · +10 analyses +10 news · lasts until used"
           >
-            {busy === 'analysis_pack' ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Plus className="h-2.5 w-2.5" />}
+            {busy === 'reload_pack' ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Plus className="h-2.5 w-2.5" />}
             Pack
           </button>
         </>
@@ -323,21 +339,31 @@ export function QuotaExhaustedBanner({ message, kind, email, onDismiss }: QuotaE
             <button
               type="button"
               disabled={!email || busy !== null}
-              onClick={() => buy('analysis_pack')}
+              onClick={() => buy('reload_pack')}
               className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-bold text-emerald-300 disabled:opacity-50"
             >
-              {busy === 'analysis_pack' ? '…' : 'Pack RM10 (+12)'}
+              {busy === 'reload_pack' ? '…' : 'Reload RM10 (+10/+10)'}
             </button>
           </>
         ) : (
-          <button
-            type="button"
-            disabled={!email || busy !== null}
-            onClick={() => buy('news')}
-            className="rounded-md bg-cyan-500 px-2.5 py-1 text-[10px] font-bold text-black disabled:opacity-50"
-          >
-            {busy === 'news' ? '…' : 'News mini RM5 (+10)'}
-          </button>
+          <>
+            <button
+              type="button"
+              disabled={!email || busy !== null}
+              onClick={() => buy('news')}
+              className="rounded-md bg-cyan-500 px-2.5 py-1 text-[10px] font-bold text-black disabled:opacity-50"
+            >
+              {busy === 'news' ? '…' : 'News mini RM5 (+10)'}
+            </button>
+            <button
+              type="button"
+              disabled={!email || busy !== null}
+              onClick={() => buy('reload_pack')}
+              className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-bold text-emerald-300 disabled:opacity-50"
+            >
+              {busy === 'reload_pack' ? '…' : 'Reload RM10 (+10/+10)'}
+            </button>
+          </>
         )}
         {onDismiss && (
           <button

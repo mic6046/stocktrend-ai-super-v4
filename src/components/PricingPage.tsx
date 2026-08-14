@@ -25,7 +25,11 @@ const QUOTA_COMPARE = [
 const OVERAGES = [
   { label: 'AI analysis mini reload', price: 'RM 5', note: '+5 analyses · Stripe MYR minimum' },
   { label: 'AI news mini reload', price: 'RM 5', note: '+10 news summaries · Stripe MYR minimum' },
-  { label: 'AI analysis pack', price: 'RM 10', note: '+12 analyses (2 bonus) · same for all plans' },
+  {
+    label: 'Reload pack',
+    price: 'RM 10',
+    note: '+10 analyses + 10 news · lasts until used (no daily reset)',
+  },
 ];
 
 interface PricingPageProps {
@@ -232,7 +236,7 @@ export function PricingPage({
                 </div>
               </div>
               <p className="mt-3 text-[11px] leading-relaxed text-gray-500">
-                Cached re-open of the same ticker does not use another analysis credit. Quotas reset at midnight MYT.
+                Each Search or Refresh uses 1 AI analysis credit — including re-opening the same ticker. All plan quotas reset every day at midnight MYT — unused credits do not roll over.
               </p>
             </div>
           ))}
@@ -242,8 +246,9 @@ export function PricingPage({
         <div className="mt-6 rounded-2xl border border-white/10 bg-[#0c0c0e] p-6">
           <h3 className="text-sm font-bold text-white mb-1">Need more before reset?</h3>
           <p className="text-xs text-gray-500 mb-4">
-            Same overage rates for Basic and Pro. Daily quotas reset at{' '}
-            <span className="text-gray-300">midnight (Malaysia Time, MYT)</span>.
+            Same overage rates for Basic and Pro. All plan quotas reset every day at{' '}
+            <span className="text-gray-300">midnight (Malaysia Time, MYT)</span>
+            {' '}— unused included credits do not roll over.
           </p>
           <div className="grid gap-3 sm:grid-cols-3">
             {OVERAGES.map((row) => (

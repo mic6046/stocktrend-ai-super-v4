@@ -6559,34 +6559,9 @@ export default function App() {
     const currentPrice = stockData.quote?.regularMarketPrice || 0;
     const priceStr = currentPrice ? currentPrice.toFixed(2) : '0.00';
     const cacheKey = `${stockData.ticker}_${stockData.history.slice(-5).map(h => h.close).join('|')}_price_${priceStr}`;
-    
-    // Client cache only when credits remain (already gated above)
-    if (!forceBypass && predictCache[cacheKey]) {
-      const cached = predictCache[cacheKey];
-      setPrediction(cached.prediction);
-      setConfidence(cached.confidence);
-      setLevels(cached.levels);
-      setRecommendation(typeof cached.recommendation === 'string' ? cached.recommendation : (cached.rating || cached.recommendation?.rating || null));
-      setFinancials(cached.financials || null);
-      setNewsSummaryDetail(cached.newsSummary || null);
-      setWhyBuyNow(cached.whyBuyNow || null);
-      setWhyBuyStrength(cached.whyBuyStrength || null);
-      setWhySellNow(cached.whySellNow || null);
-      setWhySellStrength(cached.whySellStrength || null);
-      setBullishFactors(cached.bullishFactors || []);
-      setBearishFactors(cached.bearishFactors || []);
-      setKeyRisks(cached.keyRisks || []);
-      setAiStockScore(cached.aiStockScore || null);
-      setWhaleAccumulation(cached.whaleAccumulation || null);
-      setAiFallbackActive(cached.aiFallbackActive || false);
-      setAiFallbackReason(cached.aiFallbackReason || null);
-      setForecastHorizons(cached.forecastHorizons || []);
-      setEnsembleForecast(cached.ensembleForecast || null);
-      setPatternMatches(cached.patternMatches || []);
-      setPatternSuccessSummary(cached.patternSuccessSummary || null);
-      setAdaptiveLearning(cached.adaptiveLearning || null);
-      return;
-    }
+
+    // Always hit /api/predict so every Search / Refresh bills 1 analysis credit
+    // (server may still return a cached result after charging).
 
     setPredicting(true);
     setPrediction(null);
@@ -6828,14 +6803,18 @@ export default function App() {
       setMarketDataStatus('loading');
       try {
         if (activeTicker) {
+          if (!assertAnalysisCredits()) {
+            setMarketDataStatus('idle');
+            return;
+          }
           await refreshLiveQuoteOnce(
             String(activeTicker),
             'manual-refresh-quote',
             'Click Refresh'
           );
           const tf = getActiveTimeframeParams();
-          // Chart/price only — do not re-run AI analysis
-          await fetchStock(String(activeTicker), tf.range, tf.interval, false, true, false);
+          // Manual Refresh re-runs AI analysis and uses 1 analysis credit
+          await fetchStock(String(activeTicker), tf.range, tf.interval, true, true, true);
         } else {
           await fetchMarkets(true);
         }
@@ -7312,7 +7291,7 @@ export default function App() {
     if (usage && !usage.unlimited && usage.analysesRemaining <= 0) {
       setQuotaBanner({
         kind: 'analysis',
-        message: 'Daily AI search/analysis usage is out. Please reload credits (+5 RM5 or Pack RM10) to continue.',
+        message: 'Daily AI search/analysis usage is out. Please reload credits (+5 RM5 or Reload pack RM10) to continue.',
       });
       return false;
     }

@@ -23,7 +23,7 @@ export type UsageSnapshot = {
   subscriptionStatus: string;
 };
 
-export type OverageProduct = 'analysis' | 'news' | 'analysis_pack';
+export type OverageProduct = 'analysis' | 'news' | 'analysis_pack' | 'reload_pack';
 
 export async function fetchUsage(email: string): Promise<UsageSnapshot> {
   const res = await loggedFetch(apiUrl(`/api/usage?email=${encodeURIComponent(email)}`), {

@@ -2,9 +2,10 @@
  * Daily AI usage quotas (MYT) for Quantum Node plans.
  * Basic: 20 analyses + 20 news / day
  * Pro:   30 analyses + 30 news / day
- * Overage: Pack +12 analyses, Mini +5 analyses / +10 news
+ * Overage: Reload pack RM10 (+10 analyses +10 news), Mini RM5 (+5 analyses / +10 news)
  *
- * Unused daily credits roll over into the bonus pool at MYT midnight.
+ * All plan quotas hard-reset at MYT midnight — unused included credits
+ * do not roll over. Purchased bonus packs persist until spent.
  * After daily included is exhausted, the meter shows the latest purchase
  * (e.g. Pack → 0/12 → 12/12).
  */
@@ -119,27 +120,27 @@ type DayState = {
   bonusNews: number;
   bonusAnalysesPackSize: number;
   bonusNewsPackSize: number;
-  /** True when unused daily was rolled into bonus (must persist). */
+  /** True when state must be persisted (day change or meter sync). */
   rolled: boolean;
 };
 
 /**
- * Build today's usage state. If the calendar day changed (MYT), unused daily
- * credits roll into the bonus pool and daily counters reset.
+ * Build today's usage state. On MYT day change, included quotas hard-reset.
+ * Unused included credits are discarded; purchased bonus packs persist.
  */
 function buildDayState(
   data: UserDoc,
   dateKey: string,
-  limits: { analyses: number; news: number }
+  _limits: { analyses: number; news: number }
 ): DayState {
   const usage = data.usage || {};
   const prevKey = usage.dateKey ? String(usage.dateKey) : '';
-  let bonusAnalyses = Math.max(0, Number(data.bonusAnalyses) || 0);
-  let bonusNews = Math.max(0, Number(data.bonusNews) || 0);
-  let bonusAnalysesPackSize = Math.max(0, Number(data.bonusAnalysesPackSize) || 0);
-  let bonusNewsPackSize = Math.max(0, Number(data.bonusNewsPackSize) || 0);
-  let bonusAnalysesUsed = Math.max(0, Number(usage.bonusAnalysesUsed) || 0);
-  let bonusNewsUsed = Math.max(0, Number(usage.bonusNewsUsed) || 0);
+  const bonusAnalyses = Math.max(0, Number(data.bonusAnalyses) || 0);
+  const bonusNews = Math.max(0, Number(data.bonusNews) || 0);
+  const bonusAnalysesPackSize = Math.max(0, Number(data.bonusAnalysesPackSize) || 0);
+  const bonusNewsPackSize = Math.max(0, Number(data.bonusNewsPackSize) || 0);
+  const bonusAnalysesUsed = Math.max(0, Number(usage.bonusAnalysesUsed) || 0);
+  const bonusNewsUsed = Math.max(0, Number(usage.bonusNewsUsed) || 0);
 
   if (prevKey === dateKey) {
     return {
@@ -156,34 +157,8 @@ function buildDayState(
     };
   }
 
-  // New MYT day (or first write): roll unused daily into bonus, then reset daily.
-  let rolled = false;
-  if (prevKey) {
-    const prevAnalysesUsed = Math.max(0, Number(usage.analysesUsed) || 0);
-    const prevNewsUsed = Math.max(0, Number(usage.newsUsed) || 0);
-    const unusedAnalyses = Math.max(0, limits.analyses - prevAnalysesUsed);
-    const unusedNews = Math.max(0, limits.news - prevNewsUsed);
-
-    if (unusedAnalyses > 0) {
-      bonusAnalyses += unusedAnalyses;
-      // Rolled daily becomes spendable leftover; keep current purchase meter if any.
-      if (bonusAnalysesPackSize <= 0) {
-        bonusAnalysesPackSize = unusedAnalyses;
-        bonusAnalysesUsed = 0;
-      }
-      rolled = true;
-    }
-    if (unusedNews > 0) {
-      bonusNews += unusedNews;
-      if (bonusNewsPackSize <= 0) {
-        bonusNewsPackSize = unusedNews;
-        bonusNewsUsed = 0;
-      }
-      rolled = true;
-    }
-  }
-
-  // Pack "used" counters are purchase-scoped and survive the day change.
+  // New MYT day (or first write): hard-reset daily counters only.
+  // Purchased pack meters survive the day change.
   return {
     dateKey,
     analysesUsed: 0,
@@ -194,40 +169,22 @@ function buildDayState(
     bonusNews,
     bonusAnalysesPackSize,
     bonusNewsPackSize,
-    rolled,
+    rolled: true,
   };
 }
 
 /**
- * If bonus credits exist, fold unused daily into the bonus pool and mark daily
- * exhausted so the UI shows the credit meter (total units).
+ * Keep bonus pack meters in sync. Does not fold unused daily into bonus —
+ * included quotas reset each day and stay separate from purchased packs.
  */
-function foldDailyIntoActivePack(state: DayState, limits: { analyses: number; news: number }): DayState {
+function foldDailyIntoActivePack(state: DayState, _limits: { analyses: number; news: number }): DayState {
   let rolled = state.rolled;
-  let analysesUsed = state.analysesUsed;
-  let newsUsed = state.newsUsed;
   let bonusAnalyses = state.bonusAnalyses;
   let bonusNews = state.bonusNews;
   let bonusAnalysesUsed = state.bonusAnalysesUsed;
   let bonusNewsUsed = state.bonusNewsUsed;
   let bonusAnalysesPackSize = state.bonusAnalysesPackSize;
   let bonusNewsPackSize = state.bonusNewsPackSize;
-
-  const hasAnalysisCredits = bonusAnalyses > 0 || bonusAnalysesPackSize > 0;
-  const hasNewsCredits = bonusNews > 0 || bonusNewsPackSize > 0;
-
-  if (hasAnalysisCredits && analysesUsed < limits.analyses) {
-    const unused = limits.analyses - analysesUsed;
-    if (unused > 0) bonusAnalyses += unused;
-    analysesUsed = limits.analyses;
-    rolled = true;
-  }
-  if (hasNewsCredits && newsUsed < limits.news) {
-    const unused = limits.news - newsUsed;
-    if (unused > 0) bonusNews += unused;
-    newsUsed = limits.news;
-    rolled = true;
-  }
 
   // Meter denominator = total credit units in the pool (used + remaining).
   if (bonusAnalyses > 0) {
@@ -256,8 +213,6 @@ function foldDailyIntoActivePack(state: DayState, limits: { analyses: number; ne
 
   return {
     ...state,
-    analysesUsed,
-    newsUsed,
     bonusAnalyses,
     bonusNews,
     bonusAnalysesUsed,
@@ -304,7 +259,7 @@ export async function getUsageSnapshot(email: string): Promise<UsageSnapshot> {
   const limits = dailyLimitsForPlan(plan);
   const state = foldDailyIntoActivePack(buildDayState(data, dateKey, limits), limits);
 
-  // Persist rollover so unused daily is not lost on the next read.
+  // Persist day reset / meter sync so counters stay correct on the next read.
   if (state.rolled) {
     await ref.set(
       {
@@ -340,8 +295,11 @@ export async function getUsageSnapshot(email: string): Promise<UsageSnapshot> {
     ? 9999
     : Math.max(0, limits.news - state.newsUsed) + state.bonusNews;
 
-  const analysesOnBonus = !unlimited && (state.analysesUsed >= limits.analyses || state.bonusAnalyses > 0);
-  const newsOnBonus = !unlimited && (state.newsUsed >= limits.news || state.bonusNews > 0);
+  // Pack meter only after daily included is exhausted (bonus packs never expire).
+  const analysesOnBonus =
+    !unlimited && state.analysesUsed >= limits.analyses && (state.bonusAnalyses > 0 || analysesPack.packSize > 0);
+  const newsOnBonus =
+    !unlimited && state.newsUsed >= limits.news && (state.bonusNews > 0 || newsPack.packSize > 0);
 
   return {
     email: normalized,
@@ -367,9 +325,11 @@ export async function getUsageSnapshot(email: string): Promise<UsageSnapshot> {
   };
 }
 
+export type BonusCreditKind = BillableKind | 'analysis_pack' | 'reload_pack';
+
 export async function addBonusCredits(
   email: string,
-  kind: BillableKind | 'analysis_pack',
+  kind: BonusCreditKind,
   amount?: number,
   sessionId?: string
 ): Promise<UsageSnapshot> {
@@ -401,27 +361,26 @@ export async function addBonusCredits(
       newsUsed,
     } = state;
 
-    if (kind === 'analysis_pack' || kind === 'analysis') {
+    if (kind === 'reload_pack') {
+      // Combo pack: +10 analyses +10 news. Persists until spent; daily quota stays intact.
+      const addAnalyses = amount ?? 10;
+      const addNews = 10;
+      bonusAnalyses = bonusAnalyses + addAnalyses;
+      bonusNews = bonusNews + addNews;
+      bonusAnalysesUsed = 0;
+      bonusNewsUsed = 0;
+      bonusAnalysesPackSize = bonusAnalyses;
+      bonusNewsPackSize = bonusNews;
+    } else if (kind === 'analysis_pack' || kind === 'analysis') {
       const add = amount ?? (kind === 'analysis_pack' ? 12 : 5);
-      // Roll unused daily into bonus, then meter = 0 / total credit units
-      const unusedDaily = Math.max(0, limits.analyses - analysesUsed);
-      if (unusedDaily > 0) {
-        bonusAnalyses += unusedDaily;
-      }
-      analysesUsed = limits.analyses;
       bonusAnalyses = bonusAnalyses + add;
       bonusAnalysesUsed = 0;
-      bonusAnalysesPackSize = bonusAnalyses; // total units after purchase
+      bonusAnalysesPackSize = bonusAnalyses;
     } else {
       const add = amount ?? 10;
-      const unusedDaily = Math.max(0, limits.news - newsUsed);
-      if (unusedDaily > 0) {
-        bonusNews += unusedDaily;
-      }
-      newsUsed = limits.news;
       bonusNews = bonusNews + add;
       bonusNewsUsed = 0;
-      bonusNewsPackSize = bonusNews; // total units after purchase
+      bonusNewsPackSize = bonusNews;
     }
 
     const applied = { ...(data.appliedOverageSessions || {}) };
@@ -539,7 +498,7 @@ export async function consumeUsageCredit(
             ok: false as const,
             status: 402,
             code: 'analysis_quota_exceeded',
-            error: `Daily AI analysis usage is out (${limits.analyses}/day on ${limits.planLabel}). Please reload credits — Mini RM5 (+5) or Pack RM10 (+12).`,
+            error: `Daily AI analysis usage is out (${limits.analyses}/day on ${limits.planLabel}). Please reload credits — Mini RM5 (+5) or Reload pack RM10 (+10 analyses +10 news).`,
           };
         }
       } else if (newsUsed < limits.news) {
@@ -562,7 +521,7 @@ export async function consumeUsageCredit(
           ok: false as const,
           status: 402,
           code: 'news_quota_exceeded',
-          error: `Daily AI news usage is out (${limits.news}/day on ${limits.planLabel}). Please reload credits — News mini RM5 (+10).`,
+          error: `Daily AI news usage is out (${limits.news}/day on ${limits.planLabel}). Please reload credits — News mini RM5 (+10) or Reload pack RM10 (+10 analyses +10 news).`,
         };
       }
 
