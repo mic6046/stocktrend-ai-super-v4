@@ -8,27 +8,56 @@ export type WatchlistItem = {
 
 const KEY = 'qn-watchlist';
 
+/** Normalize for localStorage + Firestore (no undefined fields). */
+export function normalizeWatchlistItem(x: Partial<WatchlistItem> | null | undefined): WatchlistItem | null {
+  if (!x || typeof x.ticker !== 'string') return null;
+  const ticker = String(x.ticker).trim().toUpperCase();
+  if (!ticker) return null;
+  const item: WatchlistItem = {
+    ticker,
+    addedAt: typeof x.addedAt === 'number' && Number.isFinite(x.addedAt) ? x.addedAt : Date.now(),
+  };
+  if (x.name && String(x.name).trim()) item.name = String(x.name).trim();
+  return item;
+}
+
+export function normalizeWatchlist(items: unknown): WatchlistItem[] {
+  if (!Array.isArray(items)) return [];
+  const out: WatchlistItem[] = [];
+  const seen = new Set<string>();
+  for (const raw of items) {
+    const item = normalizeWatchlistItem(raw as Partial<WatchlistItem>);
+    if (!item || seen.has(item.ticker)) continue;
+    seen.add(item.ticker);
+    out.push(item);
+  }
+  return out;
+}
+
+export function watchlistFingerprint(items: WatchlistItem[]): string {
+  return JSON.stringify(
+    normalizeWatchlist(items).map((x) => ({
+      ticker: x.ticker,
+      addedAt: x.addedAt,
+      ...(x.name ? { name: x.name } : {}),
+    }))
+  );
+}
+
 export function loadWatchlist(): WatchlistItem[] {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter((x) => x && typeof x.ticker === 'string')
-      .map((x) => ({
-        ticker: String(x.ticker).toUpperCase(),
-        name: x.name ? String(x.name) : undefined,
-        addedAt: typeof x.addedAt === 'number' ? x.addedAt : Date.now(),
-      }));
+    return normalizeWatchlist(JSON.parse(raw));
   } catch {
     return [];
   }
 }
 
 export function saveWatchlist(items: WatchlistItem[], opts?: { silent?: boolean }) {
+  const normalized = normalizeWatchlist(items);
   try {
-    localStorage.setItem(KEY, JSON.stringify(items));
+    localStorage.setItem(KEY, JSON.stringify(normalized));
   } catch {
     /* ignore */
   }
@@ -39,7 +68,12 @@ export function addToWatchlist(ticker: string, name?: string): WatchlistItem[] {
   const t = ticker.trim().toUpperCase();
   if (!t) return loadWatchlist();
   const list = loadWatchlist().filter((x) => x.ticker !== t);
-  list.unshift({ ticker: t, name, addedAt: Date.now() });
+  list.unshift(
+    normalizeWatchlistItem({ ticker: t, name, addedAt: Date.now() }) || {
+      ticker: t,
+      addedAt: Date.now(),
+    }
+  );
   saveWatchlist(list);
   return list;
 }

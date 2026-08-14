@@ -44,7 +44,7 @@ import { AlertsPage } from './components/pages/AlertsPage';
 import { loadSignalCache, mergeSignalCache, removeSignalCache, saveSignalCache, type CachedSignalRow } from './lib/signalCache';
 import { findATrade } from './lib/findATrade';
 import { POPULAR_UNIVERSE } from './lib/suggestTradeUniverses';
-import { loadWatchlist, saveWatchlist } from './lib/watchlistStore';
+import { loadWatchlist, saveWatchlist, normalizeWatchlist, watchlistFingerprint } from './lib/watchlistStore';
 import { loadPortfolio, savePortfolio } from './lib/portfolioStore';
 import { subscribeAccountDataChanged, notifyAccountDataChanged } from './lib/accountSync';
 import {
@@ -1110,6 +1110,9 @@ export default function App() {
   const suppressCloudSaveRef = useRef(false);
   /** Last applied/saved account payload hash — ignore identical Firestore echoes. */
   const lastSyncFingerprintRef = useRef('');
+  /** Watchlist-only fingerprint so watchlist sync isn't blocked by other fields. */
+  const lastWatchlistFpRef = useRef('');
+  const watchlistPushTimerRef = useRef<number | null>(null);
   const [usage, setUsage] = useState<UsageSnapshot | null>(null);
   const [quotaBanner, setQuotaBanner] = useState<{ kind: 'analysis' | 'news'; message: string } | null>(null);
   const [ticker, setTicker] = useState('');
@@ -2590,6 +2593,7 @@ export default function App() {
       setCloudHydrated(false);
       setCloudSyncStatus('idle');
       lastSyncFingerprintRef.current = '';
+      lastWatchlistFpRef.current = '';
       return;
     }
 
@@ -2597,6 +2601,7 @@ export default function App() {
     cloudHydratedRef.current = false;
     setCloudHydrated(false);
     lastSyncFingerprintRef.current = '';
+    lastWatchlistFpRef.current = '';
 
     const unsub = subscribeUserData(
       syncDocId,
@@ -2605,7 +2610,20 @@ export default function App() {
         const fp = accountSyncFingerprint(cloud);
 
         // Ignore echo from our own in-flight / just-completed write
-        if (suppressCloudSaveRef.current || fp === lastSyncFingerprintRef.current) {
+        if (fp === lastSyncFingerprintRef.current) {
+          if (!cloudHydratedRef.current) {
+            cloudHydratedRef.current = true;
+            setCloudHydrated(true);
+          }
+          setCloudSyncStatus('synced');
+          return;
+        }
+        if (suppressCloudSaveRef.current) {
+          // Adopt server truth while our write is settling — don't skip forever
+          lastSyncFingerprintRef.current = fp;
+          if (Array.isArray(cloud.watchlist)) {
+            lastWatchlistFpRef.current = watchlistFingerprint(normalizeWatchlist(cloud.watchlist));
+          }
           if (!cloudHydratedRef.current) {
             cloudHydratedRef.current = true;
             setCloudHydrated(true);
@@ -2665,7 +2683,17 @@ export default function App() {
           }
         }
         if (Array.isArray(cloud.watchlist)) {
-          saveWatchlist(cloud.watchlist, { silent: true });
+          const remote = normalizeWatchlist(cloud.watchlist);
+          const local = loadWatchlist();
+          // First hydrate: never let an empty cloud wipe a populated local watchlist
+          if (!isLiveRemote && remote.length === 0 && local.length > 0) {
+            lastWatchlistFpRef.current = watchlistFingerprint(local);
+          } else if (watchlistFingerprint(remote) !== watchlistFingerprint(local)) {
+            saveWatchlist(remote, { silent: true });
+            lastWatchlistFpRef.current = watchlistFingerprint(remote);
+          } else {
+            lastWatchlistFpRef.current = watchlistFingerprint(remote);
+          }
         }
         if (Array.isArray(cloud.portfolio)) {
           savePortfolio(cloud.portfolio, { silent: true });
@@ -2746,7 +2774,11 @@ export default function App() {
               modelWeights: cloud.modelWeights || storedWeights,
               trendlines: Array.isArray(cloud.trendlines) ? cloud.trendlines : storedTrends,
               annotations: Array.isArray(cloud.annotations) ? cloud.annotations : storedAnnotations,
-              watchlist: Array.isArray(cloud.watchlist) ? cloud.watchlist : loadWatchlist(),
+              watchlist: Array.isArray(cloud.watchlist)
+                ? cloud.watchlist.length === 0 && loadWatchlist().length > 0
+                  ? loadWatchlist()
+                  : normalizeWatchlist(cloud.watchlist)
+                : loadWatchlist(),
               portfolio: Array.isArray(cloud.portfolio) ? cloud.portfolio : loadPortfolio(),
               signalCache: Array.isArray(cloud.signalCache) ? cloud.signalCache : loadSignalCache(),
               prefs: {
@@ -2761,6 +2793,10 @@ export default function App() {
                 ...(cloud.prefs || {}),
               },
             };
+
+            lastWatchlistFpRef.current = watchlistFingerprint(
+              normalizeWatchlist(payload.watchlist || [])
+            );
 
             const nextFp = accountSyncFingerprint(payload);
             if (nextFp !== lastSyncFingerprintRef.current) {
@@ -2779,6 +2815,17 @@ export default function App() {
                     suppressCloudSaveRef.current = false;
                   }, 500);
                 });
+            } else {
+              // Still ensure watchlist field exists in cloud even if full blob matched oddly
+              const wl = loadWatchlist();
+              const wlFp = watchlistFingerprint(wl);
+              if (wlFp !== watchlistFingerprint(normalizeWatchlist(cloud.watchlist || []))) {
+                lastWatchlistFpRef.current = wlFp;
+                saveUserData(syncDocId, { watchlist: wl }).catch((err) => {
+                  console.error('Firestore watchlist upload failed:', err);
+                  setCloudSyncStatus('error');
+                });
+              }
             }
           }
         }, isLiveRemote ? 900 : 250);
@@ -2833,6 +2880,24 @@ export default function App() {
   const syncDocIdRef = useRef(syncDocId);
   syncDocIdRef.current = syncDocId;
 
+  const pushWatchlistToCloud = () => {
+    const docId = syncDocIdRef.current;
+    if (!docId || !cloudHydratedRef.current) return;
+    const watchlist = loadWatchlist();
+    const fp = watchlistFingerprint(watchlist);
+    if (fp === lastWatchlistFpRef.current) return;
+    lastWatchlistFpRef.current = fp;
+    setCloudSyncStatus('loading');
+    // Field-only write — must not be blocked by full-blob suppress / fingerprint
+    saveUserData(docId, { watchlist })
+      .then(() => setCloudSyncStatus('synced'))
+      .catch((err) => {
+        console.error('Firestore watchlist save failed:', err);
+        lastWatchlistFpRef.current = '';
+        setCloudSyncStatus('error');
+      });
+  };
+
   const pushAccountSync = (payload: Partial<UserCloudData>) => {
     const docId = syncDocIdRef.current;
     if (!docId || suppressCloudSaveRef.current || !cloudHydratedRef.current) return;
@@ -2840,6 +2905,9 @@ export default function App() {
     if (fp === lastSyncFingerprintRef.current) return;
     const prevFp = lastSyncFingerprintRef.current;
     lastSyncFingerprintRef.current = fp;
+    if (Array.isArray(payload.watchlist)) {
+      lastWatchlistFpRef.current = watchlistFingerprint(normalizeWatchlist(payload.watchlist));
+    }
     suppressCloudSaveRef.current = true;
     setCloudSyncStatus('loading');
     saveUserData(docId, payload)
@@ -2898,30 +2966,38 @@ export default function App() {
     analysisHorizon,
   ]);
 
-  // Watchlist / portfolio / prefs localStorage writes → push full account blob
+  // Watchlist / portfolio / prefs localStorage writes → cloud
   useEffect(() => {
     if (!syncDocId || accessState !== 'active' || !cloudHydrated) return;
-    return subscribeAccountDataChanged(() => {
-      window.setTimeout(() => {
-        if (suppressCloudSaveRef.current || !cloudHydratedRef.current) return;
-        pushAccountSync({
-          alerts,
-          autoAlertRsiDivergence,
-          modelWeights,
-          trendlines,
-          annotations,
-          watchlist: loadWatchlist(),
-          portfolio: loadPortfolio(),
-          signalCache: loadSignalCache(),
-          prefs: {
-            refreshMode: loadRefreshMode(),
-            autoRefreshIntervalSec: loadAutoRefreshIntervalSec(),
-            dashboardMarket: loadDashboardMarket(),
-            sidebarCollapsed: loadSidebarCollapsed(),
-            analysisHorizon,
-          },
-        });
-      }, 400);
+    return subscribeAccountDataChanged((kind) => {
+      if (kind === 'watchlist' || kind === 'all') {
+        if (watchlistPushTimerRef.current) window.clearTimeout(watchlistPushTimerRef.current);
+        watchlistPushTimerRef.current = window.setTimeout(() => {
+          pushWatchlistToCloud();
+        }, 250);
+      }
+      if (kind === 'portfolio' || kind === 'signals' || kind === 'prefs' || kind === 'all') {
+        window.setTimeout(() => {
+          if (suppressCloudSaveRef.current || !cloudHydratedRef.current) return;
+          pushAccountSync({
+            alerts,
+            autoAlertRsiDivergence,
+            modelWeights,
+            trendlines,
+            annotations,
+            watchlist: loadWatchlist(),
+            portfolio: loadPortfolio(),
+            signalCache: loadSignalCache(),
+            prefs: {
+              refreshMode: loadRefreshMode(),
+              autoRefreshIntervalSec: loadAutoRefreshIntervalSec(),
+              dashboardMarket: loadDashboardMarket(),
+              sidebarCollapsed: loadSidebarCollapsed(),
+              analysisHorizon,
+            },
+          });
+        }, 400);
+      }
     });
   }, [
     syncDocId,
