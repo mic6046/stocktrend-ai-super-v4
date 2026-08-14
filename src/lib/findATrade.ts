@@ -192,7 +192,7 @@ async function scoutOneFind(
       userHasPosition: false,
     });
 
-    return evaluateStockRecommendation(input, {
+    const rec = evaluateStockRecommendation(input, {
       ticker: sym,
       companyName,
       dataTimestamp: Date.now(),
@@ -201,6 +201,40 @@ async function scoutOneFind(
           ? Number(data.quote.regularMarketChangePercent)
           : null,
     });
+
+    // Authoritative board chips from technicals (never leave SM/Flow/RSI blank)
+    const tech = computeTechnicalIndicators(history, data?.quote);
+    const rsiRaw = tech?.indicators?.rsi ?? input.technical?.rsi;
+    const sm = tech?.quantumRefinement?.smartMoneyIndex?.status;
+    const flow = tech?.indicators?.institutionalFlow?.status;
+    const ad = tech?.quantumRefinement?.accumulationDistribution?.status;
+    const smartMoney =
+      sm === 'BULLISH' || ad === 'ACCUMULATION'
+        ? 'Bull'
+        : sm === 'BEARISH' || ad === 'DISTRIBUTION'
+          ? 'Bear'
+          : rec.boardMetrics?.smartMoney || 'Flat';
+    const fundFlow =
+      flow === 'LARGE_INFLOW' || flow === 'STEALTH_ACCUMULATION' || ad === 'ACCUMULATION'
+        ? 'Inflow'
+        : flow === 'LARGE_OUTFLOW' || flow === 'STEALTH_DISTRIBUTION' || ad === 'DISTRIBUTION'
+          ? 'Outflow'
+          : rec.boardMetrics?.fundFlow || 'Flat';
+
+    rec.boardMetrics = {
+      rsi: rsiRaw != null && Number.isFinite(Number(rsiRaw)) ? Number(rsiRaw) : null,
+      smartMoney,
+      fundFlow,
+      momentum: rec.boardMetrics?.momentum || 'Flat',
+      technicalTrend:
+        tech?.quantumRefinement?.trendStrength?.status?.replace(/_/g, ' ') ||
+        rec.boardMetrics?.technicalTrend ||
+        rec.engine?.chartStance ||
+        'flat',
+      changePct: rec.boardMetrics?.changePct ?? null,
+    };
+
+    return rec;
   } catch (err: any) {
     return errorRecommendation(ticker, err?.message || 'Scout failed');
   }

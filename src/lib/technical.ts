@@ -709,10 +709,14 @@ export function calculateStdDev(prices: number[], mean: number): number {
 export function computeTechnicalIndicators(history: any[], lastQuote: any): TechnicalBreakdown | null {
   if (!history || history.length < 15) return null;
 
-  // Filter out any entries missing actual closing price
-  const closes = history.map(h => h.close).filter(c => typeof c === 'number' && !isNaN(c));
-  const volumes = history.map(h => h.volume || 1).filter(v => typeof v === 'number');
-  const currentPrice = lastQuote?.regularMarketPrice || closes[closes.length - 1] || 0;
+  // Filter out any entries missing actual closing price (coerce numeric strings from APIs)
+  const closes = history
+    .map((h) => Number(h.close))
+    .filter((c) => Number.isFinite(c));
+  const volumes = history
+    .map((h) => Number(h.volume || 1))
+    .filter((v) => Number.isFinite(v));
+  const currentPrice = Number(lastQuote?.regularMarketPrice) || closes[closes.length - 1] || 0;
 
   if (closes.length < 15) return null;
 

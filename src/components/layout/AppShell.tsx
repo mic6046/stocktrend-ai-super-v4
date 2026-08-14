@@ -9,6 +9,8 @@ import {
   DASHBOARD_MARKETS,
   type DashboardMarket,
 } from '../../lib/dashboardMarket';
+import type { AssistantChatContext } from '../../lib/assistantChatApi';
+import type { UsageSnapshot } from '../../lib/usageApi';
 
 type IndexQuote = {
   symbol?: string;
@@ -45,6 +47,12 @@ type AppShellProps = {
   authLoading?: boolean;
   userEmail?: string | null;
   usageSlot?: React.ReactNode;
+  chatContext: AssistantChatContext;
+  onChatUsageUpdate?: (usage: UsageSnapshot) => void;
+  planLabel?: string | null;
+  planId?: string | null;
+  planUnlimited?: boolean;
+  onOpenPlans?: () => void;
   children: React.ReactNode;
   footer?: React.ReactNode;
 };
@@ -74,6 +82,12 @@ export function AppShell({
   authLoading,
   userEmail,
   usageSlot,
+  chatContext,
+  onChatUsageUpdate,
+  planLabel,
+  planId,
+  planUnlimited,
+  onOpenPlans,
   children,
   footer,
 }: AppShellProps) {
@@ -97,6 +111,12 @@ export function AppShell({
         onSignOut={onSignOut}
         authLoading={authLoading}
         usageSlot={usageSlot}
+        chatContext={chatContext}
+        onChatUsageUpdate={onChatUsageUpdate}
+        planLabel={planLabel}
+        planId={planId}
+        planUnlimited={planUnlimited}
+        onOpenPlans={onOpenPlans}
       />
 
       <div className="flex-1 min-w-0 flex flex-col">

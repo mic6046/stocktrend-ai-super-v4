@@ -2062,6 +2062,146 @@ ${articles.slice(0, 8).map((a: any, idx: number) => `Head ${idx+1}: "${a.title}"
   }
 });
 
+const PAGE_ASSISTANT_GUIDES: Record<string, string> = {
+  DASHBOARD:
+    'User is on Dashboard (Market Command Center): market outlook, indices pulse, opportunities, watch, and risk alerts. Explain how to use market filters and what sections mean.',
+  FIND_TRADES:
+    'User is on Find Trades: AI trade scouting / theme-risk discovery. Explain how to run a scout and interpret recommendations.',
+  AI_SIGNALS:
+    'User is on AI Signals: cached signal cards with trend, smart money, flow, RSI, risk, and change chips. Explain Update/delete and chip meanings.',
+  WATCHLIST:
+    'User is on Watchlist: saved tickers with quotes and Update that refreshes quotes/signals. Explain adding/removing and Update.',
+  PORTFOLIO:
+    'User is on Portfolio: positions and performance tracking. Explain how portfolio views relate to analysis.',
+  ANALYSIS:
+    'User is on Analysis: deep ticker analysis (charts, indicators, AI predict). Explain reading indicators and running Predict (uses analysis credits).',
+  NEWS_CENTER:
+    'User is on News Center: headlines and AI news summaries (news credits). Explain how to load news and summarize.',
+  ALERTS:
+    'User is on Alerts: price/RSI alert rules and triggered alerts. Explain creating and managing alerts.',
+  SETTINGS:
+    'User is on Settings: account, subscription, and preferences. Explain plans and usage quotas at a high level.',
+};
+
+app.post('/api/assistant-chat', async (req, res) => {
+  const emailRaw = req.body?.email;
+  const messageRaw = req.body?.message;
+  const context = req.body?.context && typeof req.body.context === 'object' ? req.body.context : {};
+  const prior = Array.isArray(req.body?.history) ? req.body.history : [];
+
+  const email = typeof emailRaw === 'string' ? emailRaw.trim() : '';
+  const message = typeof messageRaw === 'string' ? messageRaw.trim() : '';
+
+  if (!email) {
+    return res.status(401).json({
+      error: 'Sign in required to use the AI assistant.',
+      code: 'auth_required',
+    });
+  }
+  if (!message) {
+    return res.status(400).json({ error: 'Message is required.' });
+  }
+  if (message.length > 600) {
+    return res.status(400).json({ error: 'Message is too long (max 600 characters).' });
+  }
+
+  const usageSnapPre = await getUsageSnapshot(email).catch(() => null);
+  if (usageSnapPre && !usageSnapPre.unlimited && usageSnapPre.analysesRemaining <= 0) {
+    return res.status(402).json({
+      error: 'Daily AI search/analysis usage is out. Please reload credits (+5 RM5 or Pack RM10) to continue.',
+      code: 'analysis_quota_exceeded',
+      usage: usageSnapPre,
+    });
+  }
+
+  const billed = await consumeUsageCredit(email, 'analysis');
+  if (billed.ok === false) {
+    return res.status(billed.status).json({
+      error: billed.error || 'Daily AI search/analysis usage is out. Please reload credits to continue.',
+      code: billed.code,
+      usage: billed.usage,
+    });
+  }
+
+  const page = typeof context.page === 'string' ? context.page : 'DASHBOARD';
+  const pageLabel =
+    typeof context.pageLabel === 'string' && context.pageLabel.trim()
+      ? context.pageLabel.trim()
+      : page;
+  const pageGuide = PAGE_ASSISTANT_GUIDES[page] || `User is on the ${pageLabel} page in Quantum Node.`;
+
+  const ticker =
+    typeof context.ticker === 'string' && context.ticker.trim()
+      ? context.ticker.trim().toUpperCase()
+      : '';
+  const dashboardMarket =
+    typeof context.dashboardMarket === 'string' ? context.dashboardMarket : '';
+  const watchlistTickers = Array.isArray(context.watchlistTickers)
+    ? context.watchlistTickers.map((t: any) => String(t).toUpperCase()).filter(Boolean).slice(0, 20)
+    : [];
+  const signalTickers = Array.isArray(context.signalTickers)
+    ? context.signalTickers.map((t: any) => String(t).toUpperCase()).filter(Boolean).slice(0, 20)
+    : [];
+
+  const historyLines = prior
+    .slice(-6)
+    .map((m: any) => {
+      const role = m?.role === 'assistant' ? 'Assistant' : 'User';
+      const text = typeof m?.content === 'string' ? m.content.trim().slice(0, 400) : '';
+      return text ? `${role}: ${text}` : '';
+    })
+    .filter(Boolean)
+    .join('\n');
+
+  const prompt = `You are the Quantum Node in-app assistant in the left sidebar.
+Help the user with questions related to the CURRENT page and product UI only.
+Be concise (2–4 short sentences or a few bullets). No markdown tables. No investment advice or buy/sell recommendations — educational UI guidance only.
+If the question is off-topic, refuse briefly and steer back to this page.
+Always end with this exact one-line disclaimer on its own line: "Not financial advice."
+
+CURRENT PAGE: ${pageLabel} (${page})
+PAGE GUIDE: ${pageGuide}
+CONTEXT SNAPSHOT:
+- Active ticker: ${ticker || 'none'}
+- Dashboard market filter: ${dashboardMarket || 'n/a'}
+- Watchlist (sample): ${watchlistTickers.length ? watchlistTickers.join(', ') : 'none'}
+- AI signal tickers (sample): ${signalTickers.length ? signalTickers.join(', ') : 'none'}
+
+${historyLines ? `RECENT CHAT:\n${historyLines}\n` : ''}USER QUESTION:
+${message}
+`;
+
+  try {
+    const response = await safeGenerateContent({
+      model: 'gemini-2.0-flash',
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      config: {
+        thinkingConfig: { thinkingLevel: 'LOW' as any },
+        maxOutputTokens: 320,
+      },
+    });
+
+    let reply = (response?.text || '').trim();
+    if (!reply) {
+      reply =
+        'I could not generate a reply just now. Try again in a moment, or rephrase your question about this page.\nNot financial advice.';
+    } else if (!/not financial advice/i.test(reply)) {
+      reply = `${reply}\nNot financial advice.`;
+    }
+
+    return res.json({ reply, usage: billed.usage });
+  } catch (error: any) {
+    const errMsg = error?.message || String(error);
+    console.log('[assistant-chat] Gemini failed:', errMsg.substring(0, 120));
+    return res.json({
+      reply:
+        'The assistant is temporarily unavailable. Your analysis credit was used — try again shortly, or check Settings for quota.\nNot financial advice.',
+      fallback: true,
+      usage: billed.usage,
+    });
+  }
+});
+
 const tenBaggersInsightCache: Record<string, { insight: string; timestamp: number }> = {};
 
 app.get('/api/ten-baggers', async (req, res) => {

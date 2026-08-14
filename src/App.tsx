@@ -63,6 +63,7 @@ import {
   type RefreshMode,
 } from './lib/marketDataRefresh';
 import { fetchUsage, type UsageSnapshot } from './lib/usageApi';
+import { PAGE_LABELS, type AssistantChatContext } from './lib/assistantChatApi';
 import { buildInstitutionalFlowNarrative, formatSignedMillions } from './lib/institutionalFlow';
 import { getRecommendationTheme } from './utils/recommendationTheme';
 import { toHkTickerIfNumeric } from './lib/tickerNormalize';
@@ -7358,11 +7359,11 @@ export default function App() {
             risk: s.riskLabel,
             price: eng?.currentPrice && eng.currentPrice > 0 ? eng.currentPrice : undefined,
             changePct: board?.changePct ?? undefined,
-            smartMoney: board?.smartMoney,
-            fundFlow: board?.fundFlow,
-            rsi: board?.rsi ?? null,
-            momentum: board?.momentum,
-            technicalTrend: board?.technicalTrend || eng?.chartStance,
+            smartMoney: board?.smartMoney || 'Flat',
+            fundFlow: board?.fundFlow || 'Flat',
+            rsi: board?.rsi != null && Number.isFinite(board.rsi) ? board.rsi : null,
+            momentum: board?.momentum || 'Flat',
+            technicalTrend: board?.technicalTrend || eng?.chartStance || 'flat',
             bucket: /buy|add/i.test(rec)
               ? 'opportunity'
               : /sell|trim|reduce/i.test(rec)
@@ -7606,6 +7607,25 @@ export default function App() {
     }
   };
 
+  const assistantChatContext: AssistantChatContext = React.useMemo(() => {
+    const watchlistTickers = loadWatchlist()
+      .map((w) => w.ticker)
+      .filter(Boolean)
+      .slice(0, 20);
+    const signalTickers = signalCache
+      .map((r) => r.ticker)
+      .filter(Boolean)
+      .slice(0, 20);
+    return {
+      page: activePage,
+      pageLabel: PAGE_LABELS[activePage] || activePage,
+      ticker: data?.ticker || null,
+      dashboardMarket: activePage === 'DASHBOARD' ? dashboardMarket : null,
+      watchlistTickers,
+      signalTickers,
+    };
+  }, [activePage, data?.ticker, dashboardMarket, signalCache]);
+
   return (
     <>
       {showAuthModal && (
@@ -7660,6 +7680,12 @@ export default function App() {
         usageSlot={
           user ? <UsageQuotaBar usage={usage} email={user.email} onRefresh={refreshUsage} compact /> : null
         }
+        chatContext={assistantChatContext}
+        onChatUsageUpdate={(snap) => setUsage(snap)}
+        planLabel={usage?.planLabel || null}
+        planId={usage?.plan || null}
+        planUnlimited={!!usage?.unlimited}
+        onOpenPlans={() => setActivePage('SETTINGS')}
         footer={
           <footer className="mt-4 py-6 px-4 sm:px-8 border-t border-white/5 flex flex-col md:flex-row items-center justify-between text-[11px] font-sans text-gray-500 gap-3 relative z-10">
             <div className="flex flex-wrap justify-center gap-x-6 gap-y-2">
@@ -7668,7 +7694,7 @@ export default function App() {
             <div className="flex flex-col md:items-end gap-2 text-center md:text-right">
               <span className="text-gray-500">
                 Quantum Node · Powered by Google Gemini ·{' '}
-                <span className="font-mono text-emerald-500/70">dash-market-0814</span>
+                <span className="font-mono text-emerald-500/70">plans-sidebar-0814</span>
               </span>
               <LegalLinks className="justify-center md:justify-end" />
             </div>
@@ -7844,6 +7870,9 @@ export default function App() {
             disabled={loading || marketDataStatus === 'loading'}
             userEmail={user?.email}
             onSignOut={() => signOut()}
+            planLabel={usage?.planLabel || null}
+            planId={usage?.plan || null}
+            planUnlimited={!!usage?.unlimited}
             selfLearningSlot={
               <div className="space-y-3">
                 {(Object.keys(modelWeights) as (keyof typeof modelWeights)[]).map((key) => (

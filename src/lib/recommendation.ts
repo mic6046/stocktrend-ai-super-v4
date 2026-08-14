@@ -52,8 +52,8 @@ export type StockRecommendation = {
   error?: string;
 };
 
-function dirFromScore(score: number | null | undefined, up: string, down: string, mid = 'Neutral'): string {
-  if (score == null || !Number.isFinite(score)) return '—';
+function dirFromScore(score: number | null | undefined, up: string, down: string, mid = 'Flat'): string {
+  if (score == null || !Number.isFinite(score)) return mid;
   if (score >= 60) return up;
   if (score < 40) return down;
   return mid;
@@ -63,23 +63,34 @@ function buildBoardMetrics(
   input: QuantumEngineInput,
   engine: QuantumEngineOutput
 ): NonNullable<StockRecommendation['boardMetrics']> {
-  const rsi = input.technical?.rsi != null && Number.isFinite(input.technical.rsi) ? Number(input.technical.rsi) : null;
-  const smart =
-    input.smartMoneyScore != null
-      ? dirFromScore(input.smartMoneyScore, '↑', '↓')
-      : dirFromScore(input.whaleScore ?? engine.componentScores.whale, '↑', '↓');
+  const rsi =
+    input.technical?.rsi != null && Number.isFinite(Number(input.technical.rsi))
+      ? Number(input.technical.rsi)
+      : null;
+
+  const smartScore =
+    input.smartMoneyScore != null && Number.isFinite(Number(input.smartMoneyScore))
+      ? Number(input.smartMoneyScore)
+      : input.whaleScore != null && Number.isFinite(Number(input.whaleScore))
+        ? Number(input.whaleScore)
+        : Number(engine.componentScores?.whale);
+  const smart = dirFromScore(smartScore, 'Bull', 'Bear', 'Flat');
+
+  const instScore =
+    input.institutionalScore != null && Number.isFinite(Number(input.institutionalScore))
+      ? Number(input.institutionalScore)
+      : null;
   const flow =
     input.fundFlowBias === 'inflow'
-      ? '↑ Inflow'
+      ? 'Inflow'
       : input.fundFlowBias === 'outflow'
-        ? '↓ Outflow'
-        : dirFromScore(input.institutionalScore, '↑ Inflow', '↓ Outflow');
-  const mom = dirFromScore(engine.componentScores.momentum, 'Bullish', 'Bearish');
-  const trendRaw = input.technical?.trend || engine.chartStance || '—';
+        ? 'Outflow'
+        : dirFromScore(instScore, 'Inflow', 'Outflow', 'Flat');
+
+  const mom = dirFromScore(engine.componentScores?.momentum, 'Bull', 'Bear', 'Flat');
+  const trendRaw = input.technical?.trend || engine.chartStance || 'flat';
   const technicalTrend =
-    typeof trendRaw === 'string'
-      ? trendRaw.replace(/_/g, ' ')
-      : String(trendRaw);
+    typeof trendRaw === 'string' ? trendRaw.replace(/_/g, ' ') : String(trendRaw);
 
   return {
     rsi,

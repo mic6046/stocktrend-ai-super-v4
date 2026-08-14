@@ -2,54 +2,12 @@ import React, { useState } from 'react';
 import { Check, Loader2, Sparkles, Rocket, Zap, Newspaper, Info, Gem } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { startStripeCheckout, type SubscriptionPlan } from '../lib/subscription';
+import { PRICING_PLANS } from '../lib/pricingPlans';
 import { cn } from '../lib/utils';
 import { LegalLinks } from './LegalDocs';
 import { openLegalDoc } from '../lib/legal';
 
-const PLANS: Array<{
-  id: SubscriptionPlan;
-  name: string;
-  price: string;
-  period: string;
-  blurb: string;
-  features: string[];
-  highlight?: boolean;
-  badge?: string;
-  icon: 'rocket' | 'gem';
-}> = [
-  {
-    id: 'monthly',
-    name: 'Basic',
-    price: 'RM 199',
-    period: '/month',
-    blurb: 'Focused watchlist use with fair daily AI limits.',
-    icon: 'rocket',
-    features: [
-      '10 AI stock analyses per day',
-      '10 AI news summaries per day',
-      'Full charts, alerts, score & advisory',
-      'Cloud sync across devices',
-      'Cancel anytime',
-    ],
-  },
-  {
-    id: 'pro_monthly',
-    name: 'Pro',
-    price: 'RM 349',
-    period: '/month',
-    blurb: 'For active traders who need a wider daily AI runway.',
-    highlight: true,
-    badge: 'Most popular',
-    icon: 'gem',
-    features: [
-      '30 AI stock analyses per day',
-      '30 AI news summaries per day',
-      'Everything in Basic',
-      'Same overage rates & AI pack',
-      'Cancel anytime',
-    ],
-  },
-];
+const PLANS = PRICING_PLANS;
 
 const QUOTA_COMPARE = [
   {

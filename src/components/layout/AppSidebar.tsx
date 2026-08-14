@@ -20,6 +20,10 @@ import { cn } from '../../lib/utils';
 import { LegalLinks } from '../LegalDocs';
 import { openLegalDoc } from '../../lib/legal';
 import type { AppPage } from './navTypes';
+import { SidebarAiChat } from './SidebarAiChat';
+import { SubscriptionPlansSummary } from '../SubscriptionPlansSummary';
+import type { AssistantChatContext } from '../../lib/assistantChatApi';
+import type { UsageSnapshot } from '../../lib/usageApi';
 
 const NAV_ITEMS: { id: AppPage; label: string; icon: React.ElementType }[] = [
   { id: 'DASHBOARD', label: 'Dashboard', icon: LayoutDashboard },
@@ -46,6 +50,13 @@ type AppSidebarProps = {
   onSignOut: () => void;
   authLoading?: boolean;
   usageSlot?: React.ReactNode;
+  chatContext: AssistantChatContext;
+  onChatUsageUpdate?: (usage: UsageSnapshot) => void;
+  /** Current subscription plan for the sign-bar plans strip */
+  planLabel?: string | null;
+  planId?: string | null;
+  planUnlimited?: boolean;
+  onOpenPlans?: () => void;
 };
 
 export function AppSidebar({
@@ -61,6 +72,12 @@ export function AppSidebar({
   onSignOut,
   authLoading,
   usageSlot,
+  chatContext,
+  onChatUsageUpdate,
+  planLabel,
+  planId,
+  planUnlimited,
+  onOpenPlans,
 }: AppSidebarProps) {
   const go = (page: AppPage) => {
     onNavigate(page);
@@ -143,7 +160,12 @@ export function AppSidebar({
           })}
         </nav>
 
-        <div className={cn('border-t border-white/5 shrink-0 space-y-2', isCollapsed ? 'p-2' : 'p-3')}>
+        <div
+          className={cn(
+            'border-t border-white/5 shrink-0 space-y-2 overflow-y-auto max-h-[55vh]',
+            isCollapsed ? 'p-2' : 'p-3'
+          )}
+        >
           {!isCollapsed && userEmail && (
             <div className="px-1 space-y-1.5">
               <div className="flex items-center gap-2 min-w-0">
@@ -155,6 +177,33 @@ export function AppSidebar({
               {usageSlot && <div className="overflow-hidden">{usageSlot}</div>}
             </div>
           )}
+
+          <SubscriptionPlansSummary
+            variant="sidebar"
+            collapsed={isCollapsed}
+            currentPlanLabel={planLabel}
+            currentPlanId={planId}
+            unlimited={planUnlimited}
+            onExpand={() => onCollapsedChange(false)}
+            onCta={() => {
+              onOpenPlans?.();
+              onMobileOpenChange(false);
+            }}
+            ctaLabel="Manage plan"
+          />
+
+          <SidebarAiChat
+            activePage={activePage}
+            collapsed={isCollapsed}
+            onExpandSidebar={() => onCollapsedChange(false)}
+            userEmail={userEmail}
+            onSignIn={() => {
+              onSignIn();
+              onMobileOpenChange(false);
+            }}
+            chatContext={chatContext}
+            onUsageUpdate={onChatUsageUpdate}
+          />
 
           {!userEmail ? (
             <button

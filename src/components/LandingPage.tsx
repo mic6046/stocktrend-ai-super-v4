@@ -4,10 +4,15 @@ import { AuthPanel } from './AuthPanel';
 import { LegalLinks } from './LegalDocs';
 import { openLegalDoc } from '../lib/legal';
 import { useAuth } from '../lib/auth';
+import { SubscriptionPlansSummary } from './SubscriptionPlansSummary';
 
 /** Public front page — the only signed-out entry. Dashboard never mounts here. */
 export function LandingPage() {
   const { accessDenied, clearAccessDenied } = useAuth();
+
+  const scrollToSignIn = () => {
+    document.getElementById('signin')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
 
   return (
     <div className="min-h-screen bg-[#050505] text-[#e0e0e0] relative overflow-hidden flex flex-col">
@@ -22,7 +27,7 @@ export function LandingPage() {
         }}
       />
 
-      <header className="relative z-10 flex items-center px-4 sm:px-10 py-4 sm:py-5 pt-[max(1rem,env(safe-area-inset-top))]">
+      <header className="relative z-10 flex items-center justify-between gap-3 px-4 sm:px-10 py-4 sm:py-5 pt-[max(1rem,env(safe-area-inset-top))]">
         <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
           <div className="w-9 h-9 bg-emerald-500 rounded-lg flex items-center justify-center shadow-[0_0_18px_rgba(16,185,129,0.45)] shrink-0">
             <Activity className="w-5 h-5 text-black" />
@@ -31,10 +36,16 @@ export function LandingPage() {
             QUANTUM<span className="text-emerald-500">NODE</span>
           </span>
         </div>
+        <a
+          href="#plans"
+          className="shrink-0 rounded-lg border border-emerald-500/35 bg-emerald-500/10 px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-emerald-300 hover:bg-emerald-500/20 cursor-pointer"
+        >
+          Plans
+        </a>
       </header>
 
-      <main className="relative z-10 flex-1 flex items-center justify-center px-4 sm:px-6 pb-10 sm:pb-16">
-        <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)] gap-10 lg:gap-12 items-center">
+      <main className="relative z-10 flex-1 flex flex-col items-center px-4 sm:px-6 pb-10 sm:pb-16">
+        <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)] gap-10 lg:gap-12 items-center flex-1 py-4 sm:py-8">
           <div id="signin" className="w-full max-w-md mx-auto lg:mx-0 text-center lg:text-left scroll-mt-24">
             <p className="text-[11px] font-mono uppercase tracking-[0.28em] text-emerald-400 mb-3 sm:mb-4">
               AI equity terminal
@@ -84,6 +95,14 @@ export function LandingPage() {
               />
             </div>
           </section>
+        </div>
+
+        <div className="w-full max-w-6xl mt-8 sm:mt-12 pt-8 sm:pt-10 border-t border-white/5">
+          <SubscriptionPlansSummary
+            variant="landing"
+            onCta={scrollToSignIn}
+            ctaLabel="Sign in to subscribe"
+          />
         </div>
       </main>
 

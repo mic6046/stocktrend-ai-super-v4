@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bot, TrendingUp, TrendingDown, Minus, RefreshCw, Trash2 } from 'lucide-react';
+import { Bot, TrendingUp, TrendingDown, RefreshCw, Trash2 } from 'lucide-react';
 import { GlassCard, SectionLabel } from '../analysis/GlassCard';
 import { cn } from '../../lib/utils';
 
@@ -40,13 +40,14 @@ type AiSignalsPageProps = {
 
 function DirIcon({ v }: { v?: string }) {
   const s = (v || '').toLowerCase();
+  if (!s || s === '—' || s === '-' || s === 'flat' || s === 'neutral') return null;
   if (s.includes('up') || s.includes('bull') || s.includes('inflow') || s === '↑') {
     return <TrendingUp className="h-2.5 w-2.5 text-emerald-400 shrink-0" />;
   }
   if (s.includes('down') || s.includes('bear') || s.includes('outflow') || s === '↓') {
     return <TrendingDown className="h-2.5 w-2.5 text-rose-400 shrink-0" />;
   }
-  return <Minus className="h-2.5 w-2.5 text-gray-500 shrink-0" />;
+  return null;
 }
 
 export function AiSignalsPage({
@@ -157,22 +158,22 @@ export function AiSignalsPage({
                   </div>
 
                   <div className="mt-2 flex flex-wrap gap-1">
-                    <Chip label="Trend" value={s.trend || '—'} tip={EXPLAIN.technicalTrend} />
+                    <Chip label="Trend" value={s.trend || 'Flat'} tip={EXPLAIN.technicalTrend} />
                     <Chip
                       label="SM"
-                      value={s.smartMoney || '—'}
+                      value={s.smartMoney && s.smartMoney !== '—' ? s.smartMoney : 'Flat'}
                       icon={<DirIcon v={s.smartMoney} />}
                       tip={EXPLAIN.smartMoney}
                     />
                     <Chip
                       label="Flow"
-                      value={s.fundFlow || '—'}
+                      value={s.fundFlow && s.fundFlow !== '—' ? s.fundFlow : 'Flat'}
                       icon={<DirIcon v={s.fundFlow} />}
                       tip={EXPLAIN.fundFlow}
                     />
                     <Chip
                       label="RSI"
-                      value={s.rsi != null ? String(Math.round(s.rsi)) : '—'}
+                      value={s.rsi != null && Number.isFinite(s.rsi) ? String(Math.round(s.rsi)) : 'n/a'}
                       tip={EXPLAIN.rsi}
                     />
                     <Chip label="Risk" value={s.risk || '—'} tip={EXPLAIN.risk} />
