@@ -15,10 +15,13 @@ import {
   LogOut,
   LogIn,
   Activity,
+  BookOpen,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { LegalLinks } from '../LegalDocs';
+import { ManualLink } from '../UserManual';
 import { openLegalDoc } from '../../lib/legal';
+import { openUserManual } from '../../lib/userManual';
 import type { AppPage } from './navTypes';
 import { SubscriptionPlansSummary } from '../SubscriptionPlansSummary';
 import { planDisplayName } from '../../lib/pricingPlans';
@@ -311,19 +314,36 @@ export function AppSidebar({
           )}
 
           {!isCollapsed ? (
-            <LegalLinks
-              className="flex-wrap gap-x-2.5 gap-y-1 px-0.5 text-[9px]"
-              linkClassName="text-gray-600 hover:text-gray-300 transition-colors cursor-pointer"
-            />
+            <div className="space-y-1.5 px-0.5">
+              <ManualLink
+                className="inline-flex items-center gap-1.5 text-[10px] font-medium text-gray-500 hover:text-emerald-300 transition-colors cursor-pointer"
+                label="User Manual"
+              />
+              <LegalLinks
+                className="flex-wrap gap-x-2.5 gap-y-1 text-[9px]"
+                linkClassName="text-gray-600 hover:text-gray-300 transition-colors cursor-pointer"
+              />
+            </div>
           ) : (
-            <button
-              type="button"
-              onClick={() => openLegalDoc('risk')}
-              className="w-full text-center text-[8px] text-gray-600 hover:text-gray-300 leading-tight px-0.5 py-1 cursor-pointer"
-              title="Risk Warning · Terms of Use · Privacy Policy"
-            >
-              Legal
-            </button>
+            <div className="flex flex-col gap-1">
+              <button
+                type="button"
+                onClick={() => openUserManual()}
+                className="w-full inline-flex items-center justify-center min-h-[28px] text-gray-600 hover:text-emerald-300 cursor-pointer"
+                title="User Manual"
+                aria-label="User Manual"
+              >
+                <BookOpen className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => openLegalDoc('risk')}
+                className="w-full text-center text-[8px] text-gray-600 hover:text-gray-300 leading-tight px-0.5 py-1 cursor-pointer"
+                title="Risk Warning · Terms of Use · Privacy Policy"
+              >
+                Legal
+              </button>
+            </div>
           )}
         </div>
       </div>

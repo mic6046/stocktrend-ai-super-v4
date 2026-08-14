@@ -26,6 +26,7 @@ import {registerSW} from 'virtual:pwa-register';
 import { AuthProvider } from './lib/auth';
 import { SubscriptionGate } from './components/SubscriptionGate';
 import { LegalHost } from './components/LegalDocs';
+import { ManualHost } from './components/UserManual';
 import { ProductAppPreview } from './components/ProductAppPreview';
 import { PwaInstallPrompt } from './components/PwaInstallPrompt';
 import './index.css';
@@ -51,18 +52,20 @@ createRoot(document.getElementById('root')!).render(
     ) : (
       <AuthProvider>
         <LegalHost>
-          <SubscriptionGate>
-            <Suspense
-              fallback={
-                <div className="min-h-screen bg-[#050505] flex items-center justify-center text-gray-400">
-                  <div className="h-6 w-6 animate-spin rounded-full border-2 border-emerald-400 border-t-transparent" />
-                </div>
-              }
-            >
-              <App />
-            </Suspense>
-          </SubscriptionGate>
-          <PwaInstallPrompt />
+          <ManualHost>
+            <SubscriptionGate>
+              <Suspense
+                fallback={
+                  <div className="min-h-screen bg-[#050505] flex items-center justify-center text-gray-400">
+                    <div className="h-6 w-6 animate-spin rounded-full border-2 border-emerald-400 border-t-transparent" />
+                  </div>
+                }
+              >
+                <App />
+              </Suspense>
+            </SubscriptionGate>
+            <PwaInstallPrompt />
+          </ManualHost>
         </LegalHost>
       </AuthProvider>
     )}

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Settings as SettingsIcon, Shield, CreditCard, Check, Loader2, Gem, Rocket, Zap } from 'lucide-react';
+import { Settings as SettingsIcon, Shield, CreditCard, Check, Loader2, Gem, Rocket, Zap, BookOpen } from 'lucide-react';
 import { GlassCard, SectionLabel } from '../analysis/GlassCard';
 import { MarketDataRefreshBar } from '../analysis/MarketDataRefreshBar';
 import type { MarketDataStatus, RefreshMode, AutoRefreshIntervalSec } from '../../lib/marketDataRefresh';
@@ -7,6 +7,7 @@ import { OVERAGE_OFFERS, PRICING_PLANS, planDisplayName } from '../../lib/pricin
 import { startStripeCheckout, type SubscriptionPlan } from '../../lib/subscription';
 import { startOverageCheckout, type OverageProduct } from '../../lib/usageApi';
 import { openLegalDoc } from '../../lib/legal';
+import { openUserManual } from '../../lib/userManual';
 import { cn } from '../../lib/utils';
 
 type SettingsPageProps = {
@@ -97,7 +98,32 @@ export function SettingsPage({
         <p className="mt-1 text-[13px] text-gray-500">
           Market refresh, subscription, calibration, and account controls in one place.
         </p>
+        <button
+          type="button"
+          onClick={() => openUserManual()}
+          className="mt-3 inline-flex items-center gap-2 min-h-[40px] rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3.5 text-[12px] font-semibold text-emerald-200 hover:bg-emerald-500/15 cursor-pointer"
+        >
+          <BookOpen className="h-3.5 w-3.5" />
+          Open User Manual
+        </button>
       </div>
+
+      <GlassCard>
+        <SectionLabel icon={<BookOpen className="w-3.5 h-3.5 text-emerald-400" />}>
+          Help & manual
+        </SectionLabel>
+        <p className="mt-2 text-[12px] text-gray-400 leading-relaxed">
+          Step-by-step guide for Dashboard, Find Trades, Watchlist sync across devices, Analysis credits,
+          Alerts, and Settings.
+        </p>
+        <button
+          type="button"
+          onClick={() => openUserManual()}
+          className="mt-3 min-h-[40px] rounded-xl border border-white/10 bg-white/5 px-4 text-[12px] font-bold text-white hover:bg-white/10 cursor-pointer"
+        >
+          Read the User Manual
+        </button>
+      </GlassCard>
 
       <GlassCard>
         <SectionLabel icon={<CreditCard className="w-3.5 h-3.5 text-amber-400" />}>

@@ -2,6 +2,7 @@ import React from 'react';
 import { Activity, X, ShieldAlert } from 'lucide-react';
 import { AuthPanel } from './AuthPanel';
 import { LegalLinks } from './LegalDocs';
+import { ManualLink } from './UserManual';
 import { openLegalDoc } from '../lib/legal';
 import { useAuth } from '../lib/auth';
 import { SubscriptionPlansSummary } from './SubscriptionPlansSummary';
@@ -114,7 +115,10 @@ export function LandingPage() {
 
       <footer className="relative z-10 px-4 sm:px-10 py-5 sm:py-6 border-t border-white/5 flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px] text-gray-600 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
         <span>Quantum Node</span>
-        <LegalLinks />
+        <nav className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
+          <ManualLink />
+          <LegalLinks />
+        </nav>
       </footer>
 
       {accessDenied && (
