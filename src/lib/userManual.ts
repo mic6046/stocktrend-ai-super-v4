@@ -64,15 +64,15 @@ export const MANUAL_SECTIONS: ManualSection[] = [
       'Opening a result loads full Analysis for that ticker.',
     ],
   },
-  {
-    id: 'signals',
-    title: 'AI Signals',
-    body: [
-      'Stores recent scan rows (opportunity / watch / risk) for quick review.',
-      'Use Update to refresh prices and signals for listed names. Delete removes a row from the cache.',
-      'Signal rows sync to your account when you are signed in with an active plan.',
-    ],
-  },
+      {
+        id: 'signals',
+        title: 'AI Signals',
+        body: [
+          'Stores recent scan rows (opportunity / watch / risk) for quick review.',
+          'Use Update to refresh prices and signals for listed names. Delete removes a row from the cache.',
+          'AI Signals sync across devices on the same signed-in account (Android ↔ PC). Use the Sync button if a phone session was backgrounded.',
+        ],
+      },
   {
     id: 'watchlist',
     title: 'Watchlist',

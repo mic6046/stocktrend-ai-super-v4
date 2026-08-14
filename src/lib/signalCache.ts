@@ -16,45 +16,138 @@ export type CachedSignalRow = {
   price?: number;
   changePct?: number;
   bucket?: 'opportunity' | 'watch' | 'risk';
+  /** Per-row freshness for cross-device merge */
+  updatedAt?: number;
 };
 
 const KEY = 'qn-signal-cache-v1';
+const UPDATED_KEY = 'qn-signal-cache-updated-at';
+
+export function normalizeSignalRow(raw: Partial<CachedSignalRow> | null | undefined): CachedSignalRow | null {
+  if (!raw || typeof raw.ticker !== 'string') return null;
+  const ticker = String(raw.ticker).trim().toUpperCase();
+  if (!ticker) return null;
+  const row: CachedSignalRow = { ticker };
+  if (raw.name) row.name = String(raw.name);
+  if (raw.recommendation) row.recommendation = String(raw.recommendation);
+  if (typeof raw.confidence === 'number' && Number.isFinite(raw.confidence)) row.confidence = raw.confidence;
+  if (raw.trend) row.trend = String(raw.trend);
+  if (raw.smartMoney) row.smartMoney = String(raw.smartMoney);
+  if (raw.fundFlow) row.fundFlow = String(raw.fundFlow);
+  if (raw.rsi === null) row.rsi = null;
+  else if (typeof raw.rsi === 'number' && Number.isFinite(raw.rsi)) row.rsi = raw.rsi;
+  if (raw.momentum) row.momentum = String(raw.momentum);
+  if (raw.technicalTrend) row.technicalTrend = String(raw.technicalTrend);
+  if (raw.risk) row.risk = String(raw.risk);
+  if (typeof raw.price === 'number' && Number.isFinite(raw.price)) row.price = raw.price;
+  if (typeof raw.changePct === 'number' && Number.isFinite(raw.changePct)) row.changePct = raw.changePct;
+  if (raw.bucket === 'opportunity' || raw.bucket === 'watch' || raw.bucket === 'risk') row.bucket = raw.bucket;
+  if (typeof raw.updatedAt === 'number' && Number.isFinite(raw.updatedAt)) row.updatedAt = raw.updatedAt;
+  return row;
+}
+
+export function normalizeSignalCache(rows: unknown): CachedSignalRow[] {
+  if (!Array.isArray(rows)) return [];
+  const map = new Map<string, CachedSignalRow>();
+  for (const raw of rows) {
+    const row = normalizeSignalRow(raw as Partial<CachedSignalRow>);
+    if (!row) continue;
+    map.set(row.ticker, row);
+  }
+  return Array.from(map.values()).slice(0, 60);
+}
+
+export function signalCacheFingerprint(rows: CachedSignalRow[]): string {
+  return JSON.stringify(
+    normalizeSignalCache(rows).map((r) => ({
+      ticker: r.ticker,
+      recommendation: r.recommendation || '',
+      confidence: r.confidence ?? null,
+      bucket: r.bucket || '',
+      price: r.price ?? null,
+      updatedAt: r.updatedAt ?? null,
+    }))
+  );
+}
+
+function rowScore(r: CachedSignalRow): number {
+  let s = typeof r.confidence === 'number' ? r.confidence : 0;
+  if (r.recommendation) s += 5;
+  if (r.bucket) s += 3;
+  if (r.price != null) s += 2;
+  if (r.updatedAt) s += Math.min(r.updatedAt / 1e13, 1);
+  return s;
+}
+
+/** Union by ticker; keep the richer / newer row. */
+export function mergeSignalCaches(a: CachedSignalRow[], b: CachedSignalRow[]): CachedSignalRow[] {
+  const map = new Map<string, CachedSignalRow>();
+  for (const list of [normalizeSignalCache(a), normalizeSignalCache(b)]) {
+    for (const row of list) {
+      const prev = map.get(row.ticker);
+      if (!prev) {
+        map.set(row.ticker, row);
+        continue;
+      }
+      const prevAt = prev.updatedAt || 0;
+      const nextAt = row.updatedAt || 0;
+      if (nextAt > prevAt || (nextAt === prevAt && rowScore(row) >= rowScore(prev))) {
+        map.set(row.ticker, { ...prev, ...row, ticker: row.ticker });
+      } else {
+        map.set(row.ticker, { ...row, ...prev, ticker: prev.ticker });
+      }
+    }
+  }
+  return Array.from(map.values()).slice(0, 60);
+}
+
+export function loadLocalSignalCacheUpdatedAt(): number {
+  try {
+    const n = Number(localStorage.getItem(UPDATED_KEY) || '0');
+    return Number.isFinite(n) ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function saveLocalSignalCacheUpdatedAt(ts: number) {
+  try {
+    localStorage.setItem(UPDATED_KEY, String(ts));
+  } catch {
+    /* ignore */
+  }
+}
 
 export function loadSignalCache(): CachedSignalRow[] {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    return normalizeSignalCache(JSON.parse(raw));
   } catch {
     return [];
   }
 }
 
 export function saveSignalCache(rows: CachedSignalRow[], opts?: { silent?: boolean }) {
+  const normalized = normalizeSignalCache(rows).map((r) => ({
+    ...r,
+    updatedAt: r.updatedAt || Date.now(),
+  }));
   try {
-    localStorage.setItem(KEY, JSON.stringify(rows.slice(0, 60)));
+    localStorage.setItem(KEY, JSON.stringify(normalized.slice(0, 60)));
   } catch {
     /* ignore */
   }
-  if (!opts?.silent) notifyAccountDataChanged('signals');
+  if (!opts?.silent) {
+    saveLocalSignalCacheUpdatedAt(Date.now());
+    notifyAccountDataChanged('signals');
+  }
 }
 
 export function mergeSignalCache(rows: CachedSignalRow[]) {
-  const map = new Map<string, CachedSignalRow>();
-  for (const r of loadSignalCache()) map.set(r.ticker.toUpperCase(), r);
-  for (const r of rows) {
-    if (!r?.ticker) continue;
-    const key = r.ticker.toUpperCase();
-    const prev = map.get(key) || { ticker: key };
-    const next: CachedSignalRow = { ...prev, ticker: key };
-    for (const [k, v] of Object.entries(r) as [keyof CachedSignalRow, CachedSignalRow[keyof CachedSignalRow]][]) {
-      if (k === 'ticker') continue;
-      if (v !== undefined) (next as any)[k] = v;
-    }
-    map.set(key, next);
-  }
-  const out = Array.from(map.values());
+  const now = Date.now();
+  const stamped = rows.map((r) => ({ ...r, updatedAt: r.updatedAt || now }));
+  const out = mergeSignalCaches(loadSignalCache(), stamped);
   saveSignalCache(out);
   return out;
 }

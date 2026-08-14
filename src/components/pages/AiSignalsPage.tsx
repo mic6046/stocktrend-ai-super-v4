@@ -1,7 +1,8 @@
 import React from 'react';
-import { Bot, TrendingUp, TrendingDown, RefreshCw, Trash2 } from 'lucide-react';
+import { Bot, TrendingUp, TrendingDown, RefreshCw, Trash2, Cloud, CloudOff, Loader2 } from 'lucide-react';
 import { GlassCard, SectionLabel } from '../analysis/GlassCard';
 import { cn } from '../../lib/utils';
+import type { SignalSyncStatus } from '../../lib/signalCloudSync';
 
 export type AiSignalRow = {
   ticker: string;
@@ -36,6 +37,8 @@ type AiSignalsPageProps = {
   updating?: boolean;
   updateProgress?: { done: number; total: number } | null;
   onRefreshHint?: () => void;
+  cloudSyncStatus?: SignalSyncStatus;
+  onSyncNow?: () => void;
 };
 
 function DirIcon({ v }: { v?: string }) {
@@ -58,6 +61,8 @@ export function AiSignalsPage({
   updating = false,
   updateProgress = null,
   onRefreshHint,
+  cloudSyncStatus = 'idle',
+  onSyncNow,
 }: AiSignalsPageProps) {
   return (
     <div className="space-y-4 min-w-0">
@@ -68,6 +73,35 @@ export function AiSignalsPage({
           <p className="mt-1 text-[13px] text-gray-500 max-w-2xl">
             Each card translates AI output into a clear recommendation. Tap a stock for the full analysis workspace.
           </p>
+          <p
+            className={cn(
+              'mt-1.5 text-[10px] font-mono inline-flex items-center gap-1',
+              cloudSyncStatus === 'synced'
+                ? 'text-emerald-400/90'
+                : cloudSyncStatus === 'error'
+                  ? 'text-rose-400'
+                  : cloudSyncStatus === 'saving' || cloudSyncStatus === 'connecting'
+                    ? 'text-cyan-300'
+                    : 'text-gray-500'
+            )}
+          >
+            {cloudSyncStatus === 'error' ? (
+              <CloudOff className="h-3 w-3" />
+            ) : cloudSyncStatus === 'saving' || cloudSyncStatus === 'connecting' ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Cloud className="h-3 w-3" />
+            )}
+            {cloudSyncStatus === 'synced'
+              ? 'Cloud sync on · same account on Android & PC'
+              : cloudSyncStatus === 'saving'
+                ? 'Saving signals to cloud…'
+                : cloudSyncStatus === 'connecting'
+                  ? 'Connecting cloud…'
+                  : cloudSyncStatus === 'error'
+                    ? 'Cloud sync error — tap Sync'
+                    : 'Cloud sync idle — sign in with active plan'}
+          </p>
           {updating && updateProgress && updateProgress.total > 0 && (
             <p className="mt-1.5 text-[11px] font-mono text-cyan-300/90">
               Updating {updateProgress.done}/{updateProgress.total}…
@@ -75,6 +109,17 @@ export function AiSignalsPage({
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {onSyncNow && (
+            <button
+              type="button"
+              onClick={onSyncNow}
+              disabled={cloudSyncStatus === 'saving' || cloudSyncStatus === 'connecting'}
+              className="min-h-[40px] inline-flex items-center gap-1.5 rounded-xl px-3.5 text-[11px] font-bold uppercase tracking-wide cursor-pointer border border-cyan-500/35 text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50"
+            >
+              <Cloud className="h-3.5 w-3.5" />
+              Sync
+            </button>
+          )}
           {onUpdate && (
             <button
               type="button"

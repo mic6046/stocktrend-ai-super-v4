@@ -46,6 +46,7 @@ import { findATrade } from './lib/findATrade';
 import { POPULAR_UNIVERSE } from './lib/suggestTradeUniverses';
 import { loadWatchlist } from './lib/watchlistStore';
 import { startWatchlistCloudSync, type WatchlistSyncStatus } from './lib/watchlistCloudSync';
+import { startSignalCloudSync, type SignalSyncStatus } from './lib/signalCloudSync';
 import { loadPortfolio, savePortfolio } from './lib/portfolioStore';
 import { subscribeAccountDataChanged, notifyAccountDataChanged } from './lib/accountSync';
 import {
@@ -1115,6 +1116,8 @@ export default function App() {
   const lastWatchlistFpRef = useRef('');
   const [watchlistSyncStatus, setWatchlistSyncStatus] = useState<WatchlistSyncStatus>('idle');
   const watchlistSyncRef = useRef<ReturnType<typeof startWatchlistCloudSync> | null>(null);
+  const [signalSyncStatus, setSignalSyncStatus] = useState<SignalSyncStatus>('idle');
+  const signalSyncRef = useRef<ReturnType<typeof startSignalCloudSync> | null>(null);
   const [usage, setUsage] = useState<UsageSnapshot | null>(null);
   const [quotaBanner, setQuotaBanner] = useState<{ kind: 'analysis' | 'news'; message: string } | null>(null);
   const [ticker, setTicker] = useState('');
@@ -2608,6 +2611,34 @@ export default function App() {
     };
   }, [syncDocId, accessState]);
 
+  // Dedicated AI Signals sync (phone ↔ Android/PC).
+  useEffect(() => {
+    if (!syncDocId || accessState !== 'active') {
+      signalSyncRef.current?.stop();
+      signalSyncRef.current = null;
+      setSignalSyncStatus('idle');
+      return;
+    }
+    const handles = startSignalCloudSync(syncDocId, {
+      onStatus: (s) => setSignalSyncStatus(s),
+    });
+    signalSyncRef.current = handles;
+    return () => {
+      handles.stop();
+      if (signalSyncRef.current === handles) signalSyncRef.current = null;
+    };
+  }, [syncDocId, accessState]);
+
+  // Keep React signalCache in sync when cloud applies remote rows
+  useEffect(() => {
+    return subscribeAccountDataChanged((kind, source) => {
+      if (source !== 'remote') return;
+      if (kind === 'signals' || kind === 'all') {
+        setSignalCache(loadSignalCache());
+      }
+    });
+  }, []);
+
   // Watchlist cloud sync is handled by startWatchlistCloudSync (phone ↔ PC).
   useEffect(() => {
     if (!syncDocId || accessState !== 'active') {
@@ -2642,17 +2673,12 @@ export default function App() {
           return;
         }
 
-        // While a full-blob save is in flight, still apply portfolio/signals.
-        // Watchlist is owned by startWatchlistCloudSync.
+        // While a full-blob save is in flight, still apply portfolio.
+        // Watchlist + AI Signals have dedicated sync modules.
         if (suppressCloudSaveRef.current) {
           if (Array.isArray(cloud.portfolio)) {
             savePortfolio(cloud.portfolio, { silent: true });
             notifyAccountDataChanged('portfolio', 'remote');
-          }
-          if (Array.isArray(cloud.signalCache)) {
-            saveSignalCache(cloud.signalCache, { silent: true });
-            setSignalCache(cloud.signalCache);
-            notifyAccountDataChanged('signals', 'remote');
           }
           lastSyncFingerprintRef.current = fp;
           if (!cloudHydratedRef.current) {
@@ -2712,16 +2738,11 @@ export default function App() {
           }
         }
 
-        // Watchlist owned by startWatchlistCloudSync
+        // Watchlist + AI Signals owned by dedicated cloud sync modules
 
         if (Array.isArray(cloud.portfolio)) {
           savePortfolio(cloud.portfolio, { silent: true });
           if (isLiveRemote) notifyAccountDataChanged('portfolio', 'remote');
-        }
-        if (Array.isArray(cloud.signalCache)) {
-          saveSignalCache(cloud.signalCache, { silent: true });
-          setSignalCache(cloud.signalCache);
-          if (isLiveRemote) notifyAccountDataChanged('signals', 'remote');
         }
         if (cloud.prefs) {
           if (cloud.prefs.refreshMode === 'auto' || cloud.prefs.refreshMode === 'manual') {
@@ -2799,7 +2820,6 @@ export default function App() {
               trendlines: Array.isArray(cloud.trendlines) ? cloud.trendlines : storedTrends,
               annotations: Array.isArray(cloud.annotations) ? cloud.annotations : storedAnnotations,
               portfolio: Array.isArray(cloud.portfolio) ? cloud.portfolio : loadPortfolio(),
-              signalCache: Array.isArray(cloud.signalCache) ? cloud.signalCache : loadSignalCache(),
               prefs: {
                 refreshMode: loadRefreshMode(),
                 autoRefreshIntervalSec: loadAutoRefreshIntervalSec(),
@@ -2913,7 +2933,6 @@ export default function App() {
         trendlines,
         annotations,
         portfolio: loadPortfolio(),
-        signalCache: loadSignalCache(),
         prefs: {
           refreshMode,
           autoRefreshIntervalSec,
@@ -2934,7 +2953,6 @@ export default function App() {
     modelWeights,
     trendlines,
     annotations,
-    signalCache,
     refreshMode,
     autoRefreshIntervalSec,
     sidebarCollapsed,
@@ -2948,8 +2966,8 @@ export default function App() {
       // Remote applies already wrote localStorage — refresh UI only, do not echo back
       if (source === 'remote') return;
 
-      // Watchlist cloud push is owned by startWatchlistCloudSync
-      if (kind === 'portfolio' || kind === 'signals' || kind === 'prefs' || kind === 'all') {
+      // Watchlist + AI Signals cloud push owned by dedicated sync modules
+      if (kind === 'portfolio' || kind === 'prefs' || kind === 'all') {
         window.setTimeout(() => {
           if (suppressCloudSaveRef.current || !cloudHydratedRef.current) return;
           pushAccountSync({
@@ -2958,9 +2976,7 @@ export default function App() {
             modelWeights,
             trendlines,
             annotations,
-            // omit watchlist — dedicated sync owns it
             portfolio: loadPortfolio(),
-            signalCache: loadSignalCache(),
             prefs: {
               refreshMode: loadRefreshMode(),
               autoRefreshIntervalSec: loadAutoRefreshIntervalSec(),
@@ -7959,7 +7975,7 @@ export default function App() {
             <div className="flex flex-col md:items-end gap-2 text-center md:text-right">
               <span className="text-gray-500">
                 Quantum Node · Powered by Google Gemini ·{' '}
-                <span className="font-mono text-emerald-500/70">wl-phone-0814c</span>
+                <span className="font-mono text-emerald-500/70">sig-phone-0814d</span>
               </span>
               <LegalLinks className="justify-center md:justify-end" />
             </div>
@@ -8064,6 +8080,8 @@ export default function App() {
             updateProgress={signalsUpdateProgress}
             onDeleteSignal={(sym) => setSignalCache(removeSignalCache(sym))}
             onRefreshHint={() => setActivePage('FIND_TRADES')}
+            cloudSyncStatus={signalSyncStatus}
+            onSyncNow={() => void signalSyncRef.current?.pullNow()}
           />
         )}
 
