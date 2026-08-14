@@ -1,8 +1,13 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { Bot, TrendingUp, TrendingDown, RefreshCw, Trash2, Cloud, CloudOff, Loader2 } from 'lucide-react';
 import { GlassCard, SectionLabel } from '../analysis/GlassCard';
 import { cn } from '../../lib/utils';
 import type { SignalSyncStatus } from '../../lib/signalCloudSync';
+import {
+  WATCHLIST_MARKETS,
+  classifyTickerMarket,
+  type WatchlistMarket,
+} from '../../lib/dashboardMarket';
 
 export type AiSignalRow = {
   ticker: string;
@@ -28,6 +33,8 @@ const EXPLAIN: Record<string, string> = {
   technicalTrend: 'Short-term chart direction from moving averages and structure.',
   risk: 'How volatile or fragile the setup looks for a typical investor.',
 };
+
+type MarketFilter = 'ALL' | WatchlistMarket;
 
 type AiSignalsPageProps = {
   signals: AiSignalRow[];
@@ -64,6 +71,107 @@ export function AiSignalsPage({
   cloudSyncStatus = 'idle',
   onSyncNow,
 }: AiSignalsPageProps) {
+  const [marketFilter, setMarketFilter] = useState<MarketFilter>('ALL');
+
+  const grouped = useMemo(() => {
+    const buckets: Record<WatchlistMarket, AiSignalRow[]> = {
+      US: [],
+      HK: [],
+      JP: [],
+      EU: [],
+    };
+    for (const s of signals) {
+      buckets[classifyTickerMarket(s.ticker)].push(s);
+    }
+    return buckets;
+  }, [signals]);
+
+  const visibleMarkets = useMemo(() => {
+    if (marketFilter !== 'ALL') {
+      return WATCHLIST_MARKETS.filter((m) => m.key === marketFilter);
+    }
+    return WATCHLIST_MARKETS.filter((m) => grouped[m.key].length > 0);
+  }, [marketFilter, grouped]);
+
+  const renderCard = (s: AiSignalRow) => (
+    <div key={s.ticker} className="relative">
+      {onDeleteSignal && (
+        <button
+          type="button"
+          title={`Remove ${s.ticker}`}
+          aria-label={`Delete ${s.ticker} signal`}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onDeleteSignal(s.ticker);
+          }}
+          className="absolute top-1.5 right-1.5 z-10 h-7 w-7 inline-flex items-center justify-center rounded-md border border-rose-500/30 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 cursor-pointer"
+        >
+          <Trash2 className="h-3 w-3" />
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={() => onOpenTicker(s.ticker)}
+        className="text-left cursor-pointer w-full"
+      >
+        <GlassCard hover padding="sm" className="h-full border-white/10 !p-2.5">
+          <div className="flex items-center justify-between gap-2 pr-8 min-w-0">
+            <div className="min-w-0 flex items-baseline gap-2">
+              <p className="font-mono font-bold text-white text-[13px] shrink-0">{s.ticker}</p>
+              <p className="text-[10px] text-gray-500 truncate hidden sm:block">{s.name || ''}</p>
+            </div>
+            <div className="text-right shrink-0">
+              <p
+                className={cn(
+                  'text-[11px] font-black uppercase tracking-wide leading-tight',
+                  /buy|add/i.test(s.recommendation) && 'text-emerald-400',
+                  /sell|trim|reduce/i.test(s.recommendation) && 'text-rose-400',
+                  /wait|hold|indiffer|indecision/i.test(s.recommendation) && 'text-amber-300'
+                )}
+              >
+                {s.recommendation}
+              </p>
+              <p className="text-[10px] font-mono text-cyan-300 leading-tight">
+                {Math.round(s.confidence)}%
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-2 flex flex-wrap gap-1">
+            <Chip label="Trend" value={s.trend || 'Flat'} tip={EXPLAIN.technicalTrend} />
+            <Chip
+              label="SM"
+              value={s.smartMoney && s.smartMoney !== '—' ? s.smartMoney : 'Flat'}
+              icon={<DirIcon v={s.smartMoney} />}
+              tip={EXPLAIN.smartMoney}
+            />
+            <Chip
+              label="Flow"
+              value={s.fundFlow && s.fundFlow !== '—' ? s.fundFlow : 'Flat'}
+              icon={<DirIcon v={s.fundFlow} />}
+              tip={EXPLAIN.fundFlow}
+            />
+            <Chip
+              label="RSI"
+              value={s.rsi != null && Number.isFinite(s.rsi) ? String(Math.round(s.rsi)) : 'n/a'}
+              tip={EXPLAIN.rsi}
+            />
+            <Chip label="Risk" value={s.risk || '—'} tip={EXPLAIN.risk} />
+            <Chip
+              label="Chg"
+              value={
+                s.changePct != null
+                  ? `${s.changePct >= 0 ? '+' : ''}${s.changePct.toFixed(1)}%`
+                  : '—'
+              }
+            />
+          </div>
+        </GlassCard>
+      </button>
+    </div>
+  );
+
   return (
     <div className="space-y-4 min-w-0">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
@@ -71,7 +179,7 @@ export function AiSignalsPage({
           <p className="text-[10px] font-mono uppercase tracking-[0.22em] text-cyan-400">Intelligence</p>
           <h2 className="mt-1 text-2xl font-sans font-bold text-white">AI Signals</h2>
           <p className="mt-1 text-[13px] text-gray-500 max-w-2xl">
-            Each card translates AI output into a clear recommendation. Tap a stock for the full analysis workspace.
+            Signals catalogued by market. Tap a stock for the full analysis workspace.
           </p>
           <p
             className={cn(
@@ -93,7 +201,7 @@ export function AiSignalsPage({
               <Cloud className="h-3 w-3" />
             )}
             {cloudSyncStatus === 'synced'
-              ? 'Cloud sync on · same account on Android & PC'
+              ? 'Cloud sync on · iPhone, Android & PC'
               : cloudSyncStatus === 'saving'
                 ? 'Saving signals to cloud…'
                 : cloudSyncStatus === 'connecting'
@@ -147,6 +255,38 @@ export function AiSignalsPage({
         </div>
       </div>
 
+      {signals.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            type="button"
+            onClick={() => setMarketFilter('ALL')}
+            className={cn(
+              'min-h-[30px] rounded-lg px-2.5 text-[10px] font-bold uppercase tracking-wide border cursor-pointer',
+              marketFilter === 'ALL'
+                ? 'bg-cyan-500 text-black border-cyan-400'
+                : 'bg-black/40 text-gray-400 border-white/10 hover:text-white hover:border-cyan-500/35'
+            )}
+          >
+            All · {signals.length}
+          </button>
+          {WATCHLIST_MARKETS.map((m) => (
+            <button
+              key={m.key}
+              type="button"
+              onClick={() => setMarketFilter(m.key)}
+              className={cn(
+                'min-h-[30px] rounded-lg px-2.5 text-[10px] font-bold uppercase tracking-wide border cursor-pointer',
+                marketFilter === m.key
+                  ? 'bg-cyan-500 text-black border-cyan-400'
+                  : 'bg-black/40 text-gray-400 border-white/10 hover:text-white hover:border-cyan-500/35'
+              )}
+            >
+              {m.short} · {grouped[m.key].length}
+            </button>
+          ))}
+        </div>
+      )}
+
       {!signals.length ? (
         <GlassCard>
           <p className="text-[13px] text-gray-400 text-center py-8">
@@ -155,86 +295,30 @@ export function AiSignalsPage({
             <span className="text-sky-400 font-semibold">Suggest</span>.
           </p>
         </GlassCard>
+      ) : visibleMarkets.length === 0 ||
+        (marketFilter !== 'ALL' && grouped[marketFilter].length === 0) ? (
+        <GlassCard>
+          <p className="text-[13px] text-gray-400 text-center py-8">No signals in this market yet.</p>
+        </GlassCard>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-2">
-          {signals.map((s) => (
-            <div key={s.ticker} className="relative">
-              {onDeleteSignal && (
-                <button
-                  type="button"
-                  title={`Remove ${s.ticker}`}
-                  aria-label={`Delete ${s.ticker} signal`}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    onDeleteSignal(s.ticker);
-                  }}
-                  className="absolute top-1.5 right-1.5 z-10 h-7 w-7 inline-flex items-center justify-center rounded-md border border-rose-500/30 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 cursor-pointer"
-                >
-                  <Trash2 className="h-3 w-3" />
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => onOpenTicker(s.ticker)}
-                className="text-left cursor-pointer w-full"
-              >
-                <GlassCard hover padding="sm" className="h-full border-white/10 !p-2.5">
-                  <div className="flex items-center justify-between gap-2 pr-8 min-w-0">
-                    <div className="min-w-0 flex items-baseline gap-2">
-                      <p className="font-mono font-bold text-white text-[13px] shrink-0">{s.ticker}</p>
-                      <p className="text-[10px] text-gray-500 truncate hidden sm:block">{s.name || ''}</p>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <p
-                        className={cn(
-                          'text-[11px] font-black uppercase tracking-wide leading-tight',
-                          /buy|add/i.test(s.recommendation) && 'text-emerald-400',
-                          /sell|trim|reduce/i.test(s.recommendation) && 'text-rose-400',
-                          /wait|hold|indiffer|indecision/i.test(s.recommendation) && 'text-amber-300'
-                        )}
-                      >
-                        {s.recommendation}
-                      </p>
-                      <p className="text-[10px] font-mono text-cyan-300 leading-tight">
-                        {Math.round(s.confidence)}%
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    <Chip label="Trend" value={s.trend || 'Flat'} tip={EXPLAIN.technicalTrend} />
-                    <Chip
-                      label="SM"
-                      value={s.smartMoney && s.smartMoney !== '—' ? s.smartMoney : 'Flat'}
-                      icon={<DirIcon v={s.smartMoney} />}
-                      tip={EXPLAIN.smartMoney}
-                    />
-                    <Chip
-                      label="Flow"
-                      value={s.fundFlow && s.fundFlow !== '—' ? s.fundFlow : 'Flat'}
-                      icon={<DirIcon v={s.fundFlow} />}
-                      tip={EXPLAIN.fundFlow}
-                    />
-                    <Chip
-                      label="RSI"
-                      value={s.rsi != null && Number.isFinite(s.rsi) ? String(Math.round(s.rsi)) : 'n/a'}
-                      tip={EXPLAIN.rsi}
-                    />
-                    <Chip label="Risk" value={s.risk || '—'} tip={EXPLAIN.risk} />
-                    <Chip
-                      label="Chg"
-                      value={
-                        s.changePct != null
-                          ? `${s.changePct >= 0 ? '+' : ''}${s.changePct.toFixed(1)}%`
-                          : '—'
-                      }
-                    />
-                  </div>
-                </GlassCard>
-              </button>
-            </div>
-          ))}
+        <div className="space-y-5">
+          {visibleMarkets.map((m) => {
+            const rows = grouped[m.key];
+            if (!rows.length) return null;
+            return (
+              <section key={m.key} className="space-y-2">
+                <div className="flex items-center justify-between gap-2 px-0.5">
+                  <p className="text-[10px] font-mono uppercase tracking-[0.16em] text-cyan-400">
+                    {m.label}
+                  </p>
+                  <span className="text-[10px] font-mono text-gray-500">{rows.length}</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-2">
+                  {rows.map(renderCard)}
+                </div>
+              </section>
+            );
+          })}
         </div>
       )}
 

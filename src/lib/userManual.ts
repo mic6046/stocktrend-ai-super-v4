@@ -68,9 +68,9 @@ export const MANUAL_SECTIONS: ManualSection[] = [
         id: 'signals',
         title: 'AI Signals',
         body: [
-          'Stores recent scan rows (opportunity / watch / risk) for quick review.',
-          'Use Update to refresh prices and signals for listed names. Delete removes a row from the cache.',
-          'AI Signals sync across devices on the same signed-in account (Android ↔ PC). Use the Sync button if a phone session was backgrounded.',
+          'Stores recent scan rows (opportunity / watch / risk) for quick review, catalogued by market (US, Hong Kong, Japan, Europe).',
+          'Use the market chips to filter. Update refreshes prices and signals for listed names. Delete removes a row from the cache.',
+          'AI Signals sync across devices on the same signed-in account (iPhone ↔ Android ↔ PC). Use the Sync button if a phone session was backgrounded.',
         ],
       },
   {
