@@ -176,7 +176,7 @@ export function AppSidebar({
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-2 py-3 space-y-4">
+        <nav className="flex-1 min-h-0 overflow-y-auto overscroll-contain no-scrollbar px-2 py-3 space-y-4">
           {NAV_GROUPS.map((group) => (
             <div key={group.label}>
               {!isCollapsed && (
@@ -238,12 +238,11 @@ export function AppSidebar({
           ))}
         </nav>
 
-        {/* Account / plan footer */}
+        {/* Account / plan footer — no nested scrollbar */}
         <div
           className={cn(
-            'shrink-0 border-t border-white/[0.06] overflow-y-auto overscroll-contain space-y-2',
-            isCollapsed ? 'p-2' : 'p-3',
-            'max-h-[min(38vh,17rem)]'
+            'shrink-0 border-t border-white/[0.06] space-y-2',
+            isCollapsed ? 'p-2' : 'p-3'
           )}
         >
           {!isCollapsed && userEmail && (
@@ -259,7 +258,7 @@ export function AppSidebar({
                 <span className="text-emerald-400/90 font-semibold">{planName}</span>
               </p>
               {usageSlot && (
-                <div className="overflow-x-auto overflow-y-hidden pt-0.5 -mx-0.5">{usageSlot}</div>
+                <div className="overflow-x-auto overflow-y-hidden no-scrollbar pt-0.5 -mx-0.5">{usageSlot}</div>
               )}
             </div>
           )}
