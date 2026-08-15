@@ -107,7 +107,7 @@ export function AppSidebar({
   const navBody = (mode: 'desktop' | 'mobile') => {
     const isCollapsed = mode === 'desktop' && collapsed;
     return (
-      <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      <div className="flex h-full min-h-0 flex-col overflow-hidden [scrollbar-width:none]">
         {/* Brand */}
         <div
           className={cn(
@@ -176,7 +176,7 @@ export function AppSidebar({
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 min-h-0 overflow-y-auto overscroll-contain no-scrollbar px-2 py-3 space-y-4">
+        <nav className="qn-sidebar-scroll flex-1 min-h-0 overflow-y-auto overscroll-contain px-2 py-3 space-y-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden [&::-webkit-scrollbar]:w-0">
           {NAV_GROUPS.map((group) => (
             <div key={group.label}>
               {!isCollapsed && (
@@ -353,7 +353,7 @@ export function AppSidebar({
     <>
       <aside
         className={cn(
-          'hidden lg:flex flex-col shrink-0 border-r border-white/[0.06] bg-[color:var(--qn-bg-elevated)] sticky top-0 h-screen max-h-screen overflow-hidden z-30 transition-[width] duration-200',
+          'hidden lg:flex flex-col shrink-0 border-r border-white/[0.06] bg-[color:var(--qn-bg-elevated)] sticky top-0 h-screen max-h-screen overflow-hidden z-30 transition-[width] duration-200 [scrollbar-width:none]',
           collapsed ? 'w-[4.25rem]' : 'w-[15.5rem]'
         )}
       >
@@ -368,7 +368,7 @@ export function AppSidebar({
             aria-label="Close sidebar backdrop"
             onClick={() => onMobileOpenChange(false)}
           />
-          <aside className="absolute left-0 top-0 bottom-0 w-[min(19rem,90vw)] bg-[color:var(--qn-bg-elevated)] border-r border-white/[0.08] shadow-2xl pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] overflow-hidden">
+          <aside className="absolute left-0 top-0 bottom-0 w-[min(19rem,90vw)] bg-[color:var(--qn-bg-elevated)] border-r border-white/[0.08] shadow-2xl pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] overflow-hidden [scrollbar-width:none]">
             {navBody('mobile')}
           </aside>
         </div>
