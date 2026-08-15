@@ -104,7 +104,6 @@ export function AppShell({
         alertCount={alertCount}
         userEmail={userEmail}
         onSignIn={onSignIn}
-        onSignOut={onSignOut}
         authLoading={authLoading}
         usageSlot={usageSlot}
         planLabel={planLabel}
@@ -132,6 +131,10 @@ export function AppShell({
           alertCount={alertCount}
           onGoDashboard={() => onNavigate('DASHBOARD')}
           cloudSyncStatus={cloudSyncStatus}
+          userEmail={userEmail}
+          authLoading={authLoading}
+          onSignIn={onSignIn}
+          onSignOut={onSignOut}
         />
 
         {showMarketSelect && (

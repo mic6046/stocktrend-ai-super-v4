@@ -8,6 +8,8 @@ import {
   RefreshCw,
   Cloud,
   CloudOff,
+  LogOut,
+  LogIn,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { MarketDataStatus } from '../../lib/marketDataRefresh';
@@ -27,6 +29,10 @@ type AppHeaderProps = {
   alertCount?: number;
   onGoDashboard?: () => void;
   cloudSyncStatus?: 'idle' | 'loading' | 'synced' | 'error';
+  userEmail?: string | null;
+  authLoading?: boolean;
+  onSignIn?: () => void;
+  onSignOut?: () => void;
 };
 
 function formatAgo(ts: number | null): string {
@@ -53,6 +59,10 @@ export function AppHeader({
   alertCount = 0,
   onGoDashboard,
   cloudSyncStatus = 'idle',
+  userEmail,
+  authLoading,
+  onSignIn,
+  onSignOut,
 }: AppHeaderProps) {
   const marketLive = marketDataStatus === 'idle' || marketDataStatus === 'updated';
 
@@ -120,7 +130,7 @@ export function AppHeader({
           </div>
         </form>
 
-        {/* Right: market + alerts only (account lives in sidebar) */}
+        {/* Right: market + alerts + account */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           {cloudSyncStatus !== 'idle' && (
             <div
@@ -206,6 +216,32 @@ export function AppHeader({
               </span>
             )}
           </button>
+
+          {userEmail ? (
+            <button
+              type="button"
+              onClick={onSignOut}
+              disabled={authLoading}
+              className="inline-flex h-9 items-center justify-center gap-1.5 rounded-full border border-rose-500/30 bg-rose-500/10 px-2.5 sm:px-3 text-rose-300 hover:bg-rose-500/20 disabled:opacity-50 cursor-pointer"
+              aria-label="Sign out"
+              title={userEmail}
+            >
+              <LogOut className="h-3.5 w-3.5 shrink-0" />
+              <span className="hidden sm:inline text-[11px] font-semibold">Sign out</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onSignIn}
+              disabled={authLoading}
+              className="inline-flex h-9 items-center justify-center gap-1.5 rounded-full bg-emerald-500 px-2.5 sm:px-3 text-black hover:bg-emerald-400 disabled:opacity-50 cursor-pointer"
+              aria-label="Sign in"
+              title="Sign in"
+            >
+              <LogIn className="h-3.5 w-3.5 shrink-0" />
+              <span className="hidden sm:inline text-[11px] font-semibold">Sign in</span>
+            </button>
+          )}
         </div>
       </div>
     </header>

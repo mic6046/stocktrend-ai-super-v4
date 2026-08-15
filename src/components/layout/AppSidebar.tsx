@@ -12,7 +12,6 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   X,
-  LogOut,
   LogIn,
   Activity,
   BookOpen,
@@ -68,7 +67,6 @@ type AppSidebarProps = {
   alertCount?: number;
   userEmail?: string | null;
   onSignIn: () => void;
-  onSignOut: () => void;
   authLoading?: boolean;
   usageSlot?: React.ReactNode;
   planLabel?: string | null;
@@ -87,7 +85,6 @@ export function AppSidebar({
   alertCount = 0,
   userEmail,
   onSignIn,
-  onSignOut,
   authLoading,
   usageSlot,
   planLabel,
@@ -294,23 +291,7 @@ export function AppSidebar({
               <LogIn className="h-3.5 w-3.5 shrink-0" />
               {!isCollapsed && <span>Sign in</span>}
             </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => {
-                onSignOut();
-                onMobileOpenChange(false);
-              }}
-              title="Sign out"
-              className={cn(
-                'w-full inline-flex items-center justify-center gap-2 min-h-[34px] rounded-md border border-white/[0.08] text-gray-400 hover:text-white hover:bg-white/[0.04] cursor-pointer',
-                isCollapsed ? 'px-2' : 'px-3 text-[11px] font-medium'
-              )}
-            >
-              <LogOut className="h-3.5 w-3.5 shrink-0" />
-              {!isCollapsed && <span>Sign out</span>}
-            </button>
-          )}
+          ) : null}
 
           {!isCollapsed ? (
             <div className="space-y-1.5 px-0.5">
