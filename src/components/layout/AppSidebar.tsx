@@ -254,9 +254,7 @@ export function AppSidebar({
                 Plan{' '}
                 <span className="text-emerald-400/90 font-semibold">{planName}</span>
               </p>
-              {usageSlot && (
-                <div className="overflow-x-auto overflow-y-hidden no-scrollbar pt-0.5 -mx-0.5">{usageSlot}</div>
-              )}
+              {usageSlot && <div className="pt-0.5 w-full min-w-0">{usageSlot}</div>}
             </div>
           )}
 

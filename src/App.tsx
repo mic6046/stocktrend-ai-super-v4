@@ -7976,7 +7976,14 @@ export default function App() {
         authLoading={authLoading}
         userEmail={user?.email}
         usageSlot={
-          user ? <UsageQuotaBar usage={usage} email={user.email} onRefresh={refreshUsage} compact /> : null
+          user ? (
+            <UsageQuotaBar
+              usage={usage}
+              email={user.email}
+              onRefresh={refreshUsage}
+              variant="sidebar"
+            />
+          ) : null
         }
         planLabel={usage?.planLabel || null}
         planId={usage?.plan || null}
