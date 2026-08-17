@@ -19,8 +19,10 @@ import {
 } from '../../lib/dayTradeScout';
 import {
   SUGGEST_MARKETS,
+  buildSuggestUniverse,
   type SuggestMarket,
 } from '../../lib/suggestTradeUniverses';
+import { UniverseNameChips } from './UniverseNameChips';
 
 const MARKET_KEY = 'qn-day-trade-market';
 
@@ -100,10 +102,11 @@ export function DayTradePanel({ onOpenTicker, className, runToken = 0 }: DayTrad
   }, [market]);
 
   const marketLabel = SUGGEST_MARKETS.find((m) => m.key === market)?.label ?? market;
-  const popularCount = useMemo(
-    () => Math.min(DAY_TRADE_MAX, market === 'ALL' ? DAY_TRADE_MAX : DAY_TRADE_MAX),
+  const universe = useMemo(
+    () => buildSuggestUniverse(market, 'ALL', DAY_TRADE_MAX),
     [market]
   );
+  const popularCount = universe.length;
 
   const runScout = async () => {
     if (scanningRef.current) return;
@@ -161,6 +164,7 @@ export function DayTradePanel({ onOpenTicker, className, runToken = 0 }: DayTrad
             onChange={(e) => {
               setMarket(e.target.value as SuggestMarket);
               setResult(null);
+              setError(null);
             }}
             disabled={scanning}
             className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-[12px] text-gray-100 focus:outline-none focus:border-orange-500/40 disabled:opacity-60"
@@ -174,11 +178,13 @@ export function DayTradePanel({ onOpenTicker, className, runToken = 0 }: DayTrad
         </label>
         <div className="flex items-end">
           <p className="text-[10px] font-mono text-gray-500 pb-2.5">
-            up to {DAY_TRADE_MAX} popular tickers · fresh data each search
+            {universe.length} {marketLabel} names · fresh data each search
             {searchId > 0 ? ` · search #${searchId}` : ''}
           </p>
         </div>
       </div>
+
+      <UniverseNameChips names={universe} />
 
       <div className="flex flex-wrap items-center gap-2 justify-between">
         <p className="text-[10px] font-mono text-gray-500">

@@ -241,3 +241,17 @@ export function buildSuggestUniverse(
 export function universeTickers(market: SuggestMarket, theme: SuggestTheme, max = 30): string[] {
   return buildSuggestUniverse(market, theme, max).map((r) => r.ticker);
 }
+
+/** True when most tickers belong to the selected listing market. */
+export function listMatchesMarket(tickers: string[], market: SuggestMarket): boolean {
+  if (market === 'ALL') return true;
+  if (!tickers.length) return false;
+  const matching = tickers.filter((t) => {
+    const u = t.toUpperCase();
+    if (market === 'HK') return u.endsWith('.HK') || /^\d{1,5}$/.test(u);
+    if (market === 'JP') return u.endsWith('.T');
+    if (market === 'EU') return /\.(PA|DE|L|AS|BR|MI|MC)$/.test(u);
+    return !u.endsWith('.HK') && !u.endsWith('.T') && !/\.(PA|DE|L|AS|BR|MI|MC)$/.test(u);
+  }).length;
+  return matching >= Math.ceil(tickers.length / 2);
+}

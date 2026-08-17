@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Crosshair, Loader2, Rocket, Search, ListPlus } from 'lucide-react';
 import { cn } from '../../lib/utils';
@@ -21,9 +21,11 @@ import {
   SUGGEST_MARKETS,
   SUGGEST_THEMES,
   buildSuggestUniverse,
+  listMatchesMarket,
   type SuggestMarket,
   type SuggestTheme,
 } from '../../lib/suggestTradeUniverses';
+import { UniverseNameChips } from './UniverseNameChips';
 
 const LIST_STORAGE_KEY = 'qn-find-a-trade-list';
 const MARKET_KEY = 'qn-find-a-trade-market';
@@ -32,14 +34,24 @@ const LEGACY_MARKET_KEY = 'qn-suggest-market';
 const LEGACY_THEME_KEY = 'qn-suggest-theme';
 const DEFAULT_LIST = 'AAPL, NVDA, MSFT, TSLA, 0700.HK';
 
-function loadSavedList(): string {
+function curatedList(market: SuggestMarket, theme: SuggestTheme): string {
+  return buildSuggestUniverse(market, theme, FIND_A_TRADE_MAX)
+    .map((u) => u.ticker)
+    .join(', ');
+}
+
+function loadSavedList(market: SuggestMarket, theme: SuggestTheme): string {
+  const curated = curatedList(market, theme);
   try {
     const raw = localStorage.getItem(LIST_STORAGE_KEY);
-    if (raw != null && raw.trim()) return raw;
+    if (raw != null && raw.trim()) {
+      const parsed = parseTickerList(raw);
+      if (parsed.length && listMatchesMarket(parsed, market)) return raw;
+    }
   } catch {
     /* ignore */
   }
-  return DEFAULT_LIST;
+  return curated || DEFAULT_LIST;
 }
 
 function loadMarket(): SuggestMarket {
@@ -77,13 +89,14 @@ export function FindATradePanel({
   className,
   compact = false,
 }: FindATradePanelProps) {
-  const [listText, setListText] = useState(loadSavedList);
   const [market, setMarket] = useState<SuggestMarket>(loadMarket);
   const [theme, setTheme] = useState<SuggestTheme>(loadTheme);
+  const [listText, setListText] = useState(() => loadSavedList(loadMarket(), loadTheme()));
   const [scanning, setScanning] = useState(false);
   const [progress, setProgress] = useState<FindATradeProgress | null>(null);
   const [result, setResult] = useState<FindATradeResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const skipMarketSync = useRef(true);
 
   useEffect(() => {
     try {
@@ -107,6 +120,18 @@ export function FindATradePanel({
     () => buildSuggestUniverse(market, theme, FIND_A_TRADE_MAX),
     [market, theme]
   );
+
+  // Market/theme change reloads curated names so the list follows the selector
+  useEffect(() => {
+    if (skipMarketSync.current) {
+      skipMarketSync.current = false;
+      return;
+    }
+    if (!universe.length) return;
+    setListText(universe.map((u) => u.ticker).join(', '));
+    setResult(null);
+    setError(null);
+  }, [market, theme, universe]);
   const horizonLabel = HORIZON_OPTIONS.find((o) => o.key === horizon)?.label ?? horizon;
   const marketLabel = SUGGEST_MARKETS.find((m) => m.key === market)?.label ?? market;
   const themeLabel = SUGGEST_THEMES.find((t) => t.key === theme)?.label ?? theme;
@@ -172,7 +197,8 @@ export function FindATradePanel({
           <select
             value={market}
             onChange={(e) => setMarket(e.target.value as SuggestMarket)}
-            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-[12px] text-gray-100 focus:outline-none focus:border-emerald-500/40"
+            disabled={scanning}
+            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-[12px] text-gray-100 focus:outline-none focus:border-emerald-500/40 disabled:opacity-60"
           >
             {SUGGEST_MARKETS.map((m) => (
               <option key={m.key} value={m.key}>
@@ -186,7 +212,8 @@ export function FindATradePanel({
           <select
             value={theme}
             onChange={(e) => setTheme(e.target.value as SuggestTheme)}
-            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-[12px] text-gray-100 focus:outline-none focus:border-emerald-500/40"
+            disabled={scanning}
+            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-[12px] text-gray-100 focus:outline-none focus:border-emerald-500/40 disabled:opacity-60"
           >
             {SUGGEST_THEMES.map((t) => (
               <option key={t.key} value={t.key}>
@@ -196,6 +223,8 @@ export function FindATradePanel({
           </select>
         </label>
       </div>
+
+      <UniverseNameChips names={universe} />
 
       <div className="flex flex-wrap items-center gap-2 justify-between rounded-xl border border-white/8 bg-black/25 px-3 py-2">
         <p className="text-[10px] font-mono text-gray-500">

@@ -13,5 +13,6 @@ export { SuggestATradePanel } from './SuggestATradePanel';
 export type { SuggestATradePanelProps } from './SuggestATradePanel';
 export { DayTradePanel } from './DayTradePanel';
 export type { DayTradePanelProps } from './DayTradePanel';
+export { UniverseNameChips } from './UniverseNameChips';
 export { MarketDataRefreshBar } from './MarketDataRefreshBar';
 export * from './analysisTheme';

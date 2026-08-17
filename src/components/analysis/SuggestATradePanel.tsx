@@ -22,10 +22,12 @@ import {
   SUGGEST_MARKETS,
   SUGGEST_THEMES,
   buildSuggestUniverse,
+  listMatchesMarket,
   universeTickers,
   type SuggestMarket,
   type SuggestTheme,
 } from '../../lib/suggestTradeUniverses';
+import { UniverseNameChips } from './UniverseNameChips';
 
 const MARKET_KEY = 'qn-suggest-market';
 const THEME_KEY = 'qn-suggest-theme';
@@ -57,7 +59,7 @@ function loadInitialList(market: SuggestMarket, theme: SuggestTheme): string {
     const raw = localStorage.getItem(LIST_KEY);
     if (raw != null && raw.trim()) {
       const parsed = parseTickerList(raw, FIND_A_TRADE_MAX);
-      if (parsed.length) return parsed.join(', ');
+      if (parsed.length && listMatchesMarket(parsed, market)) return parsed.join(', ');
     }
   } catch {
     /* ignore */
@@ -257,6 +259,8 @@ export function SuggestATradePanel({
           </select>
         </label>
       </div>
+
+      <UniverseNameChips names={popularUniverse} />
 
       <div className="flex flex-wrap items-center gap-2 justify-between">
         <p className="text-[10px] font-mono text-gray-500">
