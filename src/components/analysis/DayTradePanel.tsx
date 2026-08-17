@@ -39,8 +39,6 @@ function loadMarket(): SuggestMarket {
 type DayTradePanelProps = {
   onOpenTicker: (ticker: string) => void;
   className?: string;
-  /** Increment from header Day Trade button to force a new scout. */
-  runToken?: number;
 };
 
 export type { DayTradePanelProps };
@@ -83,7 +81,7 @@ function FactorGrid({ factors }: { factors: DayTradeFactor[] }) {
   );
 }
 
-export function DayTradePanel({ onOpenTicker, className, runToken = 0 }: DayTradePanelProps) {
+export function DayTradePanel({ onOpenTicker, className }: DayTradePanelProps) {
   const [market, setMarket] = useState<SuggestMarket>(loadMarket);
   const [scanning, setScanning] = useState(false);
   const [progress, setProgress] = useState<DayTradeProgress | null>(null);
@@ -91,7 +89,6 @@ export function DayTradePanel({ onOpenTicker, className, runToken = 0 }: DayTrad
   const [error, setError] = useState<string | null>(null);
   const [searchId, setSearchId] = useState(0);
   const scanningRef = useRef(false);
-  const lastRunTokenRef = useRef(0);
   const scoutGenRef = useRef(0);
 
   useEffect(() => {
@@ -142,18 +139,14 @@ export function DayTradePanel({ onOpenTicker, className, runToken = 0 }: DayTrad
   };
 
   const applyMarket = (next: SuggestMarket) => {
+    scoutGenRef.current += 1;
+    scanningRef.current = false;
     setMarket(next);
     setResult(null);
     setError(null);
-    void runScout(next);
+    setScanning(false);
+    setProgress(null);
   };
-
-  useEffect(() => {
-    if (!runToken || runToken === lastRunTokenRef.current) return;
-    lastRunTokenRef.current = runToken;
-    void runScout();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: only when runToken changes
-  }, [runToken]);
 
   const canScan = !scanning;
   const visibleResult = result && result.market === market ? result : null;

@@ -1306,10 +1306,6 @@ export default function App() {
   const [showFindATrade, setShowFindATrade] = useState(false);
   const [showSuggestATrade, setShowSuggestATrade] = useState(false);
   const [showDayTrade, setShowDayTrade] = useState(false);
-  /** Bumped on every Suggest header/empty-state press → panel starts a new search. */
-  const [suggestRunToken, setSuggestRunToken] = useState(0);
-  /** Bumped on every Day Trade header press → panel starts a new scout. */
-  const [dayTradeRunToken, setDayTradeRunToken] = useState(0);
   const [refreshMode, setRefreshMode] = useState<RefreshMode>(() => loadRefreshMode());
   const [autoRefreshIntervalSec, setAutoRefreshIntervalSec] = useState<AutoRefreshIntervalSec>(
     () => loadAutoRefreshIntervalSec()
@@ -8066,10 +8062,6 @@ export default function App() {
         {activePage === 'FIND_TRADES' && (
           <FindTradesPage
             horizon={analysisHorizon}
-            suggestRunToken={suggestRunToken}
-            dayTradeRunToken={dayTradeRunToken}
-            onBumpSuggest={() => setSuggestRunToken((n) => n + 1)}
-            onBumpDay={() => setDayTradeRunToken((n) => n + 1)}
             onOpenTicker={(sym) => {
               if (!assertAnalysisCredits()) return;
               runTickerSearch(sym);

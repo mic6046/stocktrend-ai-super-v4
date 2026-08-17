@@ -77,11 +77,6 @@ type SuggestATradePanelProps = {
   horizon?: HorizonKey;
   onOpenTicker: (ticker: string) => void;
   className?: string;
-  /**
-   * Increment from the header Suggest button so each press starts a new search
-   * even when the panel is already open.
-   */
-  runToken?: number;
 };
 
 export type { SuggestATradePanelProps };
@@ -90,7 +85,6 @@ export function SuggestATradePanel({
   horizon = '1M',
   onOpenTicker,
   className,
-  runToken = 0,
 }: SuggestATradePanelProps) {
   const [market, setMarket] = useState<SuggestMarket>(loadMarket);
   const [theme, setTheme] = useState<SuggestTheme>(loadTheme);
@@ -102,7 +96,6 @@ export function SuggestATradePanel({
   const [error, setError] = useState<string | null>(null);
   const [searchId, setSearchId] = useState(0);
   const scanningRef = useRef(false);
-  const lastRunTokenRef = useRef(0);
   const scoutGenRef = useRef(0);
 
   useEffect(() => {
@@ -204,21 +197,16 @@ export function SuggestATradePanel({
 
   const applyMarketTheme = (nextMarket: SuggestMarket, nextTheme: SuggestTheme) => {
     const curated = universeTickers(nextMarket, nextTheme, FIND_A_TRADE_MAX);
+    scoutGenRef.current += 1;
+    scanningRef.current = false;
     setMarket(nextMarket);
     setTheme(nextTheme);
     setListText(curated.join(', '));
     setResult(null);
     setError(null);
-    void runSuggest(curated);
+    setScanning(false);
+    setProgress(null);
   };
-
-  // Header Suggest presses bump runToken → always start a new search
-  useEffect(() => {
-    if (!runToken || runToken === lastRunTokenRef.current) return;
-    lastRunTokenRef.current = runToken;
-    void runSuggest();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: only when runToken changes
-  }, [runToken]);
 
   const canScan = !scanning && (parsed.length > 0 || popularUniverse.length > 0);
   const visibleResult =

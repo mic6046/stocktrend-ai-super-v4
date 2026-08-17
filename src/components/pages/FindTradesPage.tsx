@@ -29,19 +29,11 @@ type Tab = 'find' | 'suggest' | 'day';
 
 type FindTradesPageProps = {
   horizon?: HorizonKey;
-  suggestRunToken: number;
-  dayTradeRunToken: number;
-  onBumpSuggest: () => void;
-  onBumpDay: () => void;
   onOpenTicker: (ticker: string) => void;
 };
 
 export function FindTradesPage({
   horizon = '1M',
-  suggestRunToken,
-  dayTradeRunToken,
-  onBumpSuggest,
-  onBumpDay,
   onOpenTicker,
 }: FindTradesPageProps) {
   const [tab, setTab] = useState<Tab>('find');
@@ -68,11 +60,7 @@ export function FindTradesPage({
           <button
             key={t.id}
             type="button"
-            onClick={() => {
-              setTab(t.id);
-              if (t.id === 'suggest') onBumpSuggest();
-              if (t.id === 'day') onBumpDay();
-            }}
+            onClick={() => setTab(t.id)}
             className={cn(
               'min-h-[40px] rounded-full px-4 text-[11px] font-bold uppercase tracking-wider border cursor-pointer',
               tab === t.id && t.color === 'emerald' && 'bg-emerald-500 text-black border-emerald-400',
@@ -122,14 +110,10 @@ export function FindTradesPage({
           <FindATradePanel horizon={horizon} onOpenTicker={onOpenTicker} />
         )}
         {tab === 'suggest' && (
-          <SuggestATradePanel
-            horizon={horizon}
-            runToken={suggestRunToken}
-            onOpenTicker={onOpenTicker}
-          />
+          <SuggestATradePanel horizon={horizon} onOpenTicker={onOpenTicker} />
         )}
         {tab === 'day' && (
-          <DayTradePanel runToken={dayTradeRunToken} onOpenTicker={onOpenTicker} />
+          <DayTradePanel onOpenTicker={onOpenTicker} />
         )}
       </Suspense>
     </div>
