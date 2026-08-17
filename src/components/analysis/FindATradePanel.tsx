@@ -96,7 +96,7 @@ export function FindATradePanel({
   const [progress, setProgress] = useState<FindATradeProgress | null>(null);
   const [result, setResult] = useState<FindATradeResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const skipMarketSync = useRef(true);
+  const scoutGenRef = useRef(0);
 
   useEffect(() => {
     try {
@@ -121,17 +121,18 @@ export function FindATradePanel({
     [market, theme]
   );
 
-  // Market/theme change reloads curated names so the list follows the selector
-  useEffect(() => {
-    if (skipMarketSync.current) {
-      skipMarketSync.current = false;
-      return;
-    }
-    if (!universe.length) return;
-    setListText(universe.map((u) => u.ticker).join(', '));
+  const applyMarketTheme = (nextMarket: SuggestMarket, nextTheme: SuggestTheme) => {
+    const names = buildSuggestUniverse(nextMarket, nextTheme, FIND_A_TRADE_MAX);
+    scoutGenRef.current += 1;
+    setMarket(nextMarket);
+    setTheme(nextTheme);
+    setListText(names.map((u) => u.ticker).join(', '));
     setResult(null);
     setError(null);
-  }, [market, theme, universe]);
+    setScanning(false);
+    setProgress(null);
+  };
+
   const horizonLabel = HORIZON_OPTIONS.find((o) => o.key === horizon)?.label ?? horizon;
   const marketLabel = SUGGEST_MARKETS.find((m) => m.key === market)?.label ?? market;
   const themeLabel = SUGGEST_THEMES.find((t) => t.key === theme)?.label ?? theme;
@@ -146,8 +147,6 @@ export function FindATradePanel({
   };
 
   const runScout = async () => {
-    if (scanning) return;
-
     const pasted = parseTickerList(listText);
     const tickers =
       pasted.length > 0 ? pasted : universe.map((u) => u.ticker).slice(0, FIND_A_TRADE_MAX);
@@ -157,6 +156,7 @@ export function FindATradePanel({
       return;
     }
 
+    const gen = ++scoutGenRef.current;
     setError(null);
     setScanning(true);
     setProgress({ done: 0, total: tickers.length });
@@ -166,17 +166,23 @@ export function FindATradePanel({
         tickers,
         horizon,
         concurrency: 3,
-        onProgress: setProgress,
+        onProgress: (p) => {
+          if (gen === scoutGenRef.current) setProgress(p);
+        },
       });
+      if (gen !== scoutGenRef.current) return;
       setResult(out);
     } catch (e: any) {
+      if (gen !== scoutGenRef.current) return;
       setError(e?.message || 'Find a Trade + failed');
     } finally {
-      setScanning(false);
+      if (gen === scoutGenRef.current) setScanning(false);
     }
   };
 
   const canScan = !scanning && (parsed.length > 0 || universe.length > 0);
+  const visibleResult =
+    result && listMatchesMarket(result.scanned.map((c) => c.ticker), market) ? result : null;
 
   return (
     <GlassCard className={cn('space-y-3', className)}>
@@ -196,9 +202,8 @@ export function FindATradePanel({
           <span className="text-[9px] font-mono uppercase tracking-wider text-gray-500">Market</span>
           <select
             value={market}
-            onChange={(e) => setMarket(e.target.value as SuggestMarket)}
-            disabled={scanning}
-            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-[12px] text-gray-100 focus:outline-none focus:border-emerald-500/40 disabled:opacity-60"
+            onChange={(e) => applyMarketTheme(e.target.value as SuggestMarket, theme)}
+            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-[12px] text-gray-100 focus:outline-none focus:border-emerald-500/40"
           >
             {SUGGEST_MARKETS.map((m) => (
               <option key={m.key} value={m.key}>
@@ -211,9 +216,8 @@ export function FindATradePanel({
           <span className="text-[9px] font-mono uppercase tracking-wider text-gray-500">Theme</span>
           <select
             value={theme}
-            onChange={(e) => setTheme(e.target.value as SuggestTheme)}
-            disabled={scanning}
-            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-[12px] text-gray-100 focus:outline-none focus:border-emerald-500/40 disabled:opacity-60"
+            onChange={(e) => applyMarketTheme(market, e.target.value as SuggestTheme)}
+            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-[12px] text-gray-100 focus:outline-none focus:border-emerald-500/40"
           >
             {SUGGEST_THEMES.map((t) => (
               <option key={t.key} value={t.key}>
@@ -224,7 +228,12 @@ export function FindATradePanel({
         </label>
       </div>
 
-      <UniverseNameChips names={universe} />
+      <div className="space-y-1.5">
+        <p className="text-[9px] font-mono uppercase tracking-wider text-emerald-300/80">
+          Suggested names · {marketLabel}
+        </p>
+        <UniverseNameChips names={universe} />
+      </div>
 
       <div className="flex flex-wrap items-center gap-2 justify-between rounded-xl border border-white/8 bg-black/25 px-3 py-2">
         <p className="text-[10px] font-mono text-gray-500">
@@ -287,9 +296,9 @@ export function FindATradePanel({
       )}
 
       <AnimatePresence mode="wait">
-        {result && (
+        {visibleResult && (
           <motion.div
-            key={result.message}
+            key={visibleResult.message}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}

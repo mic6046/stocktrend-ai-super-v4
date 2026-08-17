@@ -103,7 +103,7 @@ export function SuggestATradePanel({
   const [searchId, setSearchId] = useState(0);
   const scanningRef = useRef(false);
   const lastRunTokenRef = useRef(0);
-  const skipMarketSync = useRef(true);
+  const scoutGenRef = useRef(0);
 
   useEffect(() => {
     try {
@@ -121,17 +121,6 @@ export function SuggestATradePanel({
       /* ignore */
     }
   }, [listText]);
-
-  // Market/theme change reloads curated popular names (user can still edit afterward)
-  useEffect(() => {
-    if (skipMarketSync.current) {
-      skipMarketSync.current = false;
-      return;
-    }
-    const curated = universeTickers(market, theme, FIND_A_TRADE_MAX);
-    setListText(curated.join(', '));
-    setResult(null);
-  }, [market, theme]);
 
   const parsed = useMemo(() => parseTickerList(listText, FIND_A_TRADE_MAX), [listText]);
   const popularUniverse = useMemo(
@@ -170,9 +159,10 @@ export function SuggestATradePanel({
     setResult(null);
   };
 
-  const runSuggest = async () => {
-    if (scanningRef.current) return;
-    let tickers = parseTickerList(listText, FIND_A_TRADE_MAX);
+  const runSuggest = async (tickersOverride?: string[]) => {
+    let tickers = tickersOverride?.length
+      ? tickersOverride.slice(0, FIND_A_TRADE_MAX)
+      : parseTickerList(listText, FIND_A_TRADE_MAX);
     if (!tickers.length) {
       tickers = universeTickers(market, theme, FIND_A_TRADE_MAX);
       if (tickers.length) setListText(tickers.join(', '));
@@ -181,6 +171,7 @@ export function SuggestATradePanel({
       setError('Add tickers to the search list, or load popular names from market/theme.');
       return;
     }
+    const gen = ++scoutGenRef.current;
     setError(null);
     scanningRef.current = true;
     setScanning(true);
@@ -194,15 +185,31 @@ export function SuggestATradePanel({
         concurrency: 3,
         bypassCache: true,
         mode: 'suggest',
-        onProgress: setProgress,
+        onProgress: (p) => {
+          if (gen === scoutGenRef.current) setProgress(p);
+        },
       });
+      if (gen !== scoutGenRef.current) return;
       setResult(out);
     } catch (e: any) {
+      if (gen !== scoutGenRef.current) return;
       setError(e?.message || 'Suggest Trades failed');
     } finally {
-      scanningRef.current = false;
-      setScanning(false);
+      if (gen === scoutGenRef.current) {
+        scanningRef.current = false;
+        setScanning(false);
+      }
     }
+  };
+
+  const applyMarketTheme = (nextMarket: SuggestMarket, nextTheme: SuggestTheme) => {
+    const curated = universeTickers(nextMarket, nextTheme, FIND_A_TRADE_MAX);
+    setMarket(nextMarket);
+    setTheme(nextTheme);
+    setListText(curated.join(', '));
+    setResult(null);
+    setError(null);
+    void runSuggest(curated);
   };
 
   // Header Suggest presses bump runToken → always start a new search
@@ -214,6 +221,8 @@ export function SuggestATradePanel({
   }, [runToken]);
 
   const canScan = !scanning && (parsed.length > 0 || popularUniverse.length > 0);
+  const visibleResult =
+    result && listMatchesMarket(result.scanned.map((c) => c.ticker), market) ? result : null;
 
   return (
     <GlassCard className={cn('space-y-3', className)}>
@@ -232,9 +241,8 @@ export function SuggestATradePanel({
           <span className="text-[9px] font-mono uppercase tracking-wider text-gray-500">Market</span>
           <select
             value={market}
-            onChange={(e) => setMarket(e.target.value as SuggestMarket)}
-            disabled={scanning}
-            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-[12px] text-gray-100 focus:outline-none focus:border-sky-500/40 disabled:opacity-60"
+            onChange={(e) => applyMarketTheme(e.target.value as SuggestMarket, theme)}
+            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-[12px] text-gray-100 focus:outline-none focus:border-sky-500/40"
           >
             {SUGGEST_MARKETS.map((m) => (
               <option key={m.key} value={m.key}>
@@ -247,9 +255,8 @@ export function SuggestATradePanel({
           <span className="text-[9px] font-mono uppercase tracking-wider text-gray-500">Theme</span>
           <select
             value={theme}
-            onChange={(e) => setTheme(e.target.value as SuggestTheme)}
-            disabled={scanning}
-            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-[12px] text-gray-100 focus:outline-none focus:border-sky-500/40 disabled:opacity-60"
+            onChange={(e) => applyMarketTheme(market, e.target.value as SuggestTheme)}
+            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-[12px] text-gray-100 focus:outline-none focus:border-sky-500/40"
           >
             {SUGGEST_THEMES.map((t) => (
               <option key={t.key} value={t.key}>
@@ -260,7 +267,12 @@ export function SuggestATradePanel({
         </label>
       </div>
 
-      <UniverseNameChips names={popularUniverse} />
+      <div className="space-y-1.5">
+        <p className="text-[9px] font-mono uppercase tracking-wider text-sky-300/80">
+          Suggested names · {marketLabel}
+        </p>
+        <UniverseNameChips names={popularUniverse} />
+      </div>
 
       <div className="flex flex-wrap items-center gap-2 justify-between">
         <p className="text-[10px] font-mono text-gray-500">
@@ -334,7 +346,7 @@ export function SuggestATradePanel({
         <p className="text-[10px] font-mono text-gray-500">
           {scanning && progress
             ? `scanning ${progress.done}/${progress.total}${progress.current ? ` (${progress.current})` : ''}`
-            : result
+            : visibleResult
               ? 'press again for a new search'
               : 'fresh prices each search'}
         </p>
@@ -350,7 +362,7 @@ export function SuggestATradePanel({
           )}
         >
           {scanning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-          {scanning ? 'Searching…' : result ? 'New search' : 'Suggest Trades'}
+          {scanning ? 'Searching…' : visibleResult ? 'New search' : 'Suggest Trades'}
         </button>
       </div>
 
@@ -361,9 +373,9 @@ export function SuggestATradePanel({
       )}
 
       <AnimatePresence mode="wait">
-        {result && (
+        {visibleResult && (
           <motion.div
-            key={`suggest-${searchId}-${result.message}`}
+            key={`suggest-${searchId}-${visibleResult.message}`}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}

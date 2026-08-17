@@ -92,6 +92,7 @@ export function DayTradePanel({ onOpenTicker, className, runToken = 0 }: DayTrad
   const [searchId, setSearchId] = useState(0);
   const scanningRef = useRef(false);
   const lastRunTokenRef = useRef(0);
+  const scoutGenRef = useRef(0);
 
   useEffect(() => {
     try {
@@ -108,8 +109,8 @@ export function DayTradePanel({ onOpenTicker, className, runToken = 0 }: DayTrad
   );
   const popularCount = universe.length;
 
-  const runScout = async () => {
-    if (scanningRef.current) return;
+  const runScout = async (nextMarket: SuggestMarket = market) => {
+    const gen = ++scoutGenRef.current;
     setError(null);
     scanningRef.current = true;
     setScanning(true);
@@ -118,20 +119,33 @@ export function DayTradePanel({ onOpenTicker, className, runToken = 0 }: DayTrad
     setSearchId((n) => n + 1);
     try {
       const out = await scoutDayTrades({
-        market,
+        market: nextMarket,
         max: DAY_TRADE_MAX,
         concurrency: 3,
         bypassCache: true,
         shuffle: true,
-        onProgress: setProgress,
+        onProgress: (p) => {
+          if (gen === scoutGenRef.current) setProgress(p);
+        },
       });
+      if (gen !== scoutGenRef.current) return;
       setResult(out);
     } catch (e: any) {
+      if (gen !== scoutGenRef.current) return;
       setError(e?.message || 'Day Trade scout failed');
     } finally {
-      scanningRef.current = false;
-      setScanning(false);
+      if (gen === scoutGenRef.current) {
+        scanningRef.current = false;
+        setScanning(false);
+      }
     }
+  };
+
+  const applyMarket = (next: SuggestMarket) => {
+    setMarket(next);
+    setResult(null);
+    setError(null);
+    void runScout(next);
   };
 
   useEffect(() => {
@@ -142,6 +156,7 @@ export function DayTradePanel({ onOpenTicker, className, runToken = 0 }: DayTrad
   }, [runToken]);
 
   const canScan = !scanning;
+  const visibleResult = result && result.market === market ? result : null;
 
   return (
     <GlassCard className={cn('space-y-3', className)}>
@@ -161,13 +176,8 @@ export function DayTradePanel({ onOpenTicker, className, runToken = 0 }: DayTrad
           <span className="text-[9px] font-mono uppercase tracking-wider text-gray-500">Market</span>
           <select
             value={market}
-            onChange={(e) => {
-              setMarket(e.target.value as SuggestMarket);
-              setResult(null);
-              setError(null);
-            }}
-            disabled={scanning}
-            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-[12px] text-gray-100 focus:outline-none focus:border-orange-500/40 disabled:opacity-60"
+            onChange={(e) => applyMarket(e.target.value as SuggestMarket)}
+            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-[12px] text-gray-100 focus:outline-none focus:border-orange-500/40"
           >
             {SUGGEST_MARKETS.map((m) => (
               <option key={m.key} value={m.key}>
@@ -184,13 +194,18 @@ export function DayTradePanel({ onOpenTicker, className, runToken = 0 }: DayTrad
         </div>
       </div>
 
-      <UniverseNameChips names={universe} />
+      <div className="space-y-1.5">
+        <p className="text-[9px] font-mono uppercase tracking-wider text-orange-300/80">
+          Suggested names · {marketLabel}
+        </p>
+        <UniverseNameChips names={universe} />
+      </div>
 
       <div className="flex flex-wrap items-center gap-2 justify-between">
         <p className="text-[10px] font-mono text-gray-500">
           {scanning && progress
             ? `scanning ${progress.done}/${progress.total}${progress.current ? ` (${progress.current})` : ''}`
-            : result
+            : visibleResult
               ? 'press again for a new day-trade scout'
               : 'gates: liquidity · ATR range · bias'}
         </p>
@@ -206,7 +221,7 @@ export function DayTradePanel({ onOpenTicker, className, runToken = 0 }: DayTrad
           )}
         >
           {scanning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
-          {scanning ? 'Scanning…' : result ? 'New search' : 'Day Trade scout'}
+          {scanning ? 'Scanning…' : visibleResult ? 'New search' : 'Day Trade scout'}
         </button>
       </div>
 
@@ -217,9 +232,9 @@ export function DayTradePanel({ onOpenTicker, className, runToken = 0 }: DayTrad
       )}
 
       <AnimatePresence mode="wait">
-        {result && (
+        {visibleResult && (
           <motion.div
-            key={`day-${searchId}-${result.message}`}
+            key={`day-${searchId}-${visibleResult.message}`}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
