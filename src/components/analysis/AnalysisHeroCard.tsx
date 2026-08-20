@@ -54,7 +54,7 @@ type AnalysisHeroCardProps = {
   futureReEntryZone?: { lo: number; hi: number } | null;
   conflictingFactors?: string[] | null;
   whatToWatch?: string | null;
-  confidenceBand?: 'Low' | 'Moderate' | 'High' | null;
+  confidenceBand?: 'Very Low' | 'Low' | 'Moderate' | 'High' | null;
   userHasPosition?: boolean;
   /** @deprecated kept for compatibility — unused when target/return passed */
   projection?: HeroProjection;
@@ -258,21 +258,25 @@ export function AnalysisHeroCard({
               <div className="mt-3 rounded-xl border border-cyan-500/25 bg-cyan-500/5 px-3 py-2.5 space-y-2">
                 <div>
                   <p className="text-[9px] uppercase tracking-wider text-cyan-300/80">
-                    Primary Action · {userHasPosition ? 'Position held' : 'No position'}
+                    Primary Action · {userHasPosition ? 'Existing holder' : 'No position'}
                   </p>
-                  <p className="mt-0.5 text-[15px] sm:text-[16px] font-black text-white tracking-wide uppercase break-words leading-snug">
-                    {currentAction}
-                  </p>
+                  {currentAction.trim().toUpperCase() !== String(label || '').trim().toUpperCase() && (
+                    <p className="mt-0.5 text-[15px] sm:text-[16px] font-black text-white tracking-wide uppercase break-words leading-snug">
+                      {currentAction}
+                    </p>
+                  )}
                   {confidenceBand && (
                     <p className="mt-0.5 text-[10px] font-mono text-gray-400">
-                      CONFIDENCE ·{' '}
+                      CONVICTION ·{' '}
                       <span
                         className={
                           confidenceBand === 'High'
                             ? 'text-emerald-300'
                             : confidenceBand === 'Moderate'
                               ? 'text-amber-200'
-                              : 'text-rose-300'
+                              : confidenceBand === 'Very Low'
+                                ? 'text-rose-400'
+                                : 'text-rose-300'
                         }
                       >
                         {confidenceBand}

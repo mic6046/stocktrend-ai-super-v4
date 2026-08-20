@@ -54,7 +54,7 @@ export type PrimaryAction =
   | 'STOP LOSS'
   | 'AVOID NEW POSITION';
 
-export type ConfidenceBand = 'Low' | 'Moderate' | 'High';
+export type ConfidenceBand = 'Very Low' | 'Low' | 'Moderate' | 'High';
 
 export type PrimaryDecision = {
   currentPrice: number;
@@ -199,6 +199,12 @@ export type ConfirmationInput = {
   supportNearby?: boolean | null;
   dataQuality?: 'good' | 'stale' | 'missing' | 'unreliable' | null;
   zoneConflict?: boolean | null;
+  /** Price still holding above key support (not a confirmed breakdown). */
+  supportHolding?: boolean | null;
+  supportBroken?: boolean | null;
+  supportLevel?: number | null;
+  resistanceLevel?: number | null;
+  majorResistance?: number | null;
 };
 
 export type EvidenceConflictReport = {
@@ -221,7 +227,8 @@ function stanceFromScore(n: number | null | undefined): 'bull' | 'bear' | 'neutr
 function confidenceBandFrom(conf: number): ConfidenceBand {
   if (conf >= 80) return 'High';
   if (conf >= 65) return 'Moderate';
-  return 'Low';
+  if (conf >= 50) return 'Low';
+  return 'Very Low';
 }
 
 /**
@@ -389,6 +396,11 @@ export function detectEvidenceConflicts(opts: {
     isIndecision = true;
   }
 
+  // Structure-first: mixed flow vs an intact support/trend is WAIT/HOLD, not INDECISION.
+  if (c.supportHolding && !c.supportBroken && c.dataQuality !== 'missing' && c.dataQuality !== 'unreliable') {
+    isIndecision = false;
+  }
+
   // Build what-to-watch
   let whatToWatch = 'Wait for major signals to agree before taking a directional action.';
   if (aboveEntry) {
@@ -406,8 +418,32 @@ export function detectEvidenceConflicts(opts: {
     }.`;
   }
   if (c.resistanceNearby) {
-    const rHint = opts.targetPrice > 0 ? round2(opts.targetPrice).toFixed(2) : 'nearby resistance';
+    const rHint =
+      c.resistanceLevel != null && Number.isFinite(c.resistanceLevel)
+        ? round2(c.resistanceLevel).toFixed(2)
+        : opts.targetPrice > 0
+          ? round2(opts.targetPrice).toFixed(2)
+          : 'nearby resistance';
     whatToWatch = `Watch for a confirmed break above ${rHint} with improving institutional flow — otherwise wait rather than forcing an entry.`;
+  }
+  const sHint =
+    c.supportLevel != null && Number.isFinite(c.supportLevel) ? round2(c.supportLevel).toFixed(2) : null;
+  const rHint =
+    c.resistanceLevel != null && Number.isFinite(c.resistanceLevel)
+      ? round2(c.resistanceLevel).toFixed(2)
+      : null;
+  const r2Hint =
+    c.majorResistance != null && Number.isFinite(c.majorResistance)
+      ? round2(c.majorResistance).toFixed(2)
+      : null;
+  if (sHint || rHint) {
+    const bear = sHint
+      ? `Bearish trigger: confirmed close below ${sHint} with volume.`
+      : 'Bearish trigger: confirmed support breakdown with volume.';
+    const bull = rHint
+      ? `Bullish trigger: reclaim ${rHint}${r2Hint ? `, then confirmation above ${r2Hint}` : ''}.`
+      : 'Bullish trigger: confirmed resistance break with volume.';
+    whatToWatch = `${whatToWatch} ${bear} ${bull}`;
   }
 
   return {
@@ -431,7 +467,14 @@ export function evaluateConfirmation(input: ConfirmationInput): ConfirmationStat
   const rsi = input.rsi != null && Number.isFinite(input.rsi) ? Number(input.rsi) : null;
   const trend = String(input.trend || '').toUpperCase();
 
-  if (rec === 'SELL' || rec === 'AVOID NEW POSITION' || rec === 'REDUCE') {
+  if (rec === 'SELL' || rec === 'AVOID NEW POSITION') {
+    return 'REJECTED';
+  }
+  // REDUCE while support holds is a sizing call, not a broken thesis.
+  if (rec === 'REDUCE' && input.supportHolding && !input.supportBroken) {
+    return 'PENDING';
+  }
+  if (rec === 'REDUCE' && input.supportBroken) {
     return 'REJECTED';
   }
 
@@ -625,7 +668,7 @@ export function resolvePrimaryAction(opts: {
   const severeBreakdown = px <= opts.stopLoss;
   const thesisRejected =
     confirmationStatus === 'REJECTED' ||
-    /SELL|AVOID|REDUCE/.test(String(opts.confirmation.recommendation || '').toUpperCase());
+    /SELL|AVOID NEW POSITION/.test(String(opts.confirmation.recommendation || '').toUpperCase());
 
   const reconciled = reconcileBuyAndTakeProfitZones({
     buyZones: opts.buyZones,
@@ -780,47 +823,77 @@ export function resolvePrimaryAction(opts: {
   }
 
   // Material conflict / low confidence → INDECISION (do not force BUY/HOLD/TP)
-  // Exception: clear WAIT when setup is understood and only timing is wrong (no material conflict)
+  // Exception: intact support is WAIT/HOLD decision-support, not INDECISION
   if (conflictReport.isIndecision) {
-    return indecisionResult();
+    const structureHolds = !!confInput.supportHolding && !confInput.supportBroken;
+    if (!structureHolds) return indecisionResult();
   }
 
   // ─── OWNED POSITION ─────────────────────────────────────────────
   if (opts.userHasPosition) {
-    if (inExit || (thesisRejected && inReduce)) {
+    if (inExit) {
       return finish({
-        action: inExit ? 'EXIT' : 'REDUCE',
-        displayLabel: inExit ? 'EXIT' : 'REDUCE',
-        reason: inExit
-          ? 'Price is in/above the EXIT zone — close remaining exposure.'
-          : 'Price is in the REDUCE zone with deteriorating thesis — trim exposure.',
-        why: inExit
-          ? 'Exit zone reached — remaining risk is no longer justified.'
-          : 'Extension into reduce territory with weak confirmation — cut size.',
+        action: 'EXIT',
+        displayLabel: 'SELL',
+        reason: 'Price is in/above the EXIT zone — close remaining exposure.',
+        why: 'Exit zone reached — remaining risk is no longer justified.',
         nextOpportunity: `Watch future re-entry zone ${reEntryZone ? formatZoneRange(reEntryZone) : 'N/A'} only after a clean pullback and confirmation — not an immediate BUY.`,
-        zoneKey: inExit ? 'exit' : 'reduce',
+        zoneKey: 'exit',
       });
     }
 
-    // Take-Profit PRIORITY over nearby/overlapping Buy Zone
-    if (inTp || upsideUnattractive || inReduce) {
+    const recU = String(opts.confirmation.recommendation || '').toUpperCase();
+    const structureHolds = !!confInput.supportHolding && !confInput.supportBroken;
+    const atTarget = inTp || px >= target * 0.995;
+
+    if (inReduce && !atTarget) {
+      return finish({
+        action: 'REDUCE',
+        displayLabel: 'REDUCE PARTIAL',
+        reason: 'Price is in the REDUCE zone — trim exposure rather than a full exit while the next support test is unconfirmed.',
+        why: 'Extension into reduce territory — cut size; do not treat this as an automatic SELL.',
+        nextOpportunity: `Watch future re-entry zone ${reEntryZone ? formatZoneRange(reEntryZone) : 'N/A'} only after a clean pullback and confirmation — not an immediate BUY.`,
+        zoneKey: 'reduce',
+      });
+    }
+
+    // Take-Profit PRIORITY over nearby/overlapping Buy Zone — only when actually at TP
+    if (atTarget) {
       const partial = expectedReturn > 0.5 && expectedReturn < 6 && !inExit && !inReduce;
       return finish({
-        action: inReduce && !inTp ? 'REDUCE' : partial ? 'PARTIAL TAKE PROFIT' : 'TAKE PROFIT',
-        displayLabel: inReduce && !inTp
-          ? 'REDUCE'
-          : partial
-            ? 'PARTIAL TAKE PROFIT'
-            : 'TAKE PROFIT',
+        action: partial ? 'PARTIAL TAKE PROFIT' : 'TAKE PROFIT',
+        displayLabel: 'REDUCE PARTIAL',
         reason: `Take profit now. Price has reached the profit-taking area. If the price subsequently pulls back into the re-entry zone, reassess for a new entry.`,
-        why: `Current price ${round2(px).toFixed(2)} is in/near take-profit territory${
-          upsideUnattractive ? ' and remaining upside is unattractive' : ''
-        }. Take-profit has priority over any nearby Buy Zone.`,
+        why: `Current price ${round2(px).toFixed(2)} is in/near take-profit territory. Take-profit has priority over any nearby Buy Zone.`,
         nextOpportunity: `Future re-entry zone${
           reEntryZone ? ` ${formatZoneRange(reEntryZone)}` : ''
         }: wait for pullback + confirmation — not an automatic BUY.`,
-        zoneKey: inReduce && !inTp ? 'reduce' : 'takeProfit',
+        zoneKey: 'takeProfit',
         priceLocation: 'INSIDE_TAKE_PROFIT',
+      });
+    }
+
+    if (recU === 'REDUCE' && structureHolds) {
+      return finish({
+        action: 'REDUCE',
+        displayLabel: 'REDUCE PARTIAL',
+        reason:
+          'Price is still holding above key support, but institutional / smart-money flow is weakening — reduce partial rather than a full SELL.',
+        why: 'Support and trend structure remain intact. Weakening flow is a sizing warning, not a confirmed breakdown.',
+        nextOpportunity: conflictReport.whatToWatch,
+        zoneKey: 'hold',
+        priceLocation: 'NORMAL_HOLD',
+      });
+    }
+
+    if (thesisRejected && confInput.supportBroken) {
+      return finish({
+        action: 'EXIT',
+        displayLabel: recU === 'AVOID NEW POSITION' ? 'STRONG SELL' : 'SELL',
+        reason: 'Key support has broken with a rejected long thesis — exit remaining exposure.',
+        why: 'Confirmed support breakdown is the invalidation for a long hold.',
+        nextOpportunity: 'Reassess only after price reclaims structure with volume confirmation.',
+        zoneKey: 'exit',
       });
     }
 
@@ -871,10 +944,10 @@ export function resolvePrimaryAction(opts: {
       action: 'HOLD',
       displayLabel: 'HOLD',
       reason: 'Price is in the normal holding range — no action required.',
-      why: 'Between accumulation and take-profit — risk/reward is balanced for the existing position.',
-      nextOpportunity: `Take profit near ${formatZoneRange(tp)}; add only on a confirmed pullback into ${
-        reEntryZone ? formatZoneRange(reEntryZone) : 'the Buy Zones'
-      }.`,
+      why: structureHolds
+        ? 'Price is holding above key support and the trend structure remains intact. Mixed or weakening secondary indicators are not a SELL.'
+        : 'Between accumulation and take-profit — risk/reward is balanced for the existing position.',
+      nextOpportunity: conflictReport.whatToWatch,
       zoneKey: 'hold',
       priceLocation: 'NORMAL_HOLD',
     });
@@ -896,15 +969,18 @@ export function resolvePrimaryAction(opts: {
 
   // WAIT = setup clear, timing wrong (do not chase)
   if (inTp || upsideUnattractive || rawAboveEntry || actionBuyLoc === 'ABOVE_ALL') {
+    const nearSup = !!confInput.supportNearby && !!confInput.supportHolding && !confInput.supportBroken;
+    const weakIntoResistance = !!confInput.resistanceNearby && confirmationStatus !== 'STRONG';
     return finish({
       action: 'WAIT',
-      displayLabel: 'WAIT — DO NOT CHASE',
-      reason:
-        'Trend/setup can remain constructive, but the current price is above the preferred entry zone (or already in take-profit territory). Wait for a pullback rather than chasing.',
-      why: `Current price ${round2(px).toFixed(2)} is not an attractive fresh entry. The setup is understood — we are waiting for the right price or confirmation.`,
-      nextOpportunity: `Watch future re-entry / Buy Zone ${
-        reEntryZone ? formatZoneRange(reEntryZone) : '1–3'
-      }. Reassess only after a pullback with confirmation — Buy Zones shown are FUTURE opportunities, not a current BUY.`,
+      displayLabel: nearSup ? 'BUY WATCH' : 'WAIT — NO NEW POSITION',
+      reason: nearSup
+        ? 'Price is near key support with the uptrend still intact — watch for a bullish rejection before starting a position.'
+        : weakIntoResistance
+          ? 'Price is near resistance with incomplete confirmation — do not chase a new position.'
+          : 'Mixed or incomplete confirmation at the current price — wait; do not open a new position.',
+      why: `Current price ${round2(px).toFixed(2)} is not an attractive fresh entry. Decision support is WAIT, not a manufactured BUY or SELL.`,
+      nextOpportunity: conflictReport.whatToWatch,
       zoneKey: 'hold',
       priceLocation: inTp || rawInTp ? 'INSIDE_TAKE_PROFIT' : 'ABOVE_ALL',
     });
@@ -913,24 +989,26 @@ export function resolvePrimaryAction(opts: {
   if (actionBuyLoc === 'BELOW_ALL') {
     return finish({
       action: 'WAIT',
-      displayLabel: 'WAIT — WAIT FOR BUY ZONE',
+      displayLabel: 'WAIT — NO NEW POSITION',
       reason:
-        'Current price is below Buy Zone 3. Wait for the price to reclaim a Buy Zone and hold above stop before entering.',
-      why: 'Below the entry structure — setup path is clear; timing/structure reclaim is required.',
-      nextOpportunity: 'BUY only after reclaim + confirmation inside Buy Zone 1–3.',
+        'Current price is below the preferred entry structure. Wait for a reclaim with confirmation before starting a position.',
+      why: 'Below the entry structure — do not buy a breakdown without a confirmed reclaim.',
+      nextOpportunity: conflictReport.whatToWatch,
       zoneKey: 'hold',
       priceLocation: 'BELOW_ALL',
     });
   }
 
   if (actionBuyLoc === 'BETWEEN_ZONES' || actionBuyLoc === 'NONE' || !actionActive) {
+    const nearSup = !!confInput.supportNearby && !!confInput.supportHolding && !confInput.supportBroken;
     return finish({
       action: 'WAIT',
-      displayLabel: 'WAIT — WAIT FOR BUY ZONE',
-      reason:
-        'Price has not reached a Buy Zone entry pocket yet. Wait for price to enter Buy Zone 1, 2, or 3.',
-      why: 'Close to zones is not the same as inside a confirmed entry. Setup is understood; timing is not ready.',
-      nextOpportunity: 'Enter only when price is inside a Buy Zone with confirmation.',
+      displayLabel: nearSup ? 'BUY WATCH' : 'WAIT — NO NEW POSITION',
+      reason: nearSup
+        ? 'Price is approaching support without a confirmed breakdown — watch for rejection before entering.'
+        : 'Price has not reached a confirmed entry pocket yet. Wait rather than forcing a new position.',
+      why: 'Close to zones is not the same as a confirmed entry. Mixed evidence is WAIT, not BUY.',
+      nextOpportunity: conflictReport.whatToWatch,
       zoneKey: 'hold',
     });
   }
@@ -938,11 +1016,11 @@ export function resolvePrimaryAction(opts: {
   const zoneRange = formatZoneRange(actionActive);
   if (confirmationStatus === 'REJECTED' || thesisRejected) {
     return finish({
-      action: 'REASSESS',
-      displayLabel: `BUY ZONE ${actionActive.level} — REASSESS`,
+      action: 'AVOID NEW POSITION',
+      displayLabel: 'NO NEW POSITION',
       reason: `Current price is inside Buy Zone ${actionActive.level} (${zoneRange}), but confirmation rejects a new long — do not buy just because price is in the zone.`,
       why: 'A Buy Zone is an opportunity area, not an unconditional buy instruction.',
-      nextOpportunity: 'Reassess if confirmation improves while price holds the zone.',
+      nextOpportunity: conflictReport.whatToWatch,
       zoneKey: 'buy',
     });
   }
@@ -950,10 +1028,10 @@ export function resolvePrimaryAction(opts: {
   if (confirmationStatus === 'PENDING') {
     return finish({
       action: 'WAIT',
-      displayLabel: `BUY ZONE ${actionActive.level} — CONFIRMATION PENDING`,
+      displayLabel: 'BUY WATCH',
       reason: `Current price is inside Buy Zone ${actionActive.level} (${zoneRange}). The entry price is acceptable, but confirmation is not yet strong enough.`,
-      why: 'Inside zone ≠ BUY NOW. The setup is understood — waiting for confirmation.',
-      nextOpportunity: 'BUY / START POSITION when confirmation turns strong while price holds the zone.',
+      why: 'Inside zone ≠ BUY NOW. Watch for confirmation while support holds.',
+      nextOpportunity: 'BUY when confirmation turns strong while price holds the zone.',
       zoneKey: 'buy',
     });
   }

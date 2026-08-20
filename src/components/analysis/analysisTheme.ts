@@ -78,11 +78,13 @@ export const ACTION_COLORS = {
 export function actionToneFromLabel(label: string): ActionTone {
   const s = label.trim().toLowerCase();
   if (s.includes('exceptional') || s.includes('very strong buy') || s.includes('strong buy')) return 'strong-buy';
-  if (s.includes('avoid') || s.includes('strong sell')) return 'strong-sell';
+  if (s.includes('strong sell')) return 'strong-sell';
+  if (s.includes('avoid') || s.includes('no new position')) return 'strong-sell';
   if (s.includes('moderate buy')) return 'moderate-buy';
   if (s.includes('reduce')) return 'reduce';
   if (s.includes('sell')) return 'sell';
-  if (s.includes('hold') || s.includes('neutral')) return 'hold';
+  if (s.includes('buy watch')) return 'moderate-buy';
+  if (s.includes('wait') || s.includes('hold') || s.includes('neutral')) return 'hold';
   if (s.includes('buy')) return 'buy';
   return 'hold';
 }

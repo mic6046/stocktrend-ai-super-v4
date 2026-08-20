@@ -124,35 +124,13 @@ export function isQuantumBuy(rec: RecommendationLabel): boolean {
 }
 
 /**
- * User-facing stance line.
- * Prefer precise buy-zone displayLabel when live action is WAIT/HOLD —
- * never invent "outside BUY zone" copy that contradicts location SSOT.
+ * User-facing stance line — exactly one primary action.
+ * Never concatenate a horizon thesis with a conflicting live label (e.g. REDUCE · INDECISION).
  */
 export function formatRecommendationDisplay(rec: StockRecommendation): string {
-  const label = rec.recommendation;
-  const display = rec.engine?.currentAction?.displayLabel;
-  const live = rec.currentAction;
-  if (display && live && live !== label) {
-    // Horizon thesis stays visible; primary action is explicit and separate
-    if (
-      live === 'TAKE PROFIT' ||
-      live === 'PARTIAL TAKE PROFIT' ||
-      live === 'WAIT' ||
-      live === 'REASSESS' ||
-      live === 'HOLD' ||
-      live === 'INDECISION'
-    ) {
-      return `${label} · ${display}`;
-    }
-  }
-  if (
-    isQuantumBuy(label) &&
-    (live === 'WAIT' || live === 'HOLD' || live === 'REASSESS' || live === 'INDECISION')
-  ) {
-    if (display) return `${label} · ${display}`;
-    return live === 'INDECISION' ? `${label} · INDECISION` : `${label} · WAIT — DO NOT CHASE`;
-  }
-  return label;
+  const display = rec.engine?.currentAction?.displayLabel?.trim();
+  if (display) return display;
+  return rec.recommendation;
 }
 
 export function formatActionNote(rec: StockRecommendation): string {
@@ -275,7 +253,16 @@ export function assertMatchesQuantumRecommendation(
   if (displayed.currentAction != null) {
     const d = norm(displayed.currentAction);
     const expected = norm(source.currentAction);
-    if (d && d !== expected && !d.includes(expected)) {
+    const expectedDisplay = norm(source.engine?.currentAction?.displayLabel);
+    if (
+      d &&
+      d !== expected &&
+      !d.includes(expected) &&
+      expectedDisplay &&
+      d !== expectedDisplay &&
+      !expectedDisplay.includes(d) &&
+      !d.includes(expectedDisplay)
+    ) {
       mismatches.push(`currentAction displayed="${displayed.currentAction}" expected="${source.currentAction}"`);
     }
   }

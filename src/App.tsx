@@ -8543,7 +8543,7 @@ export default function App() {
                     ratingLabel={
                       masterRecommendation
                         ? formatRecommendationDisplay(masterRecommendation)
-                        : horizonView.ratingLabel
+                        : horizonView.currentAction.displayLabel || horizonView.ratingLabel
                     }
                     confidence={masterRecommendation?.confidence ?? horizonView.confidence}
                     currency={data.quote?.currency}

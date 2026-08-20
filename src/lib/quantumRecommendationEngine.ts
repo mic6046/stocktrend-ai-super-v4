@@ -106,7 +106,7 @@ export type LiveActionBrief = {
   nextOpportunity?: string;
   conflictingFactors?: string[];
   whatToWatch?: string;
-  confidenceBand?: 'Low' | 'Moderate' | 'High';
+  confidenceBand?: 'Very Low' | 'Low' | 'Moderate' | 'High';
   futureReEntryZone?: { lo: number; hi: number } | null;
   futureTakeProfitZone?: { lo: number; hi: number } | null;
   priceLocation?: import('./buyZoneDecision').PriceLocation;
@@ -406,6 +406,22 @@ type EvidenceBag = {
   committee: CommitteeMember[];
   bullishScore: number;
   bearishScore: number;
+  /** Price is still above key support (not a confirmed breakdown). */
+  supportHolding: boolean;
+  /** Live price is through S1 (structure break). */
+  supportBroken: boolean;
+  /** Independent bearish confirmations (volume, RSI, momentum, flow, trend). */
+  bearConfirmCount: number;
+  /** Uptrend / EMA structure still constructive. */
+  structureIntact: boolean;
+  /** Whale / institutional / smart-money softening without a breakdown. */
+  flowWeakening: boolean;
+  nearSupport: boolean;
+  nearResistance: boolean;
+  volumeSelling: boolean;
+  supportLevel: number | null;
+  resistanceLevel: number | null;
+  majorResistance: number | null;
 };
 
 function pushSignal(
@@ -851,6 +867,39 @@ function collectEvidence(input: QuantumEngineInput): EvidenceBag {
   const bearishScore = Math.round(clamp((bearWeight / total) * 100, 0, 100));
 
   // STEP 8 — BUY / SELL gates
+  // SELL is structure-first: never fire on whale / institutional / MACD softening alone.
+  const supportBroken = px > 0 && s1 != null && Number.isFinite(s1) && px < s1 * 0.998;
+  const supportHolding = px > 0 && !supportBroken && (s1 == null || px >= s1);
+  const nearSupport =
+    px > 0 && s1 != null && Number.isFinite(s1) && px >= s1 && (px - s1) / px <= 0.012;
+  const nearResistance =
+    px > 0 && r1 != null && Number.isFinite(r1) && r1 >= px && (r1 - px) / px <= 0.025;
+  const trendReversed = trend.includes('BEAR') || trend.includes('DOWNTREND');
+  const structureIntact =
+    supportHolding && !trendReversed && (input.technical?.emaBias !== 'bear' || trend.includes('BULL'));
+  const instWeak = input.institutionalScore != null && input.institutionalScore < 42;
+  const whaleWeak =
+    (input.whaleScore != null && input.whaleScore < 42) ||
+    (input.smartMoneyScore != null && input.smartMoneyScore < 42);
+  const flowWeakening = instWeak || whaleWeak || input.fundFlowBias === 'outflow';
+  const flowSelling = instWeak && whaleWeak;
+  const momCollapsed =
+    (input.momentumScore != null && input.momentumScore < 35) || input.technical?.macdBullish === false;
+  const rsiWeak = rsi != null && Number.isFinite(rsi) && rsi < 40;
+  const volumeSelling =
+    input.technical?.volumeBias === 'high' &&
+    (input.technical?.obvBias === 'bear' || input.fundFlowBias === 'outflow' || momCollapsed);
+
+  const bearFlags = [
+    supportBroken,
+    volumeSelling,
+    momCollapsed,
+    rsiWeak,
+    flowSelling,
+    trendReversed,
+  ];
+  const bearConfirmCount = bearFlags.filter(Boolean).length;
+
   const buyGateFails: string[] = [];
   if (supportHoldProbability < 45 && !(input.institutionalScore != null && input.institutionalScore >= 65)) {
     buyGateFails.push('Support hold probability too low');
@@ -866,18 +915,27 @@ function collectEvidence(input: QuantumEngineInput): EvidenceBag {
   if (!trend.includes('BULL') && !trend.includes('BEAR') && netWeight < 0.25 && technical < 60) {
     buyGateFails.push('Trend not acceptable for aggressive BUY');
   }
+  if (nearResistance && !hasAccum && (input.technical?.macdBullish === false || rsiWeak)) {
+    buyGateFails.push('Weak momentum into resistance — do not chase');
+  }
   const buyGatePass = buyGateFails.length === 0 && netWeight > 0.12;
 
   const sellGateFails: string[] = [];
-  const supportBroken = px > 0 && s1 != null && px < s1;
-  const instSelling = input.institutionalScore != null && input.institutionalScore < 40;
-  const momCollapsed = input.momentumScore != null && input.momentumScore < 35;
-  const trendReversed = trend.includes('BEAR');
-  if (!supportBroken && !instSelling && !momCollapsed && !trendReversed && netWeight > -0.35) {
-    sellGateFails.push('No confirmed support break, institutional selling, momentum collapse, or trend reversal');
+  if (!supportBroken) {
+    sellGateFails.push('Price still holding above key support — weakening flow is not a SELL');
   }
-  if (netWeight > -0.12) sellGateFails.push('Bearish evidence not dominant');
-  const sellGatePass = sellGateFails.length === 0 && netWeight < -0.12;
+  const extraConfirms = bearConfirmCount - (supportBroken ? 1 : 0);
+  if (supportBroken && extraConfirms < 2) {
+    sellGateFails.push('Support break needs 2–3 independent confirmations (volume, momentum, RSI, or flow)');
+  }
+  if (!supportBroken && extraConfirms < 3) {
+    sellGateFails.push('Need a confirmed close below support plus multiple bearish confirmations');
+  }
+  if (netWeight > -0.18) sellGateFails.push('Bearish evidence not dominant versus structure');
+  if (structureIntact && nearResistance && !supportBroken) {
+    sellGateFails.push('Approaching resistance is not an automatic SELL');
+  }
+  const sellGatePass = sellGateFails.length === 0 && supportBroken && extraConfirms >= 2 && netWeight < -0.18;
 
   return {
     bullish,
@@ -907,6 +965,17 @@ function collectEvidence(input: QuantumEngineInput): EvidenceBag {
     committee,
     bullishScore,
     bearishScore,
+    supportHolding,
+    supportBroken,
+    bearConfirmCount,
+    structureIntact,
+    flowWeakening,
+    nearSupport,
+    nearResistance,
+    volumeSelling,
+    supportLevel: s1 != null && Number.isFinite(s1) ? s1 : null,
+    resistanceLevel: r1 != null && Number.isFinite(r1) ? r1 : null,
+    majorResistance: r2 != null && Number.isFinite(r2) ? r2 : null,
   };
 }
 
@@ -1249,6 +1318,11 @@ function resolveLiveAction(
     resistanceNearby?: boolean | null;
     supportNearby?: boolean | null;
     dataQuality?: 'good' | 'stale' | 'missing' | 'unreliable' | null;
+    supportHolding?: boolean | null;
+    supportBroken?: boolean | null;
+    supportLevel?: number | null;
+    resistanceLevel?: number | null;
+    majorResistance?: number | null;
   }
 ): { brief: LiveActionBrief; decision: PrimaryDecision; zones: ReturnType<typeof buildZones>; buyZones: BuyBand[] } {
   const conf = Math.round(clamp(confidence, 40, 94));
@@ -1286,6 +1360,11 @@ function resolveLiveAction(
         resistanceNearby: confirmationExtras?.resistanceNearby,
         supportNearby: confirmationExtras?.supportNearby,
         dataQuality: confirmationExtras?.dataQuality,
+        supportHolding: confirmationExtras?.supportHolding,
+        supportBroken: confirmationExtras?.supportBroken,
+        supportLevel: confirmationExtras?.supportLevel,
+        resistanceLevel: confirmationExtras?.resistanceLevel,
+        majorResistance: confirmationExtras?.majorResistance,
       },
     })
   );
@@ -1453,8 +1532,10 @@ function positionAwareSuggestedAction(
   userHasPosition: boolean,
   evidence: EvidenceBag
 ): SuggestedAction {
-  // Prefer live price action when it is specific
-  if (live.action === 'BUY' || live.action === 'RE-ENTRY') return 'Buy';
+  if (!userHasPosition) {
+    if (live.action === 'BUY' || live.action === 'RE-ENTRY') return 'Buy';
+    return 'Hold';
+  }
   if (live.action === 'ADD POSITION') return 'Accumulate';
   if (
     live.action === 'HOLD' ||
@@ -1463,22 +1544,99 @@ function positionAwareSuggestedAction(
     live.action === 'INDECISION'
   )
     return 'Hold';
-  if (live.action === 'TAKE PROFIT' || live.action === 'PARTIAL TAKE PROFIT') return 'Take Partial Profit';
-  if (live.action === 'REDUCE' || live.action === 'STOP LOSS') return 'Reduce';
-  if (live.action === 'EXIT' || live.action === 'AVOID NEW POSITION') return 'Exit';
+  if (live.action === 'TAKE PROFIT' || live.action === 'PARTIAL TAKE PROFIT' || live.action === 'REDUCE') {
+    return 'Take Partial Profit';
+  }
+  if (live.action === 'STOP LOSS' || live.action === 'EXIT') return 'Exit';
+  if (live.action === 'AVOID NEW POSITION') return 'Hold';
 
-  if (!userHasPosition) {
-    if (rec === 'STRONG BUY' || rec === 'BUY') return 'Buy';
-    if (rec === 'AVOID NEW POSITION' || rec === 'SELL') return 'Exit';
-    return 'Hold';
-  }
-  if (rec === 'STRONG BUY' || rec === 'BUY') {
-    return evidence.bearish.some((b) => /overbought|resistance/i.test(b.label)) ? 'Accumulate' : 'Accumulate';
-  }
+  if (rec === 'STRONG BUY' || rec === 'BUY') return 'Accumulate';
   if (rec === 'HOLD') return 'Hold';
   if (rec === 'REDUCE') return 'Take Partial Profit';
+  if (rec === 'SELL' && evidence.sellGatePass && evidence.supportBroken) return 'Exit';
   if (rec === 'SELL') return 'Reduce';
-  return 'Exit';
+  return evidence.supportBroken ? 'Exit' : 'Hold';
+}
+
+function fmtLevel(n: number | null | undefined): string | null {
+  if (n == null || !Number.isFinite(n)) return null;
+  return n.toFixed(2);
+}
+
+function convictionTag(confidence: number): string {
+  if (confidence < 50) return ' — VERY LOW CONVICTION';
+  if (confidence < 65) return ' — LOW CONVICTION';
+  return '';
+}
+
+function convictionBand(confidence: number): NonNullable<LiveActionBrief['confidenceBand']> {
+  if (confidence >= 80) return 'High';
+  if (confidence >= 65) return 'Moderate';
+  if (confidence >= 50) return 'Low';
+  return 'Very Low';
+}
+
+/**
+ * One primary headline. Holders vs no-position never share contradictory labels.
+ */
+function positionAwareHeadline(
+  rec: RecommendationLabel,
+  live: LiveActionBrief,
+  userHasPosition: boolean,
+  confidence: number,
+  evidence: EvidenceBag
+): { headline: string; action: ZoneAction } {
+  const tag = convictionTag(confidence);
+
+  if (userHasPosition) {
+    if (
+      live.action === 'STOP LOSS' ||
+      live.action === 'EXIT' ||
+      (evidence.sellGatePass && evidence.supportBroken)
+    ) {
+      const strong = evidence.bearConfirmCount >= 4 || rec === 'AVOID NEW POSITION';
+      return {
+        headline: strong ? 'STRONG SELL' : 'SELL',
+        action: live.action === 'STOP LOSS' ? 'STOP LOSS' : 'EXIT',
+      };
+    }
+    if (
+      rec === 'REDUCE' ||
+      live.action === 'REDUCE' ||
+      ((live.action === 'TAKE PROFIT' || live.action === 'PARTIAL TAKE PROFIT') && rec !== 'HOLD')
+    ) {
+      return { headline: `REDUCE PARTIAL${tag}`, action: 'REDUCE' };
+    }
+    return { headline: `HOLD${tag}`, action: 'HOLD' };
+  }
+
+  if ((rec === 'BUY' || rec === 'STRONG BUY') && evidence.buyGatePass && (live.action === 'BUY' || live.action === 'RE-ENTRY')) {
+    return { headline: 'BUY', action: live.action };
+  }
+  if (evidence.supportBroken && evidence.sellGatePass) {
+    return { headline: 'NO NEW POSITION', action: 'AVOID NEW POSITION' };
+  }
+  if (evidence.nearSupport && evidence.structureIntact && !evidence.supportBroken) {
+    return { headline: `BUY WATCH${tag}`, action: 'WAIT' };
+  }
+  if (rec === 'AVOID NEW POSITION' || rec === 'SELL') {
+    return { headline: 'NO NEW POSITION', action: 'AVOID NEW POSITION' };
+  }
+  return { headline: 'WAIT — NO NEW POSITION', action: 'WAIT' };
+}
+
+function structureTriggers(evidence: EvidenceBag): { bear: string; bull: string } {
+  const s = fmtLevel(evidence.supportLevel);
+  const r = fmtLevel(evidence.resistanceLevel);
+  const r2 = fmtLevel(evidence.majorResistance);
+  return {
+    bear: s
+      ? `Bearish trigger: confirmed close below ${s} with volume.`
+      : 'Bearish trigger: confirmed close below key support with rising selling volume.',
+    bull: r
+      ? `Bullish trigger: reclaim ${r}${r2 ? `, followed by confirmation above ${r2}` : ' with volume'}.`
+      : 'Bullish trigger: confirmed breakout above resistance with volume.',
+  };
 }
 
 function buildTargets(px: number, primary: number, rec: RecommendationLabel, levels: QuantumEngineInput['levels']) {
@@ -1509,31 +1667,40 @@ function buildTargets(px: number, primary: number, rec: RecommendationLabel, lev
 function buildWhyWins(rec: RecommendationLabel, evidence: EvidenceBag): string {
   const topBull = [...evidence.bullish].sort((a, b) => b.weight - a.weight).slice(0, 4);
   const topBear = [...evidence.bearish].sort((a, b) => b.weight - a.weight).slice(0, 3);
+  const { bear, bull } = structureTriggers(evidence);
+  const s = fmtLevel(evidence.supportLevel);
   if (rec === 'STRONG BUY' || rec === 'BUY') {
     const winners = topBull.map((f) => f.label).join(', ');
     const outweighed = topBear.length ? topBear.map((f) => f.label).join(', ') : 'no dominant bearish blockers';
-    return `Although opposing signals existed (${outweighed}), the committee weighted ${winners || 'bullish evidence'} higher — especially whale/institutional and support-hold odds (${evidence.supportHoldProbability}%). Therefore ${rec}.`;
+    return `Although opposing signals existed (${outweighed}), price structure plus ${winners || 'bullish evidence'} cleared the BUY gate (support-hold ${evidence.supportHoldProbability}%). ${bear}`;
   }
-  if (rec === 'SELL' || rec === 'AVOID NEW POSITION' || rec === 'REDUCE') {
+  if (rec === 'SELL' || rec === 'AVOID NEW POSITION') {
     const winners = topBear.map((f) => f.label).join(', ');
-    const outweighed = topBull.length ? topBull.map((f) => f.label).join(', ') : 'no dominant bullish confirmation';
-    return `Although ${outweighed} appeared constructive, ${winners || 'bearish evidence'} carried higher committee weight with failed BUY gates / passed defensive gates. Therefore ${rec}.`;
+    return `SELL is justified because support broke with independent confirmation (${winners || 'volume / momentum / flow'}). ${bull}`;
   }
-  return 'Committee votes are split and neither BUY nor SELL validation cleared — HOLD is the professionally defensible stance.';
+  if (rec === 'REDUCE') {
+    const winners = topBear.map((f) => f.label).join(', ');
+    return `Price is still holding${s ? ` above ${s}` : ' above key support'} so this is not a SELL. Weakening ${winners || 'institutional / smart-money flow'} supports REDUCE PARTIAL. ${bear} ${bull}`;
+  }
+  return `Price structure remains intact${s ? ` above ${s}` : ''} and neither the BUY nor SELL gate cleared. Mixed indicators are decision support — HOLD / WAIT, not a forced trade. ${bear} ${bull}`;
 }
 
 function buildRejectedOpposite(rec: RecommendationLabel, evidence: EvidenceBag): string {
+  const { bear, bull } = structureTriggers(evidence);
   if (rec === 'STRONG BUY' || rec === 'BUY') {
     const rejected = evidence.bearish.slice(0, 5).map((f) => `• ${f.label}`);
-    if (!rejected.length) return 'No material opposite (bearish) signals required rejection.';
-    return `Although bearish signals existed:\n${rejected.join('\n')}\nConsensus did not issue SELL because institutional/whale weight and support-hold probability outweighed short-term technical caution, and SELL gates were not met.`;
+    if (!rejected.length) return `No material opposite (bearish) signals required rejection. ${bear}`;
+    return `Although bearish signals existed:\n${rejected.join('\n')}\nConsensus did not issue SELL because price still holds support and SELL confirmation (close + volume + 2–3 independent signals) was not met. ${bear}`;
   }
-  if (rec === 'SELL' || rec === 'AVOID NEW POSITION' || rec === 'REDUCE') {
+  if (rec === 'SELL' || rec === 'AVOID NEW POSITION') {
     const rejected = evidence.bullish.slice(0, 5).map((f) => `• ${f.label}`);
-    if (!rejected.length) return 'No material opposite (bullish) signals required rejection.';
-    return `Although bullish signals existed:\n${rejected.join('\n')}\nConsensus did not issue BUY because distribution/support-failure/momentum risks dominated and BUY gates failed.`;
+    if (!rejected.length) return `No material opposite (bullish) signals required rejection. ${bull}`;
+    return `Although bullish signals existed:\n${rejected.join('\n')}\nConsensus issued SELL because support broke with confirmation. ${bull}`;
   }
-  return 'Neither side cleared a decisive BUY or SELL gate — HOLD avoids forcing a directional call.';
+  if (rec === 'REDUCE') {
+    return `SELL was rejected because price has not confirmed a close below support with volume. Weakening flow alone is not a full exit. ${bear} ${bull}`;
+  }
+  return `Neither side cleared a decisive BUY or SELL gate — HOLD / WAIT avoids manufacturing a trade from mixed evidence. ${bear} ${bull}`;
 }
 
 function invalidationFor(
@@ -1542,17 +1709,20 @@ function invalidationFor(
   zones: ReturnType<typeof buildZones>,
   evidence: EvidenceBag
 ): string {
+  const { bear, bull } = structureTriggers(evidence);
+  const s = fmtLevel(evidence.supportLevel) ?? zones.stopLoss.toFixed(2);
   if (rec === 'STRONG BUY' || rec === 'BUY') {
-    return `Daily close below ${zones.stopLoss.toFixed(2)} (stop / support failure ≈ ${evidence.supportFailureProbability}%) or clear institutional distribution.`;
+    return `${bear} Thesis invalid if daily close below ${s} (stop ${zones.stopLoss.toFixed(2)}).`;
   }
-  if (rec === 'SELL' || rec === 'AVOID NEW POSITION' || rec === 'REDUCE') {
-    return `Reclaim and hold above ${(px * 1.03).toFixed(2)} with renewed whale/institutional accumulation (support hold > ${Math.max(70, evidence.supportHoldProbability)}%).`;
+  if (rec === 'SELL' || rec === 'AVOID NEW POSITION') {
+    return `${bull} Thesis invalid if price reclaims and holds the broken support with volume.`;
   }
-  return `Breakout above resistance with accumulation, or breakdown below ${zones.stopLoss.toFixed(2)}.`;
+  return `${bear} ${bull} Current thesis (price holding structure at ${px.toFixed(2)}) is invalid on a confirmed close below ${s} with volume, or a confirmed breakout above resistance with volume.`;
 }
 
 function nextReviewFor(horizonLabel: string, evidence: EvidenceBag): string {
-  return `Reassess on next earnings, decisive S/R break, or whale/institutional flow shift. Horizon: ${horizonLabel}. Support-hold ${evidence.supportHoldProbability}% · Support-fail ${evidence.supportFailureProbability}% · Resist-break ${evidence.resistanceBreakProbability}% · Resist-reject ${evidence.resistanceRejectionProbability}%.`;
+  const { bear, bull } = structureTriggers(evidence);
+  return `Reassess on a decisive S/R event, not on a single softening indicator. ${bear} ${bull} Horizon: ${horizonLabel}. Support-hold ${evidence.supportHoldProbability}% · Support-fail ${evidence.supportFailureProbability}% · Resist-break ${evidence.resistanceBreakProbability}% · Resist-reject ${evidence.resistanceRejectionProbability}%.`;
 }
 
 function consensusNote(committee: CommitteeMember[], rec: RecommendationLabel): string {
@@ -1643,11 +1813,11 @@ function validate(out: QuantumEngineOutput): boolean {
 function decideRecommendation(evidence: EvidenceBag, rawReturn: number): RecommendationLabel {
   const fromReturn = recommendationFromReturn(rawReturn);
   const fromCommittee = recFromScore(evidence.scores.overall);
+  const mixed = Math.abs(evidence.netWeight) < 0.28 || Math.abs(evidence.bullishScore - evidence.bearishScore) < 18;
 
   // Blend return-implied and committee-implied, then gate
   let candidate = fromReturn;
   if (chartStanceFromRecommendation(fromReturn) !== chartStanceFromRecommendation(fromCommittee)) {
-    // Prefer committee overall when conflict — transparency over return chase
     if (Math.abs(evidence.netWeight) > 0.25) {
       candidate = evidence.netWeight > 0 ? (fromReturn === 'STRONG BUY' ? 'STRONG BUY' : fromCommittee) : fromCommittee;
       if (evidence.netWeight > 0 && (fromCommittee === 'BUY' || fromCommittee === 'STRONG BUY')) {
@@ -1662,22 +1832,48 @@ function decideRecommendation(evidence: EvidenceBag, rawReturn: number): Recomme
     }
   }
 
+  // CORE RULE: intact support + trend is never a SELL on flow/MACD softening alone
+  if (evidence.supportHolding && !evidence.sellGatePass) {
+    if (candidate === 'SELL' || candidate === 'AVOID NEW POSITION') {
+      candidate = evidence.flowWeakening ? 'REDUCE' : 'HOLD';
+    }
+    if (candidate === 'HOLD' && evidence.flowWeakening && evidence.netWeight < -0.12) {
+      candidate = 'REDUCE';
+    }
+    if (candidate === 'REDUCE' && !evidence.flowWeakening) {
+      candidate = 'HOLD';
+    }
+  }
+
+  if (mixed && !evidence.buyGatePass && !evidence.sellGatePass) {
+    if (candidate === 'BUY' || candidate === 'STRONG BUY' || candidate === 'SELL' || candidate === 'AVOID NEW POSITION') {
+      candidate = evidence.flowWeakening && evidence.netWeight < -0.22 && evidence.supportHolding ? 'REDUCE' : 'HOLD';
+    }
+  }
+
   if ((candidate === 'BUY' || candidate === 'STRONG BUY') && !evidence.buyGatePass) {
+    if (evidence.nearSupport && evidence.structureIntact && evidence.netWeight > 0) return 'HOLD';
     if (evidence.netWeight > 0.05) return 'HOLD';
-    if (evidence.netWeight < -0.05) return evidence.sellGatePass ? 'REDUCE' : 'HOLD';
+    if (evidence.netWeight < -0.05) {
+      return evidence.sellGatePass ? (evidence.bearConfirmCount >= 4 ? 'SELL' : 'REDUCE') : 'HOLD';
+    }
     return 'HOLD';
   }
 
   if ((candidate === 'SELL' || candidate === 'AVOID NEW POSITION') && !evidence.sellGatePass) {
-    if (evidence.netWeight < -0.2) return 'REDUCE';
+    if (evidence.supportHolding) return evidence.flowWeakening && evidence.netWeight < -0.22 ? 'REDUCE' : 'HOLD';
+    if (evidence.netWeight < -0.25) return 'REDUCE';
     return 'HOLD';
   }
 
   if (candidate === 'BUY' && evidence.netWeight > 0.55 && evidence.buyGatePass && evidence.scores.overall >= 85) {
     return 'STRONG BUY';
   }
-  if (candidate === 'SELL' && evidence.netWeight < -0.55 && evidence.sellGatePass) {
-    return evidence.scores.overall < 35 ? 'AVOID NEW POSITION' : 'SELL';
+  if (evidence.sellGatePass && evidence.supportBroken && evidence.bearConfirmCount >= 4 && evidence.netWeight < -0.45) {
+    return 'AVOID NEW POSITION';
+  }
+  if (candidate === 'SELL' && evidence.sellGatePass && evidence.supportBroken) {
+    return 'SELL';
   }
 
   return candidate;
@@ -1817,7 +2013,10 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
       expectedReturn = round2(clamp(expectedReturn, -2.9, 2.9));
       target = round2(px * (1 + expectedReturn / 100));
     }
-    if (rec === 'REDUCE' && expectedReturn > -3) {
+    if (rec === 'REDUCE' && evidence.supportHolding) {
+      expectedReturn = round2(clamp(expectedReturn, -2.9, 2.9));
+      target = round2(px * (1 + expectedReturn / 100));
+    } else if (rec === 'REDUCE' && expectedReturn > -3) {
       expectedReturn = round2(-clamp(Math.max(3.5, Math.abs(expectedReturn) || 5), 3.5, 9.5));
       target = round2(px * (1 + expectedReturn / 100));
     }
@@ -1826,11 +2025,18 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
     rec = decideRecommendation(evidence, expectedReturn);
     if ((rec === 'BUY' || rec === 'STRONG BUY') && !evidence.buyGatePass) rec = 'HOLD';
     if ((rec === 'SELL' || rec === 'AVOID NEW POSITION') && !evidence.sellGatePass) {
-      rec = evidence.netWeight < -0.2 ? 'REDUCE' : 'HOLD';
-      if (rec === 'HOLD') {
-        expectedReturn = round2(clamp(expectedReturn, -2.9, 2.9));
-        target = round2(px * (1 + expectedReturn / 100));
-      }
+      rec =
+        evidence.supportHolding && evidence.flowWeakening
+          ? 'REDUCE'
+          : evidence.supportHolding
+            ? 'HOLD'
+            : evidence.netWeight < -0.25
+              ? 'REDUCE'
+              : 'HOLD';
+    }
+    if (rec === 'HOLD' || (rec === 'REDUCE' && evidence.supportHolding)) {
+      expectedReturn = round2(clamp(expectedReturn, -2.9, 2.9));
+      target = round2(px * (1 + expectedReturn / 100));
     }
 
     // Positive R/R gate for BUY
@@ -1840,11 +2046,12 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
       target = round2(px * (1 + expectedReturn / 100));
     }
 
-    const score = scoreFromRecommendation(rec, expectedReturn, evidence.netWeight * 10);
     const baseConf =
       input.baseConfidence != null && Number.isFinite(input.baseConfidence) ? input.baseConfidence : 62;
     const decisive = Math.abs(evidence.bullishScore - evidence.bearishScore) / 100;
-    const confidence = Math.round(
+    const mixedSignals =
+      Math.abs(evidence.netWeight) < 0.28 || Math.abs(evidence.bullishScore - evidence.bearishScore) < 18;
+    let confidence = Math.round(
       clamp(
         baseConf * 0.2 +
           Math.abs(evidence.netWeight) * 40 +
@@ -1855,6 +2062,28 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
         94
       )
     );
+    // Confidence = conviction in THIS recommendation, not bullishness of indicators.
+    if (!evidence.buyGatePass && !evidence.sellGatePass) {
+      confidence = Math.min(confidence, mixedSignals ? 62 : 68);
+    }
+    if ((rec === 'HOLD' || rec === 'REDUCE') && mixedSignals) {
+      confidence = Math.min(confidence, 62);
+    }
+    if (evidence.supportHolding && !evidence.sellGatePass && (rec === 'HOLD' || rec === 'REDUCE')) {
+      confidence = Math.max(confidence, 52);
+      confidence = Math.min(confidence, 64);
+    }
+    if (rec === 'SELL' && evidence.sellGatePass && evidence.bearConfirmCount >= 4) {
+      confidence = Math.max(confidence, 80);
+    }
+    if (confidence < 65 && mixedSignals && (rec === 'BUY' || rec === 'STRONG BUY' || rec === 'SELL' || rec === 'AVOID NEW POSITION')) {
+      rec = evidence.flowWeakening && evidence.supportHolding && evidence.netWeight < -0.22 ? 'REDUCE' : 'HOLD';
+      if (rec === 'HOLD') {
+        expectedReturn = round2(clamp(expectedReturn, -2.9, 2.9));
+        target = round2(px * (1 + expectedReturn / 100));
+      }
+    }
+    const score = scoreFromRecommendation(rec, expectedReturn, evidence.netWeight * 10);
 
     const vol =
       input.technical?.volatility ??
@@ -1929,11 +2158,25 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
             ? Math.abs(input.levels.s1 - px) / px <= 0.025
             : null,
         dataQuality: px > 0 ? 'good' : 'missing',
+        supportHolding: evidence.supportHolding,
+        supportBroken: evidence.supportBroken,
+        supportLevel: evidence.supportLevel,
+        resistanceLevel: evidence.resistanceLevel,
+        majorResistance: evidence.majorResistance,
       }
     );
     zones = resolved.zones;
     const buyZones = resolved.buyZones;
     const currentAction = resolved.brief;
+    const stance = positionAwareHeadline(rec, currentAction, userHasPosition, confidence, evidence);
+    currentAction.displayLabel = stance.headline;
+    currentAction.action = stance.action;
+    currentAction.confidence = confidence;
+    currentAction.confidenceBand = convictionBand(confidence);
+    if (!currentAction.whatToWatch) {
+      const trig = structureTriggers(evidence);
+      currentAction.whatToWatch = `${trig.bear} ${trig.bull}`;
+    }
     // Keep expected return aligned with target vs live price (never positive if target < px)
     expectedReturn = round2(((target - px) / px) * 100);
     if (resolved.decision.expectedReturn !== expectedReturn) {
@@ -1974,10 +2217,8 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
     const explainedSignals = positionAwareSignals(evidence.explainedSignals, userHasPosition);
     const actionLabel = currentAction.displayLabel || currentAction.action;
     const whyLine = currentAction.why || currentAction.reason;
-    const nextLine = currentAction.nextOpportunity
-      ? ` Next: ${currentAction.nextOpportunity}`
-      : '';
-    const summaryLead = `PRIMARY ACTION: ${actionLabel}. Horizon thesis: ${rec} (${confidence}% confidence). ${whyLine}${nextLine} Expected return ${expectedReturn >= 0 ? '+' : ''}${expectedReturn.toFixed(1)}%.`;
+    const nextLine = currentAction.nextOpportunity ? ` Next: ${currentAction.nextOpportunity}` : '';
+    const summaryLead = `PRIMARY ACTION: ${actionLabel}. ${whyLine}${nextLine} Conviction ${confidence}% (${convictionBand(confidence)}). Expected return ${expectedReturn >= 0 ? '+' : ''}${expectedReturn.toFixed(1)}%.`;
 
     const drawdown = round2(-Math.max(2, Math.abs(expectedReturn) * 0.55 + (vol ?? 20) * 0.12));
     const sharpe =
