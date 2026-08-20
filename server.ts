@@ -15,6 +15,7 @@ import dotenv from 'dotenv';
 import { registerStripeWebhook, registerStripeRoutes } from './server/stripe';
 import { consumeUsageCredit, getUsageSnapshot } from './server/usageQuota';
 import { requireAuthedEmailMatch } from './server/authBearer';
+import { registerHelpRoutes } from './server/helpRequests';
 
 dotenv.config();
 
@@ -546,6 +547,7 @@ app.use((req, res, next) => {
 });
 
 registerStripeRoutes(app);
+registerHelpRoutes(app);
 
 app.get('/api/usage', async (req, res) => {
   try {

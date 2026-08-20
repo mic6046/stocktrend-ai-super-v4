@@ -27,6 +27,7 @@ import { AuthProvider } from './lib/auth';
 import { SubscriptionGate } from './components/SubscriptionGate';
 import { LegalHost } from './components/LegalDocs';
 import { ManualHost } from './components/UserManual';
+import { HelpHost } from './components/HelpForm';
 import { ProductAppPreview } from './components/ProductAppPreview';
 import { PwaInstallPrompt } from './components/PwaInstallPrompt';
 import { initAppTheme } from './lib/themeStore';
@@ -56,6 +57,7 @@ createRoot(document.getElementById('root')!).render(
       <AuthProvider>
         <LegalHost>
           <ManualHost>
+            <HelpHost>
             <SubscriptionGate>
               <Suspense
                 fallback={
@@ -68,6 +70,7 @@ createRoot(document.getElementById('root')!).render(
               </Suspense>
             </SubscriptionGate>
             <PwaInstallPrompt />
+            </HelpHost>
           </ManualHost>
         </LegalHost>
       </AuthProvider>

@@ -83,5 +83,20 @@ service cloud.firestore {
     match /stripeProcessedSessions/{sessionId} {
       allow read, write: if false;
     }
+
+    // In-app help form — signed-in users may create their own ticket
+    match /helpRequests/{id} {
+      allow create: if isSignedIn()
+        && request.resource.data.email is string
+        && request.auth.token.email != null
+        && request.resource.data.email.lower() == request.auth.token.email.lower()
+        && request.resource.data.subject is string
+        && request.resource.data.message is string
+        && request.resource.data.subject.size() >= 3
+        && request.resource.data.subject.size() <= 200
+        && request.resource.data.message.size() >= 10
+        && request.resource.data.message.size() <= 4000;
+      allow read, update, delete: if false;
+    }
   }
 }

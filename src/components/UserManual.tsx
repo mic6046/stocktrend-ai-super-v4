@@ -7,6 +7,7 @@ import {
   openUserManual,
   parseManualHash,
 } from '../lib/userManual';
+import { HelpLink } from './HelpForm';
 
 export function ManualLink({
   className,
@@ -140,6 +141,17 @@ function UserManualDialog({ onClose }: { onClose: () => void }) {
               </ul>
             </section>
           ))}
+
+          <div className="rounded-xl border border-white/10 bg-black/30 px-3 py-3">
+            <p className="text-[13px] text-gray-300">
+              Still stuck?{' '}
+              <HelpLink
+                className="text-emerald-300 hover:text-emerald-200 underline-offset-2 hover:underline cursor-pointer"
+                label="Send a help request"
+              />
+              {' '}and we’ll follow up at your account email.
+            </p>
+          </div>
         </div>
       </div>
     </div>

@@ -123,6 +123,7 @@ export const MANUAL_SECTIONS: ManualSection[] = [
       'Appearance: switch Light or Dark mode. Preference syncs with your signed-in account.',
       'Choose Manual vs Auto market refresh and the auto interval. Manual is the credit-safe default.',
       'Manage subscription plans, Reload packs (+10 analyses and +10 news), and legal acceptance before checkout.',
+      'Contact support from Settings or the sidebar if you need help with billing, sign-in, or a screen.',
       'Self-learning / calibration: adjust model factor weights, then press Save (or Balance / Defaults).',
     ],
   },

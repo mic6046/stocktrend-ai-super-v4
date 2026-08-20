@@ -15,12 +15,15 @@ import {
   LogIn,
   Activity,
   BookOpen,
+  LifeBuoy,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { LegalLinks } from '../LegalDocs';
 import { ManualLink } from '../UserManual';
+import { HelpLink } from '../HelpForm';
 import { openLegalDoc } from '../../lib/legal';
 import { openUserManual } from '../../lib/userManual';
+import { openHelpForm } from '../../lib/helpForm';
 import type { AppPage } from './navTypes';
 import { SubscriptionPlansSummary } from '../SubscriptionPlansSummary';
 import { planDisplayName } from '../../lib/pricingPlans';
@@ -297,6 +300,10 @@ export function AppSidebar({
                 className="inline-flex items-center gap-1.5 text-[10px] font-medium text-gray-500 hover:text-emerald-300 transition-colors cursor-pointer"
                 label="User Manual"
               />
+              <HelpLink
+                className="inline-flex items-center gap-1.5 text-[10px] font-medium text-gray-500 hover:text-emerald-300 transition-colors cursor-pointer"
+                label="Contact support"
+              />
               <LegalLinks
                 className="flex-wrap gap-x-2.5 gap-y-1 text-[9px]"
                 linkClassName="text-gray-600 hover:text-gray-300 transition-colors cursor-pointer"
@@ -312,6 +319,15 @@ export function AppSidebar({
                 aria-label="User Manual"
               >
                 <BookOpen className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => openHelpForm()}
+                className="w-full inline-flex items-center justify-center min-h-[28px] text-gray-600 hover:text-emerald-300 cursor-pointer"
+                title="Contact support"
+                aria-label="Contact support"
+              >
+                <LifeBuoy className="h-3.5 w-3.5" />
               </button>
               <button
                 type="button"
