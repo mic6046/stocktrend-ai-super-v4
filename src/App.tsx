@@ -42,7 +42,7 @@ import { PortfolioPage } from './components/pages/PortfolioPage';
 import { SettingsPage } from './components/pages/SettingsPage';
 import { SelfLearningSettings } from './components/pages/SelfLearningSettings';
 import { AlertsPage } from './components/pages/AlertsPage';
-import { loadSignalCache, mergeSignalCache, removeSignalCache, saveSignalCache, loadLocalSignalCacheUpdatedAt, type CachedSignalRow } from './lib/signalCache';
+import { loadSignalCache, mergeSignalCache, removeSignalCache, saveSignalCache, loadLocalSignalCacheUpdatedAt, classifySignalBucket, isSignalRowFresh, type CachedSignalRow } from './lib/signalCache';
 import { srSignalFromEngine } from './lib/srProximity';
 import {
   loadAppTheme,
@@ -6277,11 +6277,7 @@ export default function App() {
           trend: (data as any)?.quantum?.chartStance,
           srSignal: sr.label,
           srDetail: sr.detail,
-          bucket: /buy|add/i.test(String(rec))
-            ? 'opportunity'
-            : /sell/i.test(String(rec))
-              ? 'risk'
-              : 'watch',
+          bucket: classifySignalBucket(String(rec)),
         },
       ])
     );
@@ -7701,11 +7697,7 @@ export default function App() {
             technicalTrend: board?.technicalTrend || eng?.chartStance || 'flat',
             srSignal: board?.srSignal || '—',
             srDetail: board?.srDetail,
-            bucket: /buy|add/i.test(rec)
-              ? 'opportunity'
-              : /sell|trim|reduce/i.test(rec)
-                ? 'risk'
-                : 'watch',
+            bucket: classifySignalBucket(rec),
           } satisfies CachedSignalRow;
         });
 
@@ -7836,11 +7828,7 @@ export default function App() {
             technicalTrend: s.boardMetrics?.technicalTrend || eng?.chartStance,
             srSignal: s.boardMetrics?.srSignal || '—',
             srDetail: s.boardMetrics?.srDetail,
-            bucket: /buy|add/i.test(rec)
-              ? 'opportunity'
-              : /sell|trim|reduce/i.test(rec)
-                ? 'risk'
-                : 'watch',
+            bucket: classifySignalBucket(rec),
           });
         }
         return next;
@@ -8063,7 +8051,7 @@ export default function App() {
             loadingSentiment={loadingSentiment}
             market={dashboardMarket}
             opportunities={signalCache
-              .filter((r) => r.bucket === 'opportunity' || (!r.bucket && /buy|add/i.test(r.recommendation || '')))
+              .filter((r) => isSignalRowFresh(r) && (r.bucket || classifySignalBucket(r.recommendation)) === 'opportunity')
               .slice(0, 8)
               .map((r) => ({
                 ticker: r.ticker,
@@ -8074,7 +8062,7 @@ export default function App() {
                 confidence: r.confidence,
               }))}
             watch={signalCache
-              .filter((r) => r.bucket === 'watch' || /wait|hold/i.test(r.recommendation || ''))
+              .filter((r) => isSignalRowFresh(r) && (r.bucket || classifySignalBucket(r.recommendation)) === 'watch')
               .slice(0, 8)
               .map((r) => ({
                 ticker: r.ticker,
@@ -8085,7 +8073,7 @@ export default function App() {
                 confidence: r.confidence,
               }))}
             riskAlerts={signalCache
-              .filter((r) => r.bucket === 'risk' || /sell|bear|high/i.test((r.risk || '') + (r.recommendation || '')))
+              .filter((r) => isSignalRowFresh(r) && (r.bucket || classifySignalBucket(r.recommendation)) === 'risk')
               .slice(0, 8)
               .map((r) => ({
                 ticker: r.ticker,

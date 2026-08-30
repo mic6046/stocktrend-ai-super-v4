@@ -23,6 +23,30 @@ export type CachedSignalRow = {
   updatedAt?: number;
 };
 
+export type SignalBucket = 'opportunity' | 'watch' | 'risk';
+
+/**
+ * Single source of truth for Dashboard bucketing. Previously three call sites
+ * (Portfolio refresh, AI Signals scan, Watchlist scan) each inlined a slightly
+ * different regex — one didn't treat REDUCE as risk, none treated AVOID NEW
+ * POSITION as risk — so the same recommendation could land in a different
+ * bucket depending on which feature last touched the cache.
+ */
+export function classifySignalBucket(recommendation?: string | null): SignalBucket {
+  const rec = String(recommendation || '');
+  if (/buy|add/i.test(rec)) return 'opportunity';
+  if (/sell|trim|reduce|avoid/i.test(rec)) return 'risk';
+  return 'watch';
+}
+
+/** How old a cached row can be before the Dashboard should stop treating it as current. */
+export const SIGNAL_ROW_STALE_MS = 48 * 60 * 60 * 1000;
+
+export function isSignalRowFresh(row: Pick<CachedSignalRow, 'updatedAt'>, now = Date.now()): boolean {
+  if (!row.updatedAt) return true;
+  return now - row.updatedAt < SIGNAL_ROW_STALE_MS;
+}
+
 const KEY = 'qn-signal-cache-v1';
 const UPDATED_KEY = 'qn-signal-cache-updated-at';
 
