@@ -1,11 +1,29 @@
 import React from 'react';
-import { Activity, X, ShieldAlert } from 'lucide-react';
+import { Activity, X, ShieldAlert, Bot, Crosshair, Zap } from 'lucide-react';
 import { AuthPanel } from './AuthPanel';
 import { LegalLinks } from './LegalDocs';
 import { ManualLink } from './UserManual';
 import { openLegalDoc } from '../lib/legal';
 import { useAuth } from '../lib/auth';
 import { SubscriptionPlansSummary } from './SubscriptionPlansSummary';
+
+const FEATURES = [
+  {
+    icon: Bot,
+    title: 'AI Signals',
+    description: 'Buy/Sell/Hold calls scored across technicals, institutional flow, and sentiment for every ticker you track.',
+  },
+  {
+    icon: Crosshair,
+    title: 'Trade Zones',
+    description: 'Entry range, stop loss, and take-profit targets laid out for every position — no manual chart reading.',
+  },
+  {
+    icon: Zap,
+    title: 'Day Trade Scout',
+    description: 'Scans the market for same-day setups and ranks them by risk/reward before you open a chart.',
+  },
+];
 
 /** Public front page — the only signed-out entry. Dashboard never mounts here. */
 export function LandingPage() {
@@ -102,6 +120,24 @@ export function LandingPage() {
               />
             </div>
           </section>
+        </div>
+
+        <div className="w-full max-w-6xl mt-8 sm:mt-12 pt-8 sm:pt-10 border-t border-white/5 grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-5">
+          {FEATURES.map((f) => {
+            const Icon = f.icon;
+            return (
+              <div
+                key={f.title}
+                className="rounded-2xl border border-white/10 bg-[#0c0c0e]/70 p-4 sm:p-5"
+              >
+                <div className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 mb-3">
+                  <Icon className="h-4 w-4" />
+                </div>
+                <h3 className="text-sm font-bold text-white mb-1">{f.title}</h3>
+                <p className="text-[13px] text-gray-400 leading-relaxed">{f.description}</p>
+              </div>
+            );
+          })}
         </div>
 
         <div className="w-full max-w-6xl mt-8 sm:mt-12 pt-8 sm:pt-10 border-t border-white/5">

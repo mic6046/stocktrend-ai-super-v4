@@ -135,7 +135,7 @@ export function AppSidebar({
                   <p className="text-[12px] font-extrabold tracking-[0.04em] text-white uppercase truncate">
                     Quantum<span className="text-emerald-400">Node</span>
                   </p>
-                  <p className="text-[9px] font-mono uppercase tracking-[0.18em] text-gray-500">
+                  <p className="text-[10px] font-mono uppercase tracking-[0.18em] text-gray-500">
                     Equity terminal
                   </p>
                 </div>
@@ -180,7 +180,7 @@ export function AppSidebar({
           {NAV_GROUPS.map((group) => (
             <div key={group.label}>
               {!isCollapsed && (
-                <p className="px-2.5 mb-1.5 text-[9px] font-mono uppercase tracking-[0.2em] text-gray-600">
+                <p className="px-2.5 mb-1.5 text-[10px] font-mono uppercase tracking-[0.2em] text-gray-600">
                   {group.label}
                 </p>
               )}
@@ -247,7 +247,7 @@ export function AppSidebar({
         >
           {!isCollapsed && userEmail && (
             <div className="rounded-md border border-white/[0.06] bg-white/[0.02] px-2.5 py-2 space-y-1.5">
-              <p className="text-[9px] font-mono uppercase tracking-[0.16em] text-gray-600">
+              <p className="text-[10px] font-mono uppercase tracking-[0.16em] text-gray-600">
                 Signed in
               </p>
               <p className="text-[11px] text-gray-300 font-mono truncate" title={userEmail}>
@@ -305,7 +305,7 @@ export function AppSidebar({
                 label="Contact support"
               />
               <LegalLinks
-                className="flex-wrap gap-x-2.5 gap-y-1 text-[9px]"
+                className="flex-wrap gap-x-2.5 gap-y-1 text-[10px]"
                 linkClassName="text-gray-600 hover:text-gray-300 transition-colors cursor-pointer"
               />
             </div>

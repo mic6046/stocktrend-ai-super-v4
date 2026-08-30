@@ -132,6 +132,33 @@ export function AppHeader({
 
         {/* Right: market + alerts + account */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          {/* Compact status dot — always visible, even on the smallest screens, so
+              "is this data fresh/synced" doesn't disappear exactly where it matters most. */}
+          {(cloudSyncStatus === 'error' || marketDataStatus !== 'idle') && (
+            <span
+              className={cn(
+                'sm:hidden inline-flex h-2 w-2 rounded-full shrink-0',
+                cloudSyncStatus === 'error'
+                  ? 'bg-rose-400'
+                  : marketDataStatus === 'loading'
+                    ? 'bg-cyan-400 animate-pulse'
+                    : marketLive
+                      ? 'bg-emerald-400'
+                      : 'bg-amber-400'
+              )}
+              title={
+                cloudSyncStatus === 'error'
+                  ? 'Account sync failed — check connection and reload'
+                  : marketDataStatus === 'loading'
+                    ? 'Syncing market data…'
+                    : marketLive
+                      ? 'Market data live'
+                      : 'Market data stale'
+              }
+              aria-hidden="true"
+            />
+          )}
+
           {cloudSyncStatus !== 'idle' && (
             <div
               className={cn(
@@ -188,20 +215,24 @@ export function AppHeader({
             <span className="text-gray-500 normal-case tracking-normal">{formatAgo(lastUpdatedAt)}</span>
           </div>
 
+          {/* Costs a credit — kept visually distinct (emerald tint) from the neutral
+              icon buttons beside it so it doesn't invite an accidental tap. */}
           <button
             type="button"
             disabled={loading || marketDataStatus === 'loading'}
             onClick={onRefresh}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 text-gray-300 hover:bg-white/5 disabled:opacity-50 cursor-pointer"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-emerald-500/25 bg-emerald-500/[0.06] text-emerald-300 hover:bg-emerald-500/15 disabled:opacity-50 cursor-pointer"
             aria-label="Refresh analysis (uses 1 credit)"
             title="Refresh analysis · uses 1 AI credit"
           >
             {marketDataStatus === 'loading' || loading ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-400" />
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
             ) : (
               <RefreshCw className="h-3.5 w-3.5" />
             )}
           </button>
+
+          <div className="hidden sm:block h-5 w-px bg-white/10 shrink-0" aria-hidden="true" />
 
           <button
             type="button"
