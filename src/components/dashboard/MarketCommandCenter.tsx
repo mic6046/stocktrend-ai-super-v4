@@ -281,7 +281,7 @@ function StockTable({
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 min-w-0">
                 <span className="font-mono font-bold text-white text-[12.5px] shrink-0">{r.ticker}</span>
-                <span className="text-[10.5px] font-semibold text-cyan-300 truncate">{r.signal || '—'}</span>
+                <span className="min-w-0 shrink text-[10.5px] font-semibold text-cyan-300 truncate">{r.signal || '—'}</span>
               </div>
               <p className="mt-0.5 text-[11px] text-gray-500 truncate">{r.name || '—'}</p>
             </div>
