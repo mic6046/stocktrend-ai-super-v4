@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { TrendingUp, TrendingDown, Sparkles, Eye, ShieldAlert, ArrowRight } from 'lucide-react';
+import { TrendingUp, TrendingDown, Sparkles, Eye, ShieldAlert, ArrowRight, RefreshCw } from 'lucide-react';
 import { GlassCard, SectionLabel } from '../analysis/GlassCard';
 import { cn } from '../../lib/utils';
 import { apiUrl, loggedFetch } from '../../lib/api';
@@ -39,7 +39,23 @@ type MarketCommandCenterProps = {
   market: DashboardMarket;
   onOpenTicker: (ticker: string) => void;
   onGoFind: () => void;
+  /** Timestamp of the last AI Signals scan backing these cards (ms epoch), or null/0 if never run. */
+  signalsUpdatedAt?: number | null;
+  signalsRefreshing?: boolean;
+  signalsRefreshProgress?: { done: number; total: number } | null;
+  onRefreshSignals?: () => void;
 };
+
+function formatSignalAge(ts: number | null | undefined): string | null {
+  if (!ts) return null;
+  const sec = Math.max(0, Math.round((Date.now() - ts) / 1000));
+  if (sec < 60) return 'just now';
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  return `${Math.round(hr / 24)}d ago`;
+}
 
 const INDEX_LABEL: Record<string, string> = {
   '^GSPC': 'S&P 500',
@@ -303,6 +319,10 @@ export function MarketCommandCenter({
   market,
   onOpenTicker,
   onGoFind,
+  signalsUpdatedAt,
+  signalsRefreshing = false,
+  signalsRefreshProgress = null,
+  onRefreshSignals,
 }: MarketCommandCenterProps) {
   const core = useMemo(() => {
     const symbols = market === 'ALL' ? DASHBOARD_ALL_INDEX_SYMBOLS : DASHBOARD_INDEX_SYMBOLS[market];
@@ -472,6 +492,29 @@ export function MarketCommandCenter({
           confirms; headlines are secondary — not a trade order.
         </p>
       </GlassCard>
+
+      {(signalsUpdatedAt || onRefreshSignals) && (
+        <div className="flex items-center justify-between gap-3 -mb-1">
+          <p className="text-[11px] text-gray-500">
+            {signalsRefreshing && signalsRefreshProgress && signalsRefreshProgress.total > 0
+              ? `Refreshing signals ${signalsRefreshProgress.done}/${signalsRefreshProgress.total}…`
+              : signalsUpdatedAt
+                ? `Signals updated ${formatSignalAge(signalsUpdatedAt)}`
+                : 'Signals not scanned yet.'}
+          </p>
+          {onRefreshSignals && (
+            <button
+              type="button"
+              onClick={onRefreshSignals}
+              disabled={signalsRefreshing}
+              className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-300 hover:text-emerald-200 disabled:opacity-50 cursor-pointer"
+            >
+              <RefreshCw className={cn('h-3 w-3', signalsRefreshing && 'animate-spin')} />
+              {signalsRefreshing ? 'Updating…' : 'Refresh'}
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
         <GlassCard className="xl:col-span-1 min-w-0">

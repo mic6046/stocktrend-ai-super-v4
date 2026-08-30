@@ -42,7 +42,7 @@ import { PortfolioPage } from './components/pages/PortfolioPage';
 import { SettingsPage } from './components/pages/SettingsPage';
 import { SelfLearningSettings } from './components/pages/SelfLearningSettings';
 import { AlertsPage } from './components/pages/AlertsPage';
-import { loadSignalCache, mergeSignalCache, removeSignalCache, saveSignalCache, type CachedSignalRow } from './lib/signalCache';
+import { loadSignalCache, mergeSignalCache, removeSignalCache, saveSignalCache, loadLocalSignalCacheUpdatedAt, type CachedSignalRow } from './lib/signalCache';
 import { srSignalFromEngine } from './lib/srProximity';
 import {
   loadAppTheme,
@@ -7720,6 +7720,24 @@ export default function App() {
     }
   };
 
+  // Auto-refresh Dashboard's Opportunities/Watch/Risk cards when the cached
+  // scan is stale, instead of on every open (that was tried before and reverted
+  // — see commit 6636a8b — because rescanning on every visit is slow/wasteful
+  // when nothing material changed since the last look).
+  const SIGNAL_CACHE_STALE_MS = 2 * 60 * 60 * 1000;
+  useEffect(() => {
+    if (activePage !== 'DASHBOARD') return;
+    if (signalsUpdating) return;
+    const age = Date.now() - loadLocalSignalCacheUpdatedAt();
+    if (age < SIGNAL_CACHE_STALE_MS) return;
+    // Quiet credit check — unlike assertAnalysisCredits(), never pop the quota
+    // banner for a background refresh the user didn't explicitly ask for.
+    const canAutoRefresh = Boolean(user?.email) && (!usage || usage.unlimited || usage.analysesRemaining > 0);
+    if (!canAutoRefresh) return;
+    void updateAiSignals();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePage]);
+
   const updateWatchlist = async () => {
     if (watchlistUpdating) return;
     if (!assertAnalysisCredits()) return;
@@ -8082,6 +8100,13 @@ export default function App() {
               runTickerSearch(sym);
             }}
             onGoFind={() => setActivePage('FIND_TRADES')}
+            signalsUpdatedAt={loadLocalSignalCacheUpdatedAt() || null}
+            signalsRefreshing={signalsUpdating}
+            signalsRefreshProgress={signalsUpdateProgress}
+            onRefreshSignals={() => {
+              if (!assertAnalysisCredits()) return;
+              void updateAiSignals();
+            }}
           />
         )}
 
