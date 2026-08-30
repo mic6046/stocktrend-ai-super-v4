@@ -252,48 +252,44 @@ function StockTable({
     return <p className="text-[12px] text-gray-500 py-4 text-center">{emptyHint}</p>;
   }
   return (
-    <div className="overflow-x-auto -mx-1">
-      <table className="w-full min-w-[520px] text-left">
-        <thead>
-          <tr className="text-[9px] uppercase tracking-wider text-gray-500 border-b border-white/5">
-            <th className="py-2 px-2 font-medium">Ticker</th>
-            <th className="py-2 px-2 font-medium">Company</th>
-            <th className="py-2 px-2 font-medium">Price</th>
-            <th className="py-2 px-2 font-medium">Change</th>
-            <th className="py-2 px-2 font-medium">AI signal</th>
-            <th className="py-2 px-2 font-medium">Conf.</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.slice(0, 6).map((r) => (
-            <tr
-              key={r.ticker}
-              onClick={() => onOpen(r.ticker)}
-              className="border-b border-white/[0.04] hover:bg-white/[0.03] cursor-pointer"
-            >
-              <td className="py-2.5 px-2 font-mono font-bold text-white text-[12px]">{r.ticker}</td>
-              <td className="py-2.5 px-2 text-[11px] text-gray-400 truncate max-w-[140px]">{r.name || '—'}</td>
-              <td className="py-2.5 px-2 font-mono text-[12px] text-white">
+    <div className="divide-y divide-white/[0.04]">
+      {rows.slice(0, 6).map((r) => {
+        const up = (r.changePct || 0) >= 0;
+        return (
+          <button
+            type="button"
+            key={r.ticker}
+            onClick={() => onOpen(r.ticker)}
+            className="w-full flex items-center justify-between gap-3 py-2.5 px-1.5 -mx-1.5 rounded-md text-left hover:bg-white/[0.03] cursor-pointer min-w-0"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="font-mono font-bold text-white text-[12.5px] shrink-0">{r.ticker}</span>
+                <span className="text-[10.5px] font-semibold text-cyan-300 truncate">{r.signal || '—'}</span>
+              </div>
+              <p className="mt-0.5 text-[11px] text-gray-500 truncate">{r.name || '—'}</p>
+            </div>
+            <div className="shrink-0 text-right">
+              <p className="font-mono text-[12px] text-white tabular-nums">
                 {formatPrice(r.price, market, r.ticker)}
-              </td>
-              <td
-                className={cn(
-                  'py-2.5 px-2 font-mono text-[12px]',
-                  (r.changePct || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'
-                )}
-              >
-                {r.changePct != null
-                  ? `${r.changePct >= 0 ? '+' : ''}${r.changePct.toFixed(2)}%`
-                  : '—'}
-              </td>
-              <td className="py-2.5 px-2 text-[11px] font-semibold text-cyan-300">{r.signal || '—'}</td>
-              <td className="py-2.5 px-2 font-mono text-[12px] text-gray-300">
-                {r.confidence != null ? `${Math.round(r.confidence)}%` : '—'}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+              </p>
+              <div className="mt-0.5 flex items-center justify-end gap-2">
+                <span
+                  className={cn(
+                    'font-mono text-[11px] tabular-nums',
+                    up ? 'text-emerald-400' : 'text-rose-400'
+                  )}
+                >
+                  {r.changePct != null ? `${up ? '+' : ''}${r.changePct.toFixed(2)}%` : '—'}
+                </span>
+                <span className="font-mono text-[11px] text-gray-400 tabular-nums">
+                  {r.confidence != null ? `${Math.round(r.confidence)}%` : '—'}
+                </span>
+              </div>
+            </div>
+          </button>
+        );
+      })}
     </div>
   );
 }
