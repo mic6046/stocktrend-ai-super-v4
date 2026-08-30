@@ -1,4 +1,13 @@
 {
-  "indexes": [],
+  "indexes": [
+    {
+      "collectionGroup": "recommendationOutcomes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "graded", "order": "ASCENDING" },
+        { "fieldPath": "evaluateAt", "order": "ASCENDING" }
+      ]
+    }
+  ],
   "fieldOverrides": []
 }

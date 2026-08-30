@@ -98,5 +98,11 @@ service cloud.firestore {
         && request.resource.data.message.size() <= 4000;
       allow read, update, delete: if false;
     }
+
+    // Recommendation accuracy tracking — written/read by the Admin SDK
+    // (Cloud Run) only, never directly by clients.
+    match /recommendationOutcomes/{id} {
+      allow read, write: if false;
+    }
   }
 }

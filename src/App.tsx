@@ -19,6 +19,7 @@ import {
 } from './lib/recommendationChangeLog';
 import { buildQuantumInputFromMarketData } from './lib/quantumInputBuilder';
 import { runQuantumRecommendationEngine } from './lib/quantumRecommendationEngine';
+import { logRecommendationOutcome } from './lib/recommendationOutcomeLog';
 import {
   assertMatchesQuantumRecommendation,
   formatRecommendationDisplay,
@@ -7455,6 +7456,31 @@ export default function App() {
     projectionMeta.lastClose,
     cockpitData?.entryPrice,
     userHasPosition,
+  ]);
+
+  // Log this call for outcome tracking (accuracy measurement) — best-effort,
+  // deduped server-side per ticker/horizon/day so re-renders don't spam writes.
+  useEffect(() => {
+    const ticker = String(data?.ticker || '');
+    if (!ticker || !horizonView.currentPrice) return;
+    logRecommendationOutcome({
+      ticker,
+      engine: 'quantum',
+      horizon: horizonView.horizon,
+      action: horizonView.finalVerdict,
+      confidence: horizonView.confidence,
+      entryPrice: horizonView.currentPrice,
+      targetPrice: horizonView.targetPrice,
+      expectedReturn: horizonView.expectedReturn,
+    });
+  }, [
+    data?.ticker,
+    horizonView.horizon,
+    horizonView.finalVerdict,
+    horizonView.currentPrice,
+    horizonView.targetPrice,
+    horizonView.confidence,
+    horizonView.expectedReturn,
   ]);
 
   /** Shared Recommendation object — every analysis surface must mirror this. */
