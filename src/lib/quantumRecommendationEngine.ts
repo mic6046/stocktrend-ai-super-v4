@@ -988,7 +988,12 @@ function fairTargetPrice(input: QuantumEngineInput, netWeight: number): number {
   if (api.price != null && api.price > 0) candidates.push(api.price);
   if (api.ret != null) candidates.push(px * (1 + api.ret / 100));
 
-  if (input.baseTarget != null && Number.isFinite(input.baseTarget)) {
+  // baseTarget/baseReturn are derived from a long-biased risk/reward helper (always priced
+  // above current price) — they only represent a plausible "expected case" when evidence
+  // isn't dominantly bearish. Skip them once netWeight is clearly negative so they don't
+  // drag the blended target upward for stocks the evidence says are bearish.
+  const baseCaseIsBullBiased = netWeight < -0.15;
+  if (!baseCaseIsBullBiased && input.baseTarget != null && Number.isFinite(input.baseTarget)) {
     const monthMove = (input.baseTarget - px) / px;
     const scale = days / 21;
     candidates.push(
@@ -1003,7 +1008,7 @@ function fairTargetPrice(input: QuantumEngineInput, netWeight: number): number {
     const mix = input.horizon === '1W' ? 0.3 : input.horizon === '1M' ? 0.5 : input.horizon === '3M' ? 0.7 : 0.85;
     candidates.push(px + (input.bearTarget - px) * mix);
   }
-  if (input.baseReturn != null) {
+  if (!baseCaseIsBullBiased && input.baseReturn != null) {
     const scale = days / 21;
     candidates.push(px * (1 + (input.baseReturn / 100) * Math.sqrt(Math.max(0.25, scale))));
   }

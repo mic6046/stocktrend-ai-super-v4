@@ -553,7 +553,7 @@ app.get('/api/usage', async (req, res) => {
   try {
     const claimed = String(req.query.email || '').trim().toLowerCase();
     const authed = await requireAuthedEmailMatch(req, claimed || null);
-    if (!authed.ok) {
+    if (authed.ok === false) {
       return res.status(authed.status).json({ error: authed.error });
     }
     const usage = await getUsageSnapshot(authed.email);
@@ -2003,7 +2003,7 @@ app.post('/api/news-summary', async (req, res) => {
     req,
     typeof claimedEmail === 'string' ? claimedEmail : null
   );
-  if (!authed.ok) {
+  if (authed.ok === false) {
     return res.status(authed.status).json({ error: authed.error, code: 'auth_required' });
   }
   const email = authed.email;
@@ -2026,7 +2026,7 @@ app.post('/api/news-summary', async (req, res) => {
   }
 
   const billed = await consumeUsageCredit(email, 'news');
-  if (!billed.ok) {
+  if (billed.ok === false) {
     return res.status(billed.status).json({
       error: billed.error || 'Daily AI news usage is out. Please reload credits to continue.',
       code: billed.code,
@@ -2103,7 +2103,7 @@ app.post('/api/assistant-chat', async (req, res) => {
   const message = typeof messageRaw === 'string' ? messageRaw.trim() : '';
 
   const authed = await requireAuthedEmailMatch(req, claimedEmail || null);
-  if (!authed.ok) {
+  if (authed.ok === false) {
     return res.status(authed.status).json({
       error: authed.error || 'Sign in required to use the AI assistant.',
       code: 'auth_required',
@@ -2437,7 +2437,7 @@ app.post('/api/predict', async (req, res) => {
     req,
     typeof claimedEmail === 'string' ? claimedEmail : null
   );
-  if (!authed.ok) {
+  if (authed.ok === false) {
     return res.status(authed.status).json({
       error: authed.error || 'Sign in required for AI analysis.',
       code: 'auth_required',
@@ -2460,7 +2460,7 @@ app.post('/api/predict', async (req, res) => {
   if (bypassCache !== true && cachedEarly && (Date.now() - cachedEarly.timestamp < 1800000)) {
     // Cache hit still consumes 1 analysis credit (Search / Refresh always bill).
     const billed = await consumeUsageCredit(email, 'analysis');
-    if (!billed.ok) {
+    if (billed.ok === false) {
       return res.status(billed.status).json({
         error: billed.error,
         code: billed.code,
@@ -2598,7 +2598,7 @@ app.post('/api/predict', async (req, res) => {
   if (bypassCache !== true && cachedResult && (Date.now() - cachedResult.timestamp < 1800000)) { // 30 mins cache
     // Cache hit still consumes 1 analysis credit (Search / Refresh always bill).
     const billed = await consumeUsageCredit(email, 'analysis');
-    if (!billed.ok) {
+    if (billed.ok === false) {
       return res.status(billed.status).json({
         error: billed.error,
         code: billed.code,
@@ -2610,7 +2610,7 @@ app.post('/api/predict', async (req, res) => {
   }
 
   const billed = await consumeUsageCredit(email, 'analysis');
-  if (!billed.ok) {
+  if (billed.ok === false) {
     return res.status(billed.status).json({
       error: billed.error,
       code: billed.code,

@@ -215,12 +215,12 @@ function rateRsiHeat(tech: TechnicalBreakdown): DayTradeFactor {
     } else if ((rsi > 65 && rsi < 75) || (rsi < 35 && rsi > 25)) {
       rating = 3;
       detail = `RSI ${rsi.toFixed(0)} — directional but nearing heat.`;
-    } else if (rsi >= 75 || rsi <= 25) {
-      rating = 1;
-      detail = `RSI ${rsi.toFixed(0)} — extreme; fade-only or skip.`;
-    } else {
+    } else if ((rsi >= 75 && rsi < 85) || (rsi <= 25 && rsi > 15)) {
       rating = 2;
       detail = `RSI ${rsi.toFixed(0)} — stretched.`;
+    } else {
+      rating = 1;
+      detail = `RSI ${rsi.toFixed(0)} — extreme; fade-only or skip.`;
     }
   }
   return {

@@ -374,7 +374,7 @@ export function registerStripeRoutes(app: express.Express) {
       const plan = (req.body?.plan as Plan) || 'monthly';
       const claimedEmail = String(req.body?.email || '').trim().toLowerCase();
       const authed = await requireAuthedEmailMatch(req, claimedEmail || null);
-      if (!authed.ok) {
+      if (authed.ok === false) {
         return res.status(authed.status).json({ error: authed.error });
       }
       const email = authed.email;
@@ -433,7 +433,7 @@ export function registerStripeRoutes(app: express.Express) {
       const claimedEmail = String(req.body?.email || '').trim().toLowerCase();
       const product = String(req.body?.product || '');
       const authed = await requireAuthedEmailMatch(req, claimedEmail || null);
-      if (!authed.ok) {
+      if (authed.ok === false) {
         return res.status(authed.status).json({ error: authed.error });
       }
       const email = authed.email;
@@ -477,7 +477,7 @@ export function registerStripeRoutes(app: express.Express) {
         return res.status(503).json({ error: 'Stripe is not configured' });
       }
       const authed = await requireAuthedEmail(req);
-      if (!authed.ok) {
+      if (authed.ok === false) {
         return res.status(authed.status).json({ error: authed.error });
       }
 
@@ -556,7 +556,7 @@ export function registerStripeRoutes(app: express.Express) {
       }
       const claimedEmail = String(req.body?.email || '').trim().toLowerCase();
       const authed = await requireAuthedEmailMatch(req, claimedEmail || null);
-      if (!authed.ok) {
+      if (authed.ok === false) {
         return res.status(authed.status).json({ error: authed.error });
       }
       const email = authed.email;

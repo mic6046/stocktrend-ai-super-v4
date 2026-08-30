@@ -884,7 +884,7 @@ export function HistoricalValuationDashboard({
                         fill="#ddd6fe"
                         stroke="#ffffff"
                         strokeWidth={2}
-                        isFront
+                        zIndex={700}
                         ifOverflow="extendDomain"
                         shape={(props: any) => {
                           const { cx, cy } = props;
