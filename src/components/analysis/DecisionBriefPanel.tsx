@@ -75,7 +75,7 @@ export function DecisionBriefPanel({ decision }: DecisionBriefPanelProps) {
         )}
         {decision.criticalCaveat && (
           <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-2.5 py-2">
-            <p className="text-[8px] uppercase tracking-wider text-amber-300 font-bold">⚠ Key risk</p>
+            <p className="text-[8px] uppercase tracking-wider text-amber-300 font-bold">⚠ Important</p>
             <p className="mt-0.5 text-[12px] font-bold text-amber-100 leading-relaxed">
               {decision.criticalCaveat}
             </p>

@@ -54,7 +54,8 @@ type AnalysisHeroCardProps = {
   futureReEntryZone?: { lo: number; hi: number } | null;
   conflictingFactors?: string[] | null;
   whatToWatch?: string | null;
-  /** BUY near resistance, or SELL/REDUCE at support — must be shown boldly, not buried. */
+  /** BUY near resistance, SELL/REDUCE at support, or a REDUCE call whose number
+   * can look inconsistent with the label — must be shown boldly, not buried. */
   criticalCaveat?: string | null;
   confidenceBand?: 'Very Low' | 'Low' | 'Moderate' | 'High' | null;
   userHasPosition?: boolean;
@@ -295,7 +296,7 @@ export function AnalysisHeroCard({
                 {criticalCaveat && (
                   <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-2.5 py-2">
                     <p className="text-[9px] uppercase tracking-wider text-amber-300 font-bold">
-                      ⚠ Key risk
+                      ⚠ Important
                     </p>
                     <p className="mt-0.5 text-[11px] font-bold text-amber-100 leading-snug">
                       {criticalCaveat}

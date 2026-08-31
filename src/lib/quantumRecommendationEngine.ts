@@ -254,8 +254,9 @@ export type QuantumEngineOutput = {
   visibleZoneKeys: Array<'buy' | 'add' | 'hold' | 'takeProfit' | 'reduce' | 'exit' | 'stop'>;
   zonesConsistent: boolean;
   keyReasons: string[];
-  /** Must be surfaced prominently: BUY within ~2.5% of resistance, or SELL/REDUCE
-   * triggered by a support breakdown. Null when neither condition applies. */
+  /** Must be surfaced prominently: BUY within ~2.5% of resistance, SELL/REDUCE
+   * triggered by a support breakdown/proximity, or a REDUCE call whose clamped
+   * expected return can look inconsistent with the label. Null otherwise. */
   criticalCaveat: string | null;
   summaryLead: string;
   explanation: string;
@@ -2317,6 +2318,13 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
       criticalCaveat = evidence.supportBroken
         ? `This ${rec} call is driven by a confirmed break below support (~${evidence.supportLevel.toFixed(2)}) plus independent confirmation (${evidence.bearConfirmCount} bearish signals) — not a single softening indicator.`
         : `Price is only ${(((px - evidence.supportLevel) / px) * 100).toFixed(1)}% above support (~${evidence.supportLevel.toFixed(2)}). A bounce here is common — this call is based on weakening evidence beyond just proximity to the level.`;
+    } else if (rec === 'REDUCE' && evidence.supportHolding) {
+      // REDUCE while support still holds gets its expected-return clamped to
+      // a narrow +/-2.9% band (line ~2068) — which can render as a positive
+      // number/target next to a "REDUCE" label and look self-contradictory.
+      // It isn't: REDUCE here means trim size on softening flow/momentum, a
+      // different and less severe call than SELL (structural breakdown).
+      criticalCaveat = `REDUCE means trim position size on weakening momentum or flow — not a bearish price call. Support is still holding, so the near-term target stays in a narrow range instead of projecting a decline; that's why it can look mild or even slightly positive next to "REDUCE".`;
     }
 
     const whyWins = buildWhyWins(rec, evidence);
