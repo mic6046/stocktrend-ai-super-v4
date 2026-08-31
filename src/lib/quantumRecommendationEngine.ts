@@ -254,6 +254,9 @@ export type QuantumEngineOutput = {
   visibleZoneKeys: Array<'buy' | 'add' | 'hold' | 'takeProfit' | 'reduce' | 'exit' | 'stop'>;
   zonesConsistent: boolean;
   keyReasons: string[];
+  /** Must be surfaced prominently: BUY within ~2.5% of resistance, or SELL/REDUCE
+   * triggered by a support breakdown. Null when neither condition applies. */
+  criticalCaveat: string | null;
   summaryLead: string;
   explanation: string;
   chartStance: ChartStance;
@@ -1985,6 +1988,7 @@ function emptyOutput(horizon: HorizonKey, horizonLabel: string, input: QuantumEn
     visibleZoneKeys: visibleZonesFor(hasPos),
     zonesConsistent: false,
     keyReasons: ['Awaiting price data'],
+    criticalCaveat: null,
     summaryLead: 'Awaiting price data to generate a QuantumNode Consensus recommendation.',
     explanation: `All metrics are locked to the ${horizonLabel} Investment Horizon.`,
     chartStance: 'neutral',
@@ -2127,6 +2131,13 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
         ? clamp(input.dataCompleteness, 0, 1)
         : 1;
     const completenessPenalty = Math.round((1 - completeness) * 20);
+    // Buying within ~2.5% of resistance carries real, elevated rejection risk
+    // (a very common outcome: price stalls or reverses right at the level)
+    // regardless of how strong the other evidence looks — the buy gate
+    // (line ~950) only blocks this outright when momentum is also weak, so a
+    // bullish call with decent momentum could otherwise sail through at full
+    // confidence right at a ceiling. Temper confidence directly instead.
+    const resistanceProximityPenalty = evidence.nearResistance && evidence.netWeight >= 0 ? 10 : 0;
     let confidence = Math.round(
       clamp(
         baseConf * 0.2 +
@@ -2135,7 +2146,8 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
           (evidence.buyGatePass || evidence.sellGatePass ? 8 : 0) +
           decisive * 12 -
           dispersionPenalty -
-          completenessPenalty,
+          completenessPenalty -
+          resistanceProximityPenalty,
         30,
         94
       )
@@ -2288,6 +2300,25 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
       .slice(0, 6);
     while (keyReasons.length < 3) keyReasons.push('Mixed evidence — position sizing discipline preferred');
 
+    // nearResistance/nearSupport/supportBroken were previously only used as
+    // silent gate conditions — a BUY near resistance with decent momentum, or
+    // a SELL/REDUCE at support, never explained *why* despite the level being
+    // the single most relevant fact. This must be surfaced, not buried.
+    let criticalCaveat: string | null = null;
+    if ((rec === 'BUY' || rec === 'STRONG BUY') && evidence.nearResistance && evidence.resistanceLevel != null && px > 0) {
+      const distPct = (((evidence.resistanceLevel - px) / px) * 100).toFixed(1);
+      criticalCaveat = `Price is only ${distPct}% below resistance (~${evidence.resistanceLevel.toFixed(2)}). Rejection at this level is common — this ${rec} call assumes the level breaks with confirmation, not that it already has. Consider a smaller entry or waiting for a confirmed close above resistance.`;
+    } else if (
+      (rec === 'SELL' || rec === 'REDUCE' || rec === 'AVOID NEW POSITION') &&
+      (evidence.supportBroken || evidence.nearSupport) &&
+      evidence.supportLevel != null &&
+      px > 0
+    ) {
+      criticalCaveat = evidence.supportBroken
+        ? `This ${rec} call is driven by a confirmed break below support (~${evidence.supportLevel.toFixed(2)}) plus independent confirmation (${evidence.bearConfirmCount} bearish signals) — not a single softening indicator.`
+        : `Price is only ${(((px - evidence.supportLevel) / px) * 100).toFixed(1)}% above support (~${evidence.supportLevel.toFixed(2)}). A bounce here is common — this call is based on weakening evidence beyond just proximity to the level.`;
+    }
+
     const whyWins = buildWhyWins(rec, evidence);
     const rejectedOpposite = buildRejectedOpposite(rec, evidence);
     const suggestedAction = positionAwareSuggestedAction(rec, currentAction, userHasPosition, evidence);
@@ -2352,6 +2383,7 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
       visibleZoneKeys,
       zonesConsistent,
       keyReasons,
+      criticalCaveat,
       summaryLead,
       explanation: `PRIMARY ACTION ${actionLabel}. ${whyLine}${nextLine} Consensus for ${horizonLabel}: ${note}`,
       chartStance: chartStanceFromRecommendation(rec),

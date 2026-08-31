@@ -8633,6 +8633,11 @@ export default function App() {
                       null
                     }
                     userHasPosition={userHasPosition}
+                    criticalCaveat={
+                      masterRecommendation?.engine?.criticalCaveat ||
+                      horizonView.criticalCaveat ||
+                      null
+                    }
                   />
                   <AiInsightsStrip
                     keyRisks={keyRisks}
