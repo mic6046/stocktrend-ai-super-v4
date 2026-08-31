@@ -586,20 +586,32 @@ function collectEvidence(input: QuantumEngineInput): EvidenceBag {
     }
   }
 
-  if (input.technical?.obvBias === 'bull') {
-    bullish.push({ label: 'OBV / volume accumulation', weight: 0.4, polarity: 'bull' });
-  } else if (input.technical?.obvBias === 'bear') {
-    bearish.push({ label: 'OBV / volume distribution', weight: 0.4, polarity: 'bear' });
-  }
+  // obvBias is not derived from real On-Balance-Volume data — both builder call
+  // sites set it from the same accumulation/distribution status already voted
+  // below as "Whale accumulation/distribution". Casting a second additive vote
+  // from identical source data isn't a confirmation, so it's used only for the
+  // (non-additive, OR-based) sell-confirmation gate further down, not here.
 
   if (input.technical?.volumeBias === 'high') {
     neutral.push({ label: 'Elevated volume — confirmation required', weight: 0.15, polarity: 'neutral' });
   }
 
   // --- Money flow ---
+  // institutionalScore, whaleScore, and smartMoneyScore are three independently
+  // *coded* but not independently *sourced* proxies — all three are volume/price-
+  // weighted flow estimates over overlapping ~10-14 day windows of the same
+  // OHLCV data (no real trade-level institutional data feed is wired up). They
+  // were previously weighted as if each were a separate confirmation (0.9/0.85/
+  // 0.7 — the single largest weights in the whole model), which let one noisy
+  // flow read, once it happened to agree across all three formulas, dominate
+  // more specific technical signals. fundFlowBias was a fourth, literal
+  // duplicate of whaleScore's own source status and has been removed entirely
+  // rather than re-weighted. Weights below are reduced to reflect "several
+  // correlated reads of the same underlying signal" rather than "three
+  // independent confirmations".
   if (input.institutionalScore != null) {
     if (input.institutionalScore >= 60) {
-      bullish.push({ label: 'Institutional accumulation detected', weight: 0.9, polarity: 'bull' });
+      bullish.push({ label: 'Institutional accumulation detected', weight: 0.55, polarity: 'bull' });
       pushSignal(
         explainedSignals,
         {
@@ -618,7 +630,7 @@ function collectEvidence(input: QuantumEngineInput): EvidenceBag {
         horizon
       );
     } else if (input.institutionalScore < 40) {
-      bearish.push({ label: 'Institutional selling / distribution', weight: 0.85, polarity: 'bear' });
+      bearish.push({ label: 'Institutional selling / distribution', weight: 0.5, polarity: 'bear' });
       pushSignal(
         explainedSignals,
         {
@@ -642,26 +654,20 @@ function collectEvidence(input: QuantumEngineInput): EvidenceBag {
   if (input.whaleScore != null) {
     if (input.whaleScore >= 60) {
       whale = Math.max(whale, input.whaleScore);
-      bullish.push({ label: 'Whale accumulation detected', weight: 0.85, polarity: 'bull' });
+      bullish.push({ label: 'Whale accumulation detected', weight: 0.5, polarity: 'bull' });
     } else if (input.whaleScore < 40) {
       whale = Math.min(whale, input.whaleScore);
-      bearish.push({ label: 'Whale distribution', weight: 0.8, polarity: 'bear' });
+      bearish.push({ label: 'Whale distribution', weight: 0.45, polarity: 'bear' });
     }
   }
 
   if (input.smartMoneyScore != null) {
     if (input.smartMoneyScore >= 65) {
       whale = Math.max(whale, input.smartMoneyScore * 0.9);
-      bullish.push({ label: 'Smart money index constructive', weight: 0.7, polarity: 'bull' });
+      bullish.push({ label: 'Smart money index constructive', weight: 0.4, polarity: 'bull' });
     } else if (input.smartMoneyScore < 40) {
-      bearish.push({ label: 'Smart money index weak', weight: 0.65, polarity: 'bear' });
+      bearish.push({ label: 'Smart money index weak', weight: 0.35, polarity: 'bear' });
     }
-  }
-
-  if (input.fundFlowBias === 'inflow') {
-    bullish.push({ label: 'Fund / capital inflow', weight: 0.5, polarity: 'bull' });
-  } else if (input.fundFlowBias === 'outflow') {
-    bearish.push({ label: 'Fund / capital outflow', weight: 0.5, polarity: 'bear' });
   }
 
   if (input.momentumScore != null) {

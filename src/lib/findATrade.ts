@@ -244,22 +244,6 @@ async function scoutOneFind(
   }
 }
 
-function roughLevels(closes: number[], px: number) {
-  if (closes.length < 10) {
-    return { s1: px * 0.97, s2: px * 0.94, r1: px * 1.03, r2: px * 1.06 };
-  }
-  const window = closes.slice(-40);
-  const lo = Math.min(...window);
-  const hi = Math.max(...window);
-  const mid = (lo + hi) / 2;
-  return {
-    s1: Math.min(px * 0.98, mid + (lo - mid) * 0.35),
-    s2: lo,
-    r1: Math.max(px * 1.02, mid + (hi - mid) * 0.35),
-    r2: hi,
-  };
-}
-
 function rankScoreSuggest(c: SuggestTradeCandidate): number {
   if (!c.isBuyCandidate) return -1e9;
   const composite = c.suggestComposite ?? c.score;
@@ -322,69 +306,20 @@ async function scoutOneSuggest(
       return emptySuggestFail(ticker, 'Technical indicators unavailable.', 'No technicals');
     }
 
-    const closes = history.map((h: any) => Number(h.close));
-    const levels = roughLevels(closes, px);
-    const instFlow = tech.indicators?.institutionalFlow?.status;
-    const ad = tech.quantumRefinement?.accumulationDistribution?.status;
-    const sm = tech.quantumRefinement?.smartMoneyIndex?.status;
-    const sector = tech.quantumRefinement?.sectorRotation?.status;
-
-    const whaleScore = ad === 'ACCUMULATION' ? 78 : ad === 'DISTRIBUTION' ? 32 : 52;
-    const institutionalScore =
-      instFlow === 'LARGE_INFLOW' || instFlow === 'STEALTH_ACCUMULATION'
-        ? 80
-        : instFlow === 'LARGE_OUTFLOW' || instFlow === 'STEALTH_DISTRIBUTION'
-          ? 30
-          : 55;
-    const smartMoneyScore = sm === 'BULLISH' ? 85 : sm === 'BEARISH' ? 35 : 50;
-
-    const engine = runQuantumRecommendationEngine({
+    // Previously hand-duplicated the same whale/institutional/smart-money/momentum
+    // construction as buildQuantumInputFromMarketData (with the same bugs: RSI
+    // copied as "momentum", accumulation/distribution status triple-counted as
+    // whale + fundFlow + obv). Use the shared, already-fixed builder instead —
+    // suggest mode's own factor scoring below reads `tech` directly, not these
+    // derived scores, so nothing else in this function depended on duplicating it.
+    const input = buildQuantumInputFromMarketData({
       horizon,
-      currentPrice: px,
-      baseScore: tech.masterScores?.aiBuyScore ?? 60,
-      baseConfidence: 65,
-      baseTarget: px * 1.06,
-      bullTarget: px * 1.12,
-      bearTarget: px * 0.92,
-      technical: {
-        rsi: tech.indicators?.rsi ?? null,
-        macdBullish:
-          tech.indicators?.macd != null
-            ? tech.indicators.macd.macdLine > tech.indicators.macd.signalLine
-            : null,
-        trend: tech.quantumRefinement?.trendStrength?.status ?? null,
-        volatility: tech.indicators?.volatility ?? null,
-        emaBias:
-          tech.indicators?.ema20 != null && px > tech.indicators.ema20 ? 'bull' : 'bear',
-        smaBias:
-          tech.indicators?.sma50 != null && px > tech.indicators.sma50 ? 'bull' : 'bear',
-        bollingerBias:
-          tech.indicators?.bollinger?.percent != null
-            ? tech.indicators.bollinger.percent <= 0.2
-              ? 'oversold'
-              : tech.indicators.bollinger.percent >= 0.8
-                ? 'overbought'
-                : 'mid'
-            : null,
-        obvBias: ad === 'ACCUMULATION' ? 'bull' : ad === 'DISTRIBUTION' ? 'bear' : 'neutral',
-        volumeBias:
-          (tech.quantumRefinement?.rvol?.ratio ?? 1) >= 1.4
-            ? 'high'
-            : (tech.quantumRefinement?.rvol?.ratio ?? 1) <= 0.7
-              ? 'low'
-              : 'normal',
-      },
-      levels,
-      whaleScore,
-      institutionalScore,
-      sentimentScore: 58,
-      momentumScore: tech.indicators?.rsi != null ? Math.round(tech.indicators.rsi) : 55,
-      smartMoneyScore,
-      fundFlowBias: ad === 'ACCUMULATION' ? 'inflow' : ad === 'DISTRIBUTION' ? 'outflow' : 'neutral',
-      sectorBias: sector === 'LEADER' ? 'leader' : sector === 'LAGGARD' ? 'laggard' : 'neutral',
-      userHasPosition: false,
       ticker,
+      quote: data?.quote,
+      history,
+      userHasPosition: false,
     });
+    const engine = runQuantumRecommendationEngine(input);
 
     const suggest = scoreSuggestTrade({
       technical: tech,
