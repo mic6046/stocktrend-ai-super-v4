@@ -1146,6 +1146,22 @@ export function sanitizePrimaryDecision(d: PrimaryDecision): PrimaryDecision {
     };
   }
 
+  if (!d.userHasPosition && d.action === 'EXIT') {
+    return {
+      ...d,
+      action: 'WAIT',
+      displayLabel: 'WAIT — NO POSITION TO EXIT',
+      reason: 'This exit alert applies to existing holders. You have no position here to exit.',
+      why: 'Non-owners cannot EXIT a position they do not hold.',
+      nextOpportunity: d.reEntryZone
+        ? `Future entry zone ${formatZoneRange(d.reEntryZone)}.`
+        : 'Wait for a confirmed Buy Zone setup.',
+      zoneKey: 'hold',
+      validated: true,
+      conflictsFixed: [...d.conflictsFixed, 'Sanitized: flat account cannot EXIT'],
+    };
+  }
+
   if (d.userHasPosition && d.action === 'BUY') {
     return {
       ...d,
