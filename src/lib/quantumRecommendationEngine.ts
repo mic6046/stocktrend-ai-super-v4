@@ -2398,12 +2398,24 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
     // silent gate conditions — a BUY near resistance with decent momentum, or
     // a SELL/REDUCE at support, never explained *why* despite the level being
     // the single most relevant fact. This must be surfaced, not buried.
+    //
+    // REDUCE is a position-management concept — positionAwareHeadline only
+    // ever displays a REDUCE-flavored primary action when userHasPosition is
+    // true; for a flat account, rec === 'REDUCE' resolves to something
+    // unrelated (WAIT/HOLD/etc, since you can't reduce a position you don't
+    // own). The caveat box sits inside the Primary Action UI context, so
+    // firing it off the raw horizon-level rec regardless of position produced
+    // a caveat talking about "REDUCE" next to a primary action that was never
+    // REDUCE at all — confusing, not clarifying. Gate every REDUCE-specific
+    // branch on userHasPosition; SELL/AVOID/BUY don't need this guard since
+    // they still map to a semantically-aligned flat-account action (e.g.
+    // "NO NEW POSITION" for SELL) even when the exact label text differs.
     let criticalCaveat: string | null = null;
     if ((rec === 'BUY' || rec === 'STRONG BUY') && evidence.nearResistance && evidence.resistanceLevel != null && px > 0) {
       const distPct = (((evidence.resistanceLevel - px) / px) * 100).toFixed(1);
       criticalCaveat = `Price is only ${distPct}% below resistance (~${evidence.resistanceLevel.toFixed(2)}). Rejection at this level is common — this ${rec} call assumes the level breaks with confirmation, not that it already has. Consider a smaller entry or waiting for a confirmed close above resistance.`;
     } else if (
-      (rec === 'SELL' || rec === 'REDUCE' || rec === 'AVOID NEW POSITION') &&
+      (rec === 'SELL' || rec === 'AVOID NEW POSITION' || (rec === 'REDUCE' && userHasPosition)) &&
       (evidence.supportBroken || evidence.nearSupport) &&
       evidence.supportLevel != null &&
       px > 0
@@ -2411,7 +2423,7 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
       criticalCaveat = evidence.supportBroken
         ? `This ${rec} call is driven by a confirmed break below support (~${evidence.supportLevel.toFixed(2)}) plus independent confirmation (${evidence.bearConfirmCount} bearish signals) — not a single softening indicator.`
         : `Price is only ${(((px - evidence.supportLevel) / px) * 100).toFixed(1)}% above support (~${evidence.supportLevel.toFixed(2)}). A bounce here is common — this call is based on weakening evidence beyond just proximity to the level.`;
-    } else if (rec === 'REDUCE' && evidence.supportHolding) {
+    } else if (rec === 'REDUCE' && userHasPosition && evidence.supportHolding) {
       // REDUCE while support still holds gets its expected-return clamped to
       // a narrow +/-2.9% band (line ~2068) — which can render as a positive
       // number/target next to a "REDUCE" label and look self-contradictory.
