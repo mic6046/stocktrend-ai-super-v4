@@ -877,10 +877,18 @@ function collectEvidence(input: QuantumEngineInput): EvidenceBag {
 
   const priceVolumeSurge = volumeHigh && priceRisingConfirmed && input.technical?.macdBullish !== false;
   const breakoutWithVolume = priceAboveResistanceNow && volumeHigh;
+  // A single 80+ flow reading isn't "strong accumulation" if the OTHER two flow
+  // measures are both actively bearish (<40) — that's whale/institutional flow
+  // disagreeing with itself, not conviction. Require at least one of the other
+  // two measures to not be bearish before the 80+ reading counts.
+  const isFlowBearish = (v: number | null | undefined) => v != null && v < 40;
+  const whaleHigh = input.whaleScore != null && input.whaleScore >= 80;
+  const instHigh = input.institutionalScore != null && input.institutionalScore >= 80;
+  const smartHigh = input.smartMoneyScore != null && input.smartMoneyScore >= 80;
   const strongAccumulation =
-    (input.whaleScore != null && input.whaleScore >= 80) ||
-    (input.institutionalScore != null && input.institutionalScore >= 80) ||
-    (input.smartMoneyScore != null && input.smartMoneyScore >= 80);
+    (whaleHigh && (!isFlowBearish(input.institutionalScore) || !isFlowBearish(input.smartMoneyScore))) ||
+    (instHigh && (!isFlowBearish(input.whaleScore) || !isFlowBearish(input.smartMoneyScore))) ||
+    (smartHigh && (!isFlowBearish(input.whaleScore) || !isFlowBearish(input.institutionalScore)));
   const pullbackToSupportInUptrend =
     trend.includes('BULL') &&
     px > 0 &&
