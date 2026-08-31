@@ -2097,14 +2097,31 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
     const decisive = Math.abs(evidence.bullishScore - evidence.bearishScore) / 100;
     const mixedSignals =
       Math.abs(evidence.netWeight) < 0.28 || Math.abs(evidence.bullishScore - evidence.bearishScore) < 18;
+    // Confidence was previously a pure function of the same aggregate score
+    // that produces the call (netWeight/overall/decisive) — so two calls with
+    // an identical aggregate score got identical confidence even when one
+    // committee unanimously agreed and the other was split down the middle.
+    // Penalize confidence directly for seats whose own score meaningfully
+    // opposes the call's direction, independent of the aggregate magnitude.
+    // (This is not the same thing as calibration against real outcomes — the
+    // recommendationOutcomes tracker has no data yet to calibrate against —
+    // but it does make confidence track genuine internal disagreement, which
+    // it previously ignored entirely.)
+    const callDirection = evidence.netWeight >= 0 ? 1 : -1;
+    const disagreeingSeats = evidence.committee.filter((c) => {
+      const lean = c.score - 50;
+      return Math.sign(lean) === -callDirection && Math.abs(lean) > 8;
+    }).length;
+    const dispersionPenalty = Math.min(20, disagreeingSeats * 5);
     let confidence = Math.round(
       clamp(
         baseConf * 0.2 +
           Math.abs(evidence.netWeight) * 40 +
           evidence.scores.overall * 0.28 +
           (evidence.buyGatePass || evidence.sellGatePass ? 8 : 0) +
-          decisive * 12,
-        38,
+          decisive * 12 -
+          dispersionPenalty,
+        30,
         94
       )
     );
