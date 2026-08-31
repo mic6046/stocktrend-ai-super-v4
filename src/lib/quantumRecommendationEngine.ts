@@ -202,6 +202,8 @@ export type QuantumEngineInput = {
   technicalBreakdown?: import('./technical').TechnicalBreakdown | null;
   /** Detected market regime — shifts committee weights (see getCommitteeWeights). */
   marketRegime?: string | null;
+  /** 0..1 — how much of the input rests on real data vs. silent fallback defaults. */
+  dataCompleteness?: number | null;
 };
 
 export type QuantumEngineOutput = {
@@ -2113,6 +2115,18 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
       return Math.sign(lean) === -callDirection && Math.abs(lean) > 8;
     }).length;
     const dispersionPenalty = Math.min(20, disagreeingSeats * 5);
+    // Short price history, missing P/E, and missing/zero volume all made
+    // technical.ts's flow indicators (accumulation/distribution, institutional
+    // flow, smart money) fall back to placeholder defaults — silently, with no
+    // effect on confidence. A ticker with almost no usable data produced a
+    // full-strength recommendation indistinguishable from one backed by solid
+    // data. Unknown (caller didn't supply it) defaults to fully complete —
+    // never penalize on the absence of the signal itself.
+    const completeness =
+      input.dataCompleteness != null && Number.isFinite(input.dataCompleteness)
+        ? clamp(input.dataCompleteness, 0, 1)
+        : 1;
+    const completenessPenalty = Math.round((1 - completeness) * 20);
     let confidence = Math.round(
       clamp(
         baseConf * 0.2 +
@@ -2120,7 +2134,8 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
           evidence.scores.overall * 0.28 +
           (evidence.buyGatePass || evidence.sellGatePass ? 8 : 0) +
           decisive * 12 -
-          dispersionPenalty,
+          dispersionPenalty -
+          completenessPenalty,
         30,
         94
       )

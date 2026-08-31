@@ -77,6 +77,35 @@ function momentumScoreFromRoc(history: any[], currentPrice: number): number | nu
 }
 
 /**
+ * How much of the data this call actually rests on vs. silent fallbacks.
+ * Short history makes RSI/MACD/trend noisy and technical.ts's accumulation/
+ * distribution, institutional-flow, and smart-money reads default to neutral
+ * placeholders below 10-14 days of history; missing trailingPE previously
+ * scored a fabricated "fairly valued" bucket instead of neutral (now fixed
+ * separately); missing/zero volume makes every flow-based indicator here
+ * meaningless noise. None of this previously reduced confidence — a ticker
+ * with almost no usable inputs produced a full-strength recommendation
+ * indistinguishable from one backed by solid data.
+ */
+function computeDataCompleteness(history: any[], quote: any): number {
+  let score = 0;
+  const maxScore = 3;
+
+  if (history.length >= 60) score += 1;
+  else if (history.length >= 30) score += 0.6;
+  else if (history.length >= 14) score += 0.3;
+
+  const hasPE = Number.isFinite(quote?.trailingPE) && Number(quote?.trailingPE) > 0;
+  if (hasPE) score += 1;
+
+  const recentBars = history.slice(-20);
+  const barsWithVolume = recentBars.filter((h) => Number(h?.volume) > 0).length;
+  score += recentBars.length > 0 ? barsWithVolume / recentBars.length : 0;
+
+  return Math.max(0, Math.min(1, score / maxScore));
+}
+
+/**
  * Build QuantumEngineInput from OHLCV + optional full-analysis enrichments.
  * Chart-derived fields are identical for Find a Trade and App; enrich only upgrades inputs.
  */
@@ -225,5 +254,6 @@ export function buildQuantumInputFromMarketData(opts: {
     userHasPosition: Boolean(opts.userHasPosition),
     technicalBreakdown: tech ?? null,
     marketRegime: inst?.marketRegime ?? null,
+    dataCompleteness: computeDataCompleteness(history, opts.quote),
   };
 }

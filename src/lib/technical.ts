@@ -1898,12 +1898,19 @@ export function computeTechnicalIndicators(history: any[], lastQuote: any): Tech
   const masterSentimentScore = Math.max(5, Math.min(100, rawSentimentScore));
 
   // 4. Value Score (0-100) -> PE, PB, Dividend, Earnings Growth (Weights: 15%)
-  const peVal = lastQuote?.trailingPE || 22.5;
+  // Previously defaulted missing P/E to 22.5, which lands in the "fairly
+  // valued" bucket (65/100) — a mildly bullish-coded score fabricated from
+  // absent data, common for many international/growth tickers whose provider
+  // doesn't report trailingPE. Missing data should score neutral, not "fine".
+  const hasRealPE = Number.isFinite(lastQuote?.trailingPE) && Number(lastQuote?.trailingPE) > 0;
+  const peVal = hasRealPE ? Number(lastQuote.trailingPE) : null;
   let valuationScore = 50;
-  if (peVal < 15) valuationScore = 85;
-  else if (peVal < 26) valuationScore = 65;
-  else if (peVal < 45) valuationScore = 40;
-  else valuationScore = 20;
+  if (peVal != null) {
+    if (peVal < 15) valuationScore = 85;
+    else if (peVal < 26) valuationScore = 65;
+    else if (peVal < 45) valuationScore = 40;
+    else valuationScore = 20;
+  }
 
   const rawValueScore = (
     valuationScore * 0.30 +
