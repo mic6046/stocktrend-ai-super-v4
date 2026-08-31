@@ -708,8 +708,12 @@ export function resolvePrimaryAction(opts: {
   });
 
   const { location: buyLoc, active } = locatePriceInBuyZones(px, buyZones);
-  // Prefer raw membership for action priority (TP vs Buy overlap case)
-  const inTp = rawInTp || px >= target * 0.995;
+  // Prefer raw membership for action priority (TP vs Buy overlap case) — but only when
+  // the raw TP zone wasn't itself a conflict that reconciliation had to repair. If it was
+  // repaired (e.g. it overlapped the buy zone), the raw membership reflects a zone we no
+  // longer show the user, so fall back to membership in the reconciled/displayed TP zone.
+  const tpWasRepaired = reconciled.conflictsFixed.some((c) => c.startsWith('Take-Profit'));
+  const inTp = (rawInTp && !tpWasRepaired) || inBand(px, tp) || px >= target * 0.995;
   const inReduce = rawInReduce;
   const inExit = rawInExit;
   const upsideUnattractive = expectedReturn < 2.5 || px >= target * 0.995;
@@ -720,7 +724,7 @@ export function resolvePrimaryAction(opts: {
   if (severeBreakdown) priceLocation = 'AT_STOP';
   else if (inExit) priceLocation = 'INSIDE_EXIT';
   else if (inReduce && !inTp) priceLocation = 'INSIDE_REDUCE';
-  else if (inTp || (upsideUnattractive && (rawAboveEntry || rawInTp))) {
+  else if (inTp || (upsideUnattractive && (rawAboveEntry || (rawInTp && !tpWasRepaired)))) {
     priceLocation = 'INSIDE_TAKE_PROFIT';
   } else if (actionBuyLoc === 'ABOVE_ALL' || actionBuyLoc === 'BETWEEN_ZONES' || actionBuyLoc === 'NONE') {
     priceLocation = actionBuyLoc === 'ABOVE_ALL' ? 'ABOVE_ALL' : 'NORMAL_HOLD';
@@ -982,7 +986,14 @@ export function resolvePrimaryAction(opts: {
       why: `Current price ${round2(px).toFixed(2)} is not an attractive fresh entry. Decision support is WAIT, not a manufactured BUY or SELL.`,
       nextOpportunity: conflictReport.whatToWatch,
       zoneKey: 'hold',
-      priceLocation: inTp || rawInTp ? 'INSIDE_TAKE_PROFIT' : 'ABOVE_ALL',
+      priceLocation:
+        inTp || (rawInTp && !tpWasRepaired)
+          ? 'INSIDE_TAKE_PROFIT'
+          : actionBuyLoc === 'INSIDE_ZONE_1' ||
+              actionBuyLoc === 'INSIDE_ZONE_2' ||
+              actionBuyLoc === 'INSIDE_ZONE_3'
+            ? actionBuyLoc
+            : 'ABOVE_ALL',
     });
   }
 
