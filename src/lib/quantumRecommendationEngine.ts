@@ -487,6 +487,14 @@ type EvidenceBag = {
   supportLevel: number | null;
   resistanceLevel: number | null;
   majorResistance: number | null;
+  /** Price rising with confirming volume — user-prioritized "very strong buy" pattern. */
+  priceVolumeSurge: boolean;
+  /** Price above resistance AND volume confirms the breakout. */
+  breakoutWithVolume: boolean;
+  /** Whale/institutional/smart-money accumulation at a high-conviction threshold (70+). */
+  strongAccumulation: boolean;
+  /** Uptrend structure intact with price pulled back into the support zone. */
+  pullbackToSupportInUptrend: boolean;
 };
 
 function pushSignal(
@@ -818,7 +826,16 @@ function collectEvidence(input: QuantumEngineInput): EvidenceBag {
       );
     } else if (distToR1 < 0) {
       resistanceBreakProbability = clamp(72 + Math.abs(distToR1) * 100, 60, 90);
-      bullish.push({ label: 'Price above resistance (breakout)', weight: 0.55, polarity: 'bull' });
+      // A breakout confirmed by volume is a materially stronger signal than price
+      // alone clearing resistance — weighted up per the user's explicit priority.
+      const volConfirmed = input.technical?.volumeBias === 'high';
+      bullish.push({
+        label: volConfirmed
+          ? 'Breakout above resistance confirmed by volume'
+          : 'Price above resistance (breakout)',
+        weight: volConfirmed ? 0.85 : 0.55,
+        polarity: 'bull',
+      });
     } else {
       resistanceBreakProbability = clamp(40 + (1 - Math.min(distToR1, 0.1) / 0.1) * 20, 30, 65);
     }
@@ -826,6 +843,55 @@ function collectEvidence(input: QuantumEngineInput): EvidenceBag {
 
   const supportFailureProbability = 100 - Math.round(supportHoldProbability);
   const resistanceRejectionProbability = 100 - Math.round(resistanceBreakProbability);
+
+  // --- USER-PRIORITIZED SIGNALS ---
+  // Price rising with confirming volume, a volume-confirmed breakout, strong
+  // (70+) accumulation, and an uptrend pullback into support are treated as the
+  // primary drivers of a BUY/STRONG BUY call — weighted heavily here, and able to
+  // override a lukewarm fundamentals/sentiment read via the escalation in
+  // decideRecommendation() (these never override a genuine, gated SELL).
+  const priceAboveResistanceNow = px > 0 && r1 != null && Number.isFinite(r1) && px > r1;
+  const volumeHigh = input.technical?.volumeBias === 'high';
+  const priceRisingConfirmed =
+    trend.includes('BULL') ||
+    input.technical?.emaBias === 'bull' ||
+    (input.momentumScore != null && input.momentumScore >= 60);
+
+  const priceVolumeSurge = volumeHigh && priceRisingConfirmed && input.technical?.macdBullish !== false;
+  const breakoutWithVolume = priceAboveResistanceNow && volumeHigh;
+  const strongAccumulation =
+    (input.whaleScore != null && input.whaleScore >= 70) ||
+    (input.institutionalScore != null && input.institutionalScore >= 70) ||
+    (input.smartMoneyScore != null && input.smartMoneyScore >= 70);
+  const pullbackToSupportInUptrend =
+    trend.includes('BULL') &&
+    px > 0 &&
+    s1 != null &&
+    Number.isFinite(s1) &&
+    px >= s1 * 0.995 &&
+    (px - s1) / px <= 0.03;
+
+  if (priceVolumeSurge) {
+    bullish.push({
+      label: 'Price rising with confirming volume — high-conviction buy signal',
+      weight: 0.65,
+      polarity: 'bull',
+    });
+  }
+  if (strongAccumulation) {
+    bullish.push({
+      label: 'Accumulation conviction very high (70+)',
+      weight: 0.35,
+      polarity: 'bull',
+    });
+  }
+  if (pullbackToSupportInUptrend) {
+    bullish.push({
+      label: 'Uptrend pullback to support — classic high-quality entry',
+      weight: 0.35,
+      polarity: 'bull',
+    });
+  }
 
   if (vol > 35) {
     risk = clamp(70 + (vol - 35), 70, 92);
@@ -1049,6 +1115,10 @@ function collectEvidence(input: QuantumEngineInput): EvidenceBag {
     supportLevel: s1 != null && Number.isFinite(s1) ? s1 : null,
     resistanceLevel: r1 != null && Number.isFinite(r1) ? r1 : null,
     majorResistance: r2 != null && Number.isFinite(r2) ? r2 : null,
+    priceVolumeSurge,
+    breakoutWithVolume,
+    strongAccumulation,
+    pullbackToSupportInUptrend,
   };
 }
 
@@ -1967,6 +2037,26 @@ function decideRecommendation(evidence: EvidenceBag, rawReturn: number): Recomme
     }
   }
 
+  // USER-PRIORITIZED SIGNALS: price rising with confirming volume, a
+  // volume-confirmed breakout, strong (70+) accumulation, or an uptrend pullback
+  // to support are treated as the primary drivers of a BUY/STRONG BUY call —
+  // other factors (fundamentals, sentiment) matter less for this decision, so
+  // these can lift a HOLD/BUY candidate to BUY/STRONG BUY even when the
+  // fundamentals-heavy committee score or buy gate is lukewarm. They never flip a
+  // genuine, gated SELL/REDUCE/AVOID call — a confirmed support break, or an
+  // active sell gate, stays a hard block.
+  const hardBearishBlock = evidence.sellGatePass || evidence.supportBroken;
+  if (
+    !hardBearishBlock &&
+    (candidate === 'HOLD' || candidate === 'BUY' || candidate === 'STRONG BUY') &&
+    (evidence.priceVolumeSurge ||
+      evidence.breakoutWithVolume ||
+      evidence.strongAccumulation ||
+      evidence.pullbackToSupportInUptrend)
+  ) {
+    return 'STRONG BUY';
+  }
+
   if ((candidate === 'BUY' || candidate === 'STRONG BUY') && !evidence.buyGatePass) {
     if (evidence.nearSupport && evidence.structureIntact && evidence.netWeight > 0) return 'HOLD';
     if (evidence.netWeight > 0.05) return 'HOLD';
@@ -2140,7 +2230,21 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
 
     expectedReturn = round2(((target - px) / px) * 100);
     rec = decideRecommendation(evidence, expectedReturn);
-    if ((rec === 'BUY' || rec === 'STRONG BUY') && !evidence.buyGatePass) rec = 'HOLD';
+    // Mirrors the user-prioritized override inside decideRecommendation(): a
+    // strong price+volume/breakout/accumulation/pullback pattern can carry a
+    // BUY/STRONG BUY call even when the fundamentals-heavy buy gate is lukewarm.
+    const hasStrongTechnicalPattern =
+      evidence.priceVolumeSurge ||
+      evidence.breakoutWithVolume ||
+      evidence.strongAccumulation ||
+      evidence.pullbackToSupportInUptrend;
+    if (
+      (rec === 'BUY' || rec === 'STRONG BUY') &&
+      !evidence.buyGatePass &&
+      !(hasStrongTechnicalPattern && !evidence.sellGatePass && !evidence.supportBroken)
+    ) {
+      rec = 'HOLD';
+    }
     if ((rec === 'SELL' || rec === 'AVOID NEW POSITION') && !evidence.sellGatePass) {
       rec =
         evidence.supportHolding && evidence.flowWeakening
@@ -2243,7 +2347,12 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
     if (rec === 'SELL' && evidence.sellGatePass && evidence.bearConfirmCount >= 4) {
       confidence = Math.max(confidence, 80);
     }
-    if (confidence < 65 && mixedSignals && (rec === 'BUY' || rec === 'STRONG BUY' || rec === 'SELL' || rec === 'AVOID NEW POSITION')) {
+    if (
+      confidence < 65 &&
+      mixedSignals &&
+      (rec === 'BUY' || rec === 'STRONG BUY' || rec === 'SELL' || rec === 'AVOID NEW POSITION') &&
+      !((rec === 'BUY' || rec === 'STRONG BUY') && hasStrongTechnicalPattern && !evidence.sellGatePass && !evidence.supportBroken)
+    ) {
       rec = evidence.flowWeakening && evidence.supportHolding && evidence.netWeight < -0.22 ? 'REDUCE' : 'HOLD';
       if (rec === 'HOLD') {
         expectedReturn = round2(clamp(expectedReturn, -2.9, 2.9));
