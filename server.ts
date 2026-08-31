@@ -2781,33 +2781,16 @@ app.post('/api/predict', async (req, res) => {
     };
   });
 
-  // Adaptive learning comparative ledger
-  const compareHorizons = [
-    { label: '20 Days Ago', len: 20, adj: 'Trend Model tuning coefficient set at +1.2%, MACD scaling optimized' },
-    { label: '60 Days Ago', len: 60, adj: 'Smart Money momentum flow dynamic index adjusted by +2.5% for accumulation breakout' },
-    { label: '90 Days Ago', len: 90, adj: 'Fundamental P/E multiples re-anchored, Sector rotation indicator bias dampener set at -1.1%' }
-  ];
-
-  const comparisons = compareHorizons.map(ch => {
-    const historicalIdx = closes.length - 1 - ch.len;
-    let actualValue = currentPriceNum;
-    let pastPrice = historicalIdx >= 0 ? closes[historicalIdx] : currentPriceNum * 0.94;
-    
-    const actualReturnVal = ((actualValue / pastPrice) - 1) * 100;
-    const pastForecastReturn = actualReturnVal * (0.85 + Math.random() * 0.25);
-    const predictedValue = pastPrice * (1 + pastForecastReturn / 100);
-    const errorPercent = Math.abs((predictedValue - actualValue) / actualValue) * 100;
-
-    return {
-      period: ch.label,
-      predictedValue: parseFloat(predictedValue.toFixed(2)),
-      actualValue: parseFloat(actualValue.toFixed(2)),
-      errorPercent: parseFloat(errorPercent.toFixed(2)),
-      coefficientAdjustment: ch.adj
-    };
-  });
-
-  const modelAccuracy = parseFloat((100 - (comparisons.reduce((sum, c) => sum + c.errorPercent, 0) / comparisons.length)).toFixed(1));
+  // Adaptive learning comparative ledger — previously fabricated a "predicted"
+  // value by scaling the already-known actual return (pastForecastReturn =
+  // actualReturnVal * random factor), which mathematically guarantees ~85-110%
+  // "accuracy" regardless of whether the model has any real skill. There is no
+  // record of what the model actually predicted N days ago to compare against
+  // (the recommendationOutcomes tracker added later logs this going forward,
+  // but has no historical backlog yet), so report this as genuinely unavailable
+  // rather than a fabricated number.
+  const comparisons: Array<{ period: string; predictedValue: number; actualValue: number; errorPercent: number; coefficientAdjustment: string }> = [];
+  const modelAccuracy: number | null = null;
 
   const ensembleForecast = {
     trendModel: trendModelVal,

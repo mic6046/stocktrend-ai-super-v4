@@ -1569,76 +1569,36 @@ export function computeTechnicalIndicators(history: any[], lastQuote: any): Tech
 
   const tickerSym = lastQuote?.symbol || "The stock";
 
-  // 16. Insider Trading Score
-  let insiderSentiment: 'BULLISH' | 'NEUTRAL' | 'BEARISH' = 'NEUTRAL';
-  let insiderScore = 50;
-  let ceoPurchases = 0;
-  let directorPurchases = 0;
-  let execPurchases = 0;
-  let insiderReason = "";
+  // 16. Insider Trading — no real insider-transaction data source is wired up.
+  // Previously this fabricated purchase counts (including Math.random()) as a
+  // function of RSI/price digits and fed a non-trivial score into masterValueScore/
+  // masterSentimentScore. Report neutral/unavailable instead of inventing data.
+  const insiderSentiment: 'BULLISH' | 'NEUTRAL' | 'BEARISH' = 'NEUTRAL';
+  const insiderScore = 50;
+  const ceoPurchases = 0;
+  const directorPurchases = 0;
+  const execPurchases = 0;
+  const insiderReason = 'Insider transaction data is not available for this ticker.';
 
-  const isLowRsi = (rsi && rsi < 40) || false;
-  const isHighRsi = (rsi && rsi > 70) || false;
+  // 17. Analyst Upgrade/Downgrade — no real analyst-coverage data source is wired
+  // up. Previously this synthesized upgrade/downgrade counts and a price-target
+  // revision purely from the technical score, which is not real analyst coverage.
+  const analystScore = 50;
+  const upgrades = 0;
+  const downgrades = 0;
+  const targetPriceChangePct = 0;
+  const analystLabel = 'Analyst coverage data is not available for this ticker.';
 
-  if (isLowRsi) {
-    insiderSentiment = 'BULLISH';
-    insiderScore = 80 + Math.floor(Math.abs(40 - (rsi || 40)) * 1.5);
-    insiderScore = Math.min(99, insiderScore);
-    ceoPurchases = 1 + Math.floor((currentPrice % 5) / 2);
-    directorPurchases = 2 + Math.floor((currentPrice % 4));
-    execPurchases = 1 + Math.floor((currentPrice % 3));
-    insiderReason = `Insiders aggressively acquired shares over private treasury windows to defend the $${currentPrice.toFixed(0)} cost level.`;
-  } else if (isHighRsi) {
-    insiderSentiment = 'BEARISH';
-    insiderScore = 20 + Math.floor((100 - (rsi || 70)) * 0.8);
-    insiderScore = Math.max(10, insiderScore);
-    ceoPurchases = 0;
-    directorPurchases = 0;
-    execPurchases = 0;
-    insiderReason = "Quiet distribution as stock approaches multi-month highs. Insiders holding primary options blocks without active buys.";
-  } else {
-    insiderSentiment = 'NEUTRAL';
-    insiderScore = 50 + Math.floor((directionalBias - 50) * 0.4);
-    ceoPurchases = Math.random() > 0.6 ? 1 : 0;
-    directorPurchases = Math.floor(currentPrice % 2);
-    execPurchases = Math.random() > 0.5 ? 1 : 0;
-    insiderReason = "Insiders are maintaining stable structural shares with quiet holdings. Transactions are within 90-day standard baseline ranges.";
-  }
-
-  // 17. Analyst Upgrade/Downgrade Score
-  const analystScore = Math.max(15, Math.min(98, 52 + (directionalBias - 50) * 0.9));
-  const upgrades = Math.max(0, Math.floor((analystScore - 30) / 8));
-  const downgrades = Math.max(0, Math.floor((70 - analystScore) / 10));
-  const targetPriceChangePct = Math.max(-10, Math.min(45, (analystScore - 50) * 0.5 + 2.4));
-  const analystLabel = upgrades >= downgrades 
-    ? `Strong Buy consensus: ${upgrades} upgrades vs ${downgrades} downgrades in last 30 days (+${targetPriceChangePct.toFixed(1)}% price target revisions)`
-    : `Defensive caution: ${downgrades} downgrades vs ${upgrades} upgrades in last 30 days (${targetPriceChangePct.toFixed(1)}% price target reduction)`;
-
-  // 18. Earnings Surprise Score
-  const expectedEPS = Math.max(0.1, +(currentPrice * 0.008 + (currentPrice % 3) * 0.1).toFixed(2));
-  let actualEPS = expectedEPS;
-  const earningsVariancePct = (directionalBias - 50) / 150; // -15% to +15%
-  actualEPS = +(expectedEPS * (1.12 + earningsVariancePct)).toFixed(2);
-  const expectedRevenue = Math.max(5, +((currentPrice * 8.5 + (currentPrice % 10) * 1.5) / 10).toFixed(1));
-  const actualRevenue = +(expectedRevenue * (1.05 + earningsVariancePct)).toFixed(1);
-
-  let earningsSentiment: 'Positive Surprise' | 'Negative Surprise' | 'Neutral' = 'Neutral';
-  let earningsScore = 50;
-  if (actualEPS > expectedEPS * 1.04) {
-    earningsSentiment = 'Positive Surprise';
-    earningsScore = 75 + Math.min(23, Math.floor((actualEPS - expectedEPS)/expectedEPS * 150));
-  } else if (actualEPS < expectedEPS * 0.96) {
-    earningsSentiment = 'Negative Surprise';
-    earningsScore = 20 + Math.max(0, Math.floor((actualEPS / expectedEPS) * 30));
-  } else {
-    earningsSentiment = 'Neutral';
-    earningsScore = 50;
-  }
-  const earningsLabel = earningsSentiment === 'Positive Surprise'
-    ? `EPS Outperformed by +${((actualEPS-expectedEPS)/expectedEPS * 100).toFixed(1)}%, Revenue +${((actualRevenue-expectedRevenue)/expectedRevenue * 100).toFixed(1)}% YoY`
-    : earningsSentiment === 'Negative Surprise'
-    ? `EPS Missed by ${((expectedEPS-actualEPS)/expectedEPS * 100).toFixed(1)}%, Revenue trailing expectations`
-    : `EPS aligned with consensus at $${actualEPS.toFixed(2)}`;
+  // 18. Earnings Surprise — no real earnings-report data source is wired up.
+  // Previously this fabricated an expected/actual EPS from currentPrice alone,
+  // hardcoded to "beat" by ~12% on average, which is not real earnings data.
+  const expectedEPS = 0;
+  const actualEPS = 0;
+  const expectedRevenue = 0;
+  const actualRevenue = 0;
+  const earningsSentiment: 'Positive Surprise' | 'Negative Surprise' | 'Neutral' = 'Neutral';
+  const earningsScore = 50;
+  const earningsLabel = 'Earnings report data is not available for this ticker.';
 
   // 19. Dividend Strength Score
   const isHkSymbol = tickerSym.includes("HK") || tickerSym.includes(".HK");
@@ -2567,11 +2527,17 @@ export function computeTechnicalIndicators(history: any[], lastQuote: any): Tech
   // ------------------------------------------
   // BACKTEST ENGINE (ACCURACY HISTORIAN)
   // ------------------------------------------
-  const accuracy1d = 74.2;
-  const accuracy5d = 79.1;
-  const accuracy10d = 84.6;
-  const accuracy30d = 89.9;
-  const historicalAccuracy = Math.round((accuracy1d + accuracy5d + accuracy10d + accuracy30d) / 4);
+  // Previously hardcoded (74.2/79.1/84.6/89.9) identically for every ticker —
+  // not measured, and it silently added a constant ~29-point boost to every
+  // stock's signalQuality regardless of setup quality. No real per-ticker
+  // backtest is computed at this layer, so report neutral (uninformative)
+  // instead of a fabricated number. The recommendationOutcomes tracker is the
+  // intended real source once it accumulates enough graded history.
+  const accuracy1d = 50;
+  const accuracy5d = 50;
+  const accuracy10d = 50;
+  const accuracy30d = 50;
+  const historicalAccuracy = 50;
 
   // ------------------------------------------
   // INTEGRATED PROBABILITY ENGINE (BAYESIAN PRE-UPDATE CALIBRATION)

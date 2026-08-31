@@ -5515,7 +5515,7 @@ export default function App() {
     };
 
     // 9. ALPHA & PORTFOLIO FIT ENGINE
-    const historicalAccuracyVal = adaptiveLearning?.modelAccuracy || 85;
+    const historicalAccuracyVal = adaptiveLearning?.modelAccuracy ?? null;
     const expectedMarketReturnVal = 7.5;
     const expectedStockReturnVal = baseCase.expectedReturn * 12; // annualized drift proxy
     const alphaValue = parseFloat((expectedStockReturnVal - expectedMarketReturnVal).toFixed(2));
