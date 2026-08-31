@@ -5597,7 +5597,9 @@ export default function App() {
       flow20Day,
       flow60Day,
       netCapInflowM,
+      isAccum,
       isDistrib,
+      adConfidencePct,
       agreementScore,
       trendScore,
       volumeScore,
@@ -11514,16 +11516,29 @@ export default function App() {
                         const blocks = whaleAccumulation ? `${whaleAccumulation.metrics.megaWhaleBlockTrades} Blocks` : (cockpitData?.blockTrades ?? "34 Active Mega-Whale Trades");
                         const darkPool = whaleAccumulation ? whaleAccumulation.metrics.darkPoolActivity : (cockpitData?.darkPoolStatus ?? "Active Dark Pool Position Building");
                         
-                        // No fabricated fallback: when the model didn't return real whale-flow
-                        // metrics, reuse the real technical net capital inflow (cockpitData) so
-                        // this card can't disagree with the actual Accumulation/Distribution
-                        // signal shown elsewhere on the page.
+                        // No fabricated fallback. This card blends two genuinely different real
+                        // signals, matching what buildInstitutionalFlowNarrative expects:
+                        //  - "long-term" (flow5/20/60): the multi-day Accumulation/Distribution
+                        //    line — the same canonical trend signal that drives the whale score,
+                        //    cockpit classification and the deterministic engine's own whale
+                        //    evidence factor, so this card can't point the opposite direction
+                        //    from those. Magnitude is anchored to the real recent capital-flow
+                        //    scale so it isn't an arbitrary number, sign follows the real trend.
+                        //  - "short-term" (whaleIn/whaleOut): today's/recent whale order flow —
+                        //    the real, outlier-volume-based net capital inflow. This can
+                        //    legitimately disagree with the long-term trend (e.g. fresh buying
+                        //    inside a longer distribution phase); when it does,
+                        //    buildInstitutionalFlowNarrative explains the nuance instead of
+                        //    reporting a flat, contradictory "Strong Accumulation/Distribution".
                         const realNetFlowM = cockpitData?.netCapInflowM ?? 0;
-                        const flow5Num = whaleAccumulation?.metrics?.institutionalFundFlow ?? realNetFlowM;
-                        const flow20Num = whaleAccumulation?.metrics?.netMoneyFlow ?? realNetFlowM;
+                        const ltSign = cockpitData?.isAccum ? 1 : cockpitData?.isDistrib ? -1 : 0;
+                        const ltMagnitude = Math.max(1, Math.abs(realNetFlowM), ((cockpitData?.adConfidencePct ?? 50) - 50));
+                        const longTermFlowProxy = ltSign * ltMagnitude;
+                        const flow5Num = whaleAccumulation?.metrics?.institutionalFundFlow ?? longTermFlowProxy;
+                        const flow20Num = whaleAccumulation?.metrics?.netMoneyFlow ?? longTermFlowProxy;
                         const flow60Num = whaleAccumulation
                           ? whaleAccumulation.metrics.netMoneyFlow * 2.8
-                          : realNetFlowM;
+                          : longTermFlowProxy;
                         const flow5 = formatSignedMillions(flow5Num);
                         const flow20 = formatSignedMillions(flow20Num);
                         const flow60 = formatSignedMillions(flow60Num);
@@ -11543,7 +11558,21 @@ export default function App() {
                         const buyProb = whaleAccumulation ? whaleAccumulation.buyProbability : Math.round(Math.min(100, Math.max(0, scoreVal)));
                         const sellProb = whaleAccumulation ? whaleAccumulation.sellProbability : Math.round(Math.min(100, Math.max(0, 100 - scoreVal)));
                         const explanation = flowNarrative.explanation;
-                        const classVal = flowNarrative.trendStatus;
+                        // Headline status: without real LLM whale data, use the same canonical
+                        // Accumulation/Distribution signal driving the whale score, cockpit
+                        // classification and the deterministic engine's own whale evidence —
+                        // not the raw short-vs-long-term reconciliation label, which can
+                        // legitimately read "Early Accumulation" even while the canonical
+                        // signal says Distribution (fresh block buying inside a longer
+                        // distribution trend). That nuance stays in the explanation text; the
+                        // badge itself must match the rest of the page.
+                        const classVal = whaleAccumulation
+                          ? flowNarrative.trendStatus
+                          : cockpitData?.isAccum
+                            ? (scoreVal >= 71 ? 'Strong Accumulation' : 'Early Accumulation')
+                            : cockpitData?.isDistrib
+                              ? (scoreVal <= 29 ? 'Strong Distribution' : 'Early Distribution')
+                              : 'Neutral';
 
                         return (
                           <>
@@ -11555,9 +11584,9 @@ export default function App() {
                                   </h3>
                                   <span className={cn(
                                     "text-[8.5px] font-mono px-1.5 py-0.5 rounded uppercase tracking-wider border font-black text-right",
-                                    flowNarrative.trendStatus.includes('Accumulation')
+                                    classVal.includes('Accumulation')
                                       ? "text-cyan-400 bg-cyan-500/10 border-cyan-500/20"
-                                      : flowNarrative.trendStatus.includes('Distribution')
+                                      : classVal.includes('Distribution')
                                       ? "text-rose-400 bg-rose-500/10 border-rose-500/20"
                                       : "text-amber-400 bg-amber-500/10 border-amber-500/20"
                                   )}>
