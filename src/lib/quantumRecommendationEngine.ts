@@ -2550,6 +2550,25 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
       const distPct = (((evidence.resistanceLevel - px) / px) * 100).toFixed(1);
       criticalCaveat = `Price is only ${distPct}% below resistance (~${evidence.resistanceLevel.toFixed(2)}). Rejection at this level is common — this ${rec} call assumes the level breaks with confirmation, not that it already has. Consider a smaller entry or waiting for a confirmed close above resistance.`;
     } else if (
+      (rec === 'BUY' || rec === 'STRONG BUY') &&
+      input.technical?.rsi != null &&
+      (input.technical.rsi >= 70 || input.technical?.macdBullish === false)
+    ) {
+      // A BUY/STRONG BUY driven by strong accumulation/flow can still coincide
+      // with RSI overbought and/or a fresh bearish MACD crossover — a genuine
+      // short-term exhaustion warning the accumulation evidence doesn't cancel
+      // out. Same principle as the resistance caveat: the call stays valid, the
+      // risk gets surfaced instead of buried.
+      const overbought = input.technical.rsi >= 70;
+      const macdBear = input.technical?.macdBullish === false;
+      const warnParts: string[] = [];
+      if (overbought) warnParts.push(`RSI is at ${input.technical.rsi.toFixed(0)} (overbought)`);
+      if (macdBear) warnParts.push('MACD has just turned bearish');
+      const driver = evidence.strongAccumulation
+        ? 'strong whale/institutional accumulation'
+        : 'the underlying technical and flow evidence';
+      criticalCaveat = `This ${rec} call is supported by ${driver}, but ${warnParts.join(' and ')} — a short-term pullback or stall is common here even inside a longer uptrend. Consider scaling in rather than a full entry, or waiting for momentum to reset before adding size.`;
+    } else if (
       (rec === 'SELL' || rec === 'AVOID NEW POSITION' || (rec === 'REDUCE' && userHasPosition)) &&
       (evidence.supportBroken || evidence.nearSupport) &&
       evidence.supportLevel != null &&
