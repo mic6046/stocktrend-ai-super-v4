@@ -1425,14 +1425,39 @@ function resolveLiveAction(
     ? Math.max(...primary.buyZones.map((z) => Math.max(z.lo, z.hi)))
     : syncedZones.buyZone.hi;
   const eps = Math.max(px * 0.0008, 0.01);
-  const holdLo = envelopeHi + eps;
+  // holdLo must also leave room for a non-degenerate addZone right below it
+  // (addZone.lo = buyZone.hi + eps) — previously this only considered
+  // envelopeHi, so whenever envelopeHi === buyZone.hi (the common single-
+  // buy-zone case) holdLo landed exactly at addZone.lo with zero room between
+  // them. The addZone fallback below then built a hi past that point,
+  // guaranteeing addZone.hi > holdZone.lo — an overlap that zonesAreConsistent
+  // correctly flagged, showing "Recalculate" on effectively every real ticker.
+  const minAddZoneWidth = eps;
+  const holdLo = Math.max(envelopeHi + eps, syncedZones.buyZone.hi + eps + minAddZoneWidth + eps);
   const tpLo = Math.min(primary.takeProfitZone.lo, primary.takeProfitZone.hi);
+  // tpLo is a hard ceiling, not one option in a max() with the preferred width —
+  // the previous Math.max(minWidth, Math.min(ceiling, preferredWidth)) could
+  // pick minWidth even when it exceeded the ceiling (whenever tpLo sat close
+  // to holdLo, common when the buy envelope and take-profit zone are both
+  // anchored near a tight recent range), letting holdZone reach into
+  // takeProfitZone. Only fall back past the ceiling when respecting it would
+  // make the zone degenerate (lo >= hi) — and even then, push takeProfitZone
+  // up afterward so the two never actually overlap.
+  const cappedHoldHi = Math.min(tpLo - eps, holdLo + px * 0.04);
   syncedZones.holdZone = {
     lo: round2(holdLo),
-    hi: round2(Math.max(holdLo + px * 0.008, Math.min(tpLo - eps, holdLo + px * 0.04))),
+    hi: round2(cappedHoldHi > holdLo ? cappedHoldHi : holdLo + px * 0.008),
   };
   if (!(syncedZones.holdZone.lo < syncedZones.holdZone.hi)) {
-    syncedZones.holdZone = { lo: round2(holdLo), hi: round2(tpLo - eps) };
+    syncedZones.holdZone = { lo: round2(holdLo), hi: round2(holdLo + px * 0.008) };
+  }
+  if (syncedZones.takeProfitZone.lo <= syncedZones.holdZone.hi) {
+    const shift = round2(syncedZones.holdZone.hi + eps - syncedZones.takeProfitZone.lo);
+    syncedZones.takeProfitZone = {
+      lo: round2(syncedZones.takeProfitZone.lo + shift),
+      hi: round2(syncedZones.takeProfitZone.hi + shift),
+    };
+    syncedZones.takeProfit = syncedZones.takeProfitZone.hi;
   }
   syncedZones.addZone = {
     lo: syncedZones.buyZone.hi + eps,
@@ -1441,11 +1466,13 @@ function resolveLiveAction(
   if (!(syncedZones.addZone.lo < syncedZones.addZone.hi)) {
     syncedZones.addZone = {
       lo: round2(syncedZones.buyZone.hi + eps),
-      hi: round2(syncedZones.buyZone.hi + eps * 2),
+      hi: round2(Math.min(syncedZones.holdZone.lo - eps, syncedZones.buyZone.hi + eps * 2)),
     };
   }
-  // Keep reduce/exit above TP
-  const tpHi = Math.max(primary.takeProfitZone.lo, primary.takeProfitZone.hi);
+  // Keep reduce/exit above TP — anchor to the (possibly shifted) synced zone,
+  // not the original primary.takeProfitZone, or reduceZone could start below
+  // a takeProfitZone that was just pushed up to clear holdZone.
+  const tpHi = Math.max(syncedZones.takeProfitZone.lo, syncedZones.takeProfitZone.hi);
   syncedZones.reduceZone = {
     lo: round2(tpHi + eps),
     hi: round2(tpHi + eps + px * 0.012),
@@ -2270,7 +2297,16 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
     }
     // Keep expected return aligned with target vs live price (never positive if target < px)
     expectedReturn = round2(((target - px) / px) * 100);
-    if (resolved.decision.expectedReturn !== expectedReturn) {
+    // HOLD and REDUCE-while-support-holds were deliberately clamped to a
+    // narrow +/-2.9% band earlier (a HOLD/mild-REDUCE shouldn't imply a big
+    // directional move) — but resolveLiveAction's own buy-zone-based target
+    // isn't bound by that clamp, so letting it override here silently blew
+    // the band back open (observed on real tickers: HOLD calls reporting
+    // 5-8% expected return). That mismatch is exactly what validate() checks
+    // for, so every affected call showed "Recalculate" to the user. Preserve
+    // the clamp for these two labels instead of letting it get overridden.
+    const clampedLabel = rec === 'HOLD' || (rec === 'REDUCE' && evidence.supportHolding);
+    if (!clampedLabel && resolved.decision.expectedReturn !== expectedReturn) {
       // Prefer decision ER when it repaired sign/target consistency
       if (
         Math.sign(resolved.decision.expectedReturn) !== Math.sign(expectedReturn) ||
