@@ -308,6 +308,21 @@ function round2(n: number) {
   return Math.round(n * 100) / 100;
 }
 
+/**
+ * Applies a minimum-conviction floor without collapsing distinct raw values
+ * to the same number. Plain Math.max(floor, raw) maps every raw value below
+ * the floor to the identical floor value — e.g. two different horizons whose
+ * fairTargetPrice-derived returns were 0.98% and 2.46% (both below a 3.2%
+ * floor) both landed on exactly 3.2%, erasing the horizon-scaling that was
+ * computed correctly upstream. Values already at/above the floor pass
+ * through unchanged; only the sub-floor range gets compressed instead of
+ * flattened.
+ */
+function floorWithSignal(raw: number, floor: number, fallback: number): number {
+  const abs = Math.abs(raw) || fallback;
+  return abs >= floor ? abs : floor + abs * 0.3;
+}
+
 function mapApiRow(
   rows: QuantumEngineInput['forecastHorizons'],
   horizon: HorizonKey
@@ -2082,11 +2097,11 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
     let rec = decideRecommendation(evidence, expectedReturn);
 
     if ((rec === 'BUY' || rec === 'STRONG BUY') && expectedReturn < 3) {
-      expectedReturn = round2(clamp(Math.max(3.2, Math.abs(expectedReturn) || 5), 3.2, 18));
+      expectedReturn = round2(clamp(floorWithSignal(expectedReturn, 3.2, 5), 3.2, 18));
       target = round2(px * (1 + expectedReturn / 100));
     }
     if ((rec === 'SELL' || rec === 'AVOID NEW POSITION') && expectedReturn > -3) {
-      expectedReturn = round2(-clamp(Math.max(3.2, Math.abs(expectedReturn) || 6), 3.2, 22));
+      expectedReturn = round2(-clamp(floorWithSignal(expectedReturn, 3.2, 6), 3.2, 22));
       target = round2(px * (1 + expectedReturn / 100));
     }
     if (rec === 'HOLD') {
@@ -2097,7 +2112,7 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
       expectedReturn = round2(clamp(expectedReturn, -2.9, 2.9));
       target = round2(px * (1 + expectedReturn / 100));
     } else if (rec === 'REDUCE' && expectedReturn > -3) {
-      expectedReturn = round2(-clamp(Math.max(3.5, Math.abs(expectedReturn) || 5), 3.5, 9.5));
+      expectedReturn = round2(-clamp(floorWithSignal(expectedReturn, 3.5, 5), 3.5, 9.5));
       target = round2(px * (1 + expectedReturn / 100));
     }
 
@@ -2307,11 +2322,19 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
     // the clamp for these two labels instead of letting it get overridden.
     const clampedLabel = rec === 'HOLD' || (rec === 'REDUCE' && evidence.supportHolding);
     if (!clampedLabel && resolved.decision.expectedReturn !== expectedReturn) {
-      // Prefer decision ER when it repaired sign/target consistency
-      if (
-        Math.sign(resolved.decision.expectedReturn) !== Math.sign(expectedReturn) ||
-        Math.abs(resolved.decision.expectedReturn - expectedReturn) > 0.25
-      ) {
+      // resolved.decision.targetPrice comes from buyZoneDecision.ts's own
+      // take-profit-zone target, which isn't horizon-aware — it doesn't scale
+      // with input.horizon the way fairTargetPrice's blend deliberately does
+      // (verified: fairTargetPrice went 0.98% -> 2.46% -> 4.16% -> 7.57% across
+      // 1W/1M/3M/1Y for one ticker, all correctly increasing with horizon).
+      // The old ">0.25 points apart" branch treated that expected numeric gap
+      // between two genuinely different targets as an "inconsistency to
+      // repair", so it fired on every single call and silently overwrote the
+      // horizon-scaled value with the same constant number regardless of
+      // horizon. Only override on an actual contradiction (opposite signs —
+      // e.g. fairTargetPrice implying downside while the zone system's own
+      // take-profit sits above price), not a mere magnitude difference.
+      if (Math.sign(resolved.decision.expectedReturn) !== Math.sign(expectedReturn)) {
         expectedReturn = resolved.decision.expectedReturn;
         target = resolved.decision.targetPrice;
       }
