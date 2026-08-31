@@ -331,6 +331,24 @@ function round2(n: number) {
 }
 
 /**
+ * Rounding a price to cents is fine for most tickers, but for a low-priced
+ * stock one cent can be a large fraction of the price — e.g. $0.01 on a $2.59
+ * stock is ~0.39%, well past the 0.15-point consistency tolerance validate()
+ * checks between a target price and its implied expectedReturn %. That
+ * mismatch showed up as "✗ Recalculate" on real sub-$20 tickers (observed on
+ * AMC) even though nothing about the recommendation itself was wrong — only
+ * the price rounding was too coarse. Scale precision with price so the
+ * rounding error always stays well under that tolerance.
+ */
+function roundPrice(n: number): number {
+  if (!Number.isFinite(n)) return n;
+  const abs = Math.abs(n);
+  if (abs > 0 && abs < 2) return Math.round(n * 10000) / 10000;
+  if (abs < 20) return Math.round(n * 1000) / 1000;
+  return round2(n);
+}
+
+/**
  * Applies a minimum-conviction floor without collapsing distinct raw values
  * to the same number. Plain Math.max(floor, raw) maps every raw value below
  * the floor to the identical floor value — e.g. two different horizons whose
@@ -2201,7 +2219,7 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
     if (api.ret != null && Math.abs(api.ret) > 0.2) {
       if (Math.sign(api.ret) === Math.sign(net) || Math.abs(net) < 0.1) {
         expectedReturn = round2(expectedReturn * 0.55 + api.ret * 0.45);
-        target = round2(px * (1 + expectedReturn / 100));
+        target = roundPrice(px * (1 + expectedReturn / 100));
       }
     }
     expectedReturn = round2(((target - px) / px) * 100);
@@ -2210,22 +2228,22 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
 
     if ((rec === 'BUY' || rec === 'STRONG BUY') && expectedReturn < 3) {
       expectedReturn = round2(clamp(floorWithSignal(expectedReturn, 3.2, 5), 3.2, 18));
-      target = round2(px * (1 + expectedReturn / 100));
+      target = roundPrice(px * (1 + expectedReturn / 100));
     }
     if ((rec === 'SELL' || rec === 'AVOID NEW POSITION') && expectedReturn > -3) {
       expectedReturn = round2(-clamp(floorWithSignal(expectedReturn, 3.2, 6), 3.2, 22));
-      target = round2(px * (1 + expectedReturn / 100));
+      target = roundPrice(px * (1 + expectedReturn / 100));
     }
     if (rec === 'HOLD') {
       expectedReturn = round2(clamp(expectedReturn, -2.9, 2.9));
-      target = round2(px * (1 + expectedReturn / 100));
+      target = roundPrice(px * (1 + expectedReturn / 100));
     }
     if (rec === 'REDUCE' && evidence.supportHolding) {
       expectedReturn = round2(clamp(expectedReturn, -2.9, 2.9));
-      target = round2(px * (1 + expectedReturn / 100));
+      target = roundPrice(px * (1 + expectedReturn / 100));
     } else if (rec === 'REDUCE' && expectedReturn > -3) {
       expectedReturn = round2(-clamp(floorWithSignal(expectedReturn, 3.5, 5), 3.5, 9.5));
-      target = round2(px * (1 + expectedReturn / 100));
+      target = roundPrice(px * (1 + expectedReturn / 100));
     }
 
     expectedReturn = round2(((target - px) / px) * 100);
@@ -2257,14 +2275,14 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
     }
     if (rec === 'HOLD' || (rec === 'REDUCE' && evidence.supportHolding)) {
       expectedReturn = round2(clamp(expectedReturn, -2.9, 2.9));
-      target = round2(px * (1 + expectedReturn / 100));
+      target = roundPrice(px * (1 + expectedReturn / 100));
     }
 
     // Positive R/R gate for BUY
     if ((rec === 'BUY' || rec === 'STRONG BUY') && expectedReturn <= 0) {
       rec = 'HOLD';
       expectedReturn = round2(clamp(expectedReturn, -2.9, 2.9));
-      target = round2(px * (1 + expectedReturn / 100));
+      target = roundPrice(px * (1 + expectedReturn / 100));
     }
 
     const baseConf =
@@ -2356,7 +2374,7 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
       rec = evidence.flowWeakening && evidence.supportHolding && evidence.netWeight < -0.22 ? 'REDUCE' : 'HOLD';
       if (rec === 'HOLD') {
         expectedReturn = round2(clamp(expectedReturn, -2.9, 2.9));
-        target = round2(px * (1 + expectedReturn / 100));
+        target = roundPrice(px * (1 + expectedReturn / 100));
       }
     }
     const score = scoreFromRecommendation(rec, expectedReturn, evidence.netWeight * 10);
