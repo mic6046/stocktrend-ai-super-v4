@@ -491,7 +491,7 @@ type EvidenceBag = {
   priceVolumeSurge: boolean;
   /** Price above resistance AND volume confirms the breakout. */
   breakoutWithVolume: boolean;
-  /** Whale/institutional/smart-money accumulation at a high-conviction threshold (70+). */
+  /** Whale/institutional/smart-money accumulation at a high-conviction threshold (80+). */
   strongAccumulation: boolean;
   /** Uptrend structure intact with price pulled back into the support zone. */
   pullbackToSupportInUptrend: boolean;
@@ -846,7 +846,7 @@ function collectEvidence(input: QuantumEngineInput): EvidenceBag {
 
   // --- USER-PRIORITIZED SIGNALS ---
   // Price rising with confirming volume, a volume-confirmed breakout, strong
-  // (70+) accumulation, and an uptrend pullback into support are treated as the
+  // (80+) accumulation, and an uptrend pullback into support are treated as the
   // primary drivers of a BUY/STRONG BUY call — weighted heavily here, and able to
   // override a lukewarm fundamentals/sentiment read via the escalation in
   // decideRecommendation() (these never override a genuine, gated SELL).
@@ -860,9 +860,9 @@ function collectEvidence(input: QuantumEngineInput): EvidenceBag {
   const priceVolumeSurge = volumeHigh && priceRisingConfirmed && input.technical?.macdBullish !== false;
   const breakoutWithVolume = priceAboveResistanceNow && volumeHigh;
   const strongAccumulation =
-    (input.whaleScore != null && input.whaleScore >= 70) ||
-    (input.institutionalScore != null && input.institutionalScore >= 70) ||
-    (input.smartMoneyScore != null && input.smartMoneyScore >= 70);
+    (input.whaleScore != null && input.whaleScore >= 80) ||
+    (input.institutionalScore != null && input.institutionalScore >= 80) ||
+    (input.smartMoneyScore != null && input.smartMoneyScore >= 80);
   const pullbackToSupportInUptrend =
     trend.includes('BULL') &&
     px > 0 &&
@@ -880,7 +880,7 @@ function collectEvidence(input: QuantumEngineInput): EvidenceBag {
   }
   if (strongAccumulation) {
     bullish.push({
-      label: 'Accumulation conviction very high (70+)',
+      label: 'Accumulation conviction very high (80+)',
       weight: 0.35,
       polarity: 'bull',
     });
@@ -2038,7 +2038,7 @@ function decideRecommendation(evidence: EvidenceBag, rawReturn: number): Recomme
   }
 
   // USER-PRIORITIZED SIGNALS: price rising with confirming volume, a
-  // volume-confirmed breakout, strong (70+) accumulation, or an uptrend pullback
+  // volume-confirmed breakout, strong (80+) accumulation, or an uptrend pullback
   // to support are treated as the primary drivers of a BUY/STRONG BUY call —
   // other factors (fundamentals, sentiment) matter less for this decision, so
   // these can lift a HOLD/BUY candidate to BUY/STRONG BUY even when the
