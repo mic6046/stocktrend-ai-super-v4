@@ -125,7 +125,7 @@ export type ComponentScores = {
   overall: number;
 };
 
-/** Consensus weights (Step 3) */
+/** Consensus weights (Step 3) — used when no market regime is known. */
 export const COMMITTEE_WEIGHTS: Record<CommitteeSeat, number> = {
   Technical: 0.2,
   Fundamental: 0.25,
@@ -134,6 +134,26 @@ export const COMMITTEE_WEIGHTS: Record<CommitteeSeat, number> = {
   Momentum: 0.1,
   Sentiment: 0.1,
 };
+
+/**
+ * technical.ts already detects a market regime (Bull/Bear/Sideways/High
+ * Volatility/Crisis) and computes regime-adjusted weights for its own internal
+ * buyIndexScore — but that score was never read by this engine, so every stock
+ * got the same fixed committee weights regardless of regime. This mirrors the
+ * same regime-adaptation logic technical.ts already validated, applied to the
+ * committee that actually drives BUY/SELL. All sets sum to 1.0.
+ */
+const REGIME_COMMITTEE_WEIGHTS: Record<string, Record<CommitteeSeat, number>> = {
+  'Crisis Market': { Technical: 0.12, Fundamental: 0.3, Whale: 0.2, Risk: 0.25, Momentum: 0.05, Sentiment: 0.08 },
+  'High Volatility Market': { Technical: 0.15, Fundamental: 0.25, Whale: 0.22, Risk: 0.2, Momentum: 0.08, Sentiment: 0.1 },
+  'Bull Market': { Technical: 0.25, Fundamental: 0.18, Whale: 0.2, Risk: 0.12, Momentum: 0.15, Sentiment: 0.1 },
+  'Bear Market': { Technical: 0.2, Fundamental: 0.22, Whale: 0.18, Risk: 0.22, Momentum: 0.08, Sentiment: 0.1 },
+};
+
+function getCommitteeWeights(marketRegime?: string | null): Record<CommitteeSeat, number> {
+  if (marketRegime && REGIME_COMMITTEE_WEIGHTS[marketRegime]) return REGIME_COMMITTEE_WEIGHTS[marketRegime];
+  return COMMITTEE_WEIGHTS;
+}
 
 export type QuantumEngineInput = {
   horizon: HorizonKey;
@@ -180,6 +200,8 @@ export type QuantumEngineInput = {
   userHasPosition?: boolean;
   /** Full technical breakdown for Buy Zone 1/2/3 SSOT (optional). */
   technicalBreakdown?: import('./technical').TechnicalBreakdown | null;
+  /** Detected market regime — shifts committee weights (see getCommitteeWeights). */
+  marketRegime?: string | null;
 };
 
 export type QuantumEngineOutput = {
@@ -793,6 +815,8 @@ function collectEvidence(input: QuantumEngineInput): EvidenceBag {
     bearish.find((f) => /news|sentiment|Sector/i.test(f.label))?.label ||
     'Sentiment balanced';
 
+  const weights = getCommitteeWeights(input.marketRegime);
+
   const committee: CommitteeMember[] = [
     {
       seat: 'Technical',
@@ -800,7 +824,7 @@ function collectEvidence(input: QuantumEngineInput): EvidenceBag {
       recommendation: recFromScore(technical),
       confidence: Math.round(clamp(55 + Math.abs(technical - 50) * 0.7, 45, 92)),
       reason: techReason,
-      weight: COMMITTEE_WEIGHTS.Technical,
+      weight: weights.Technical,
     },
     {
       seat: 'Fundamental',
@@ -808,7 +832,7 @@ function collectEvidence(input: QuantumEngineInput): EvidenceBag {
       recommendation: recFromScore(fundamental),
       confidence: Math.round(clamp(55 + Math.abs(fundamental - 50) * 0.7, 45, 92)),
       reason: fundReason,
-      weight: COMMITTEE_WEIGHTS.Fundamental,
+      weight: weights.Fundamental,
     },
     {
       seat: 'Whale',
@@ -816,7 +840,7 @@ function collectEvidence(input: QuantumEngineInput): EvidenceBag {
       recommendation: recFromScore(whale),
       confidence: Math.round(clamp(55 + Math.abs(whale - 50) * 0.7, 45, 92)),
       reason: whaleReason,
-      weight: COMMITTEE_WEIGHTS.Whale,
+      weight: weights.Whale,
     },
     {
       seat: 'Risk',
@@ -829,7 +853,7 @@ function collectEvidence(input: QuantumEngineInput): EvidenceBag {
           : risk <= 35
             ? 'Risk contained — room for constructive stance'
             : 'Risk moderate — require confirmation',
-      weight: COMMITTEE_WEIGHTS.Risk,
+      weight: weights.Risk,
     },
     {
       seat: 'Momentum',
@@ -837,7 +861,7 @@ function collectEvidence(input: QuantumEngineInput): EvidenceBag {
       recommendation: recFromScore(momentum),
       confidence: Math.round(clamp(55 + Math.abs(momentum - 50) * 0.7, 45, 92)),
       reason: momReason,
-      weight: COMMITTEE_WEIGHTS.Momentum,
+      weight: weights.Momentum,
     },
     {
       seat: 'Sentiment',
@@ -845,19 +869,19 @@ function collectEvidence(input: QuantumEngineInput): EvidenceBag {
       recommendation: recFromScore(news),
       confidence: Math.round(clamp(52 + Math.abs(news - 50) * 0.7, 45, 90)),
       reason: sentReason,
-      weight: COMMITTEE_WEIGHTS.Sentiment,
+      weight: weights.Sentiment,
     },
   ];
 
   // STEP 3 — weighted overall (Risk inverted into quality score for blend)
   const overall = Math.round(
     clamp(
-      technical * COMMITTEE_WEIGHTS.Technical +
-        fundamental * COMMITTEE_WEIGHTS.Fundamental +
-        whale * COMMITTEE_WEIGHTS.Whale +
-        (100 - risk) * COMMITTEE_WEIGHTS.Risk +
-        momentum * COMMITTEE_WEIGHTS.Momentum +
-        news * COMMITTEE_WEIGHTS.Sentiment,
+      technical * weights.Technical +
+        fundamental * weights.Fundamental +
+        whale * weights.Whale +
+        (100 - risk) * weights.Risk +
+        momentum * weights.Momentum +
+        news * weights.Sentiment,
       1,
       99
     )
@@ -1737,7 +1761,18 @@ function consensusNote(committee: CommitteeMember[], rec: RecommendationLabel): 
     if (t === 'neutral') return c.recommendation === 'HOLD' || c.recommendation === 'REDUCE';
     return s === t || (t === 'bull' && c.recommendation === 'HOLD' && c.score >= 55);
   }).length;
-  return `Consensus from AI Investment Committee (${agree}/${committee.length} aligned or non-blocking). Weights: Tech 20% · Fund 25% · Whale 20% · Risk 15% · Mom 10% · Sent 10%.`;
+  const seatAbbrev: Partial<Record<CommitteeSeat, string>> = {
+    Technical: 'Tech',
+    Fundamental: 'Fund',
+    Whale: 'Whale',
+    Risk: 'Risk',
+    Momentum: 'Mom',
+    Sentiment: 'Sent',
+  };
+  const weightsText = committee
+    .map((c) => `${seatAbbrev[c.seat] || c.seat} ${Math.round(c.weight * 100)}%`)
+    .join(' · ');
+  return `Consensus from AI Investment Committee (${agree}/${committee.length} aligned or non-blocking). Weights: ${weightsText}.`;
 }
 
 function validate(out: QuantumEngineOutput): boolean {

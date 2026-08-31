@@ -56,6 +56,27 @@ function scenarioTarget(inst: any, name: 'Base Case' | 'Bull Case' | 'Bear Case'
 }
 
 /**
+ * Momentum previously defaulted to Math.round(rsi) — meaning the "Momentum"
+ * committee seat was just a copy of the "Technical" seat's own RSI read, with
+ * opposite semantics (RSI>70 is bearish/overbought for Technical, but was
+ * scored as bullish "positive momentum" here). Rate-of-change measures
+ * genuine trend continuation instead, independent of RSI's mean-reversion read.
+ */
+function priceRateOfChangePct(history: any[], lookbackDays: number, currentPrice: number): number | null {
+  if (!history.length || !(currentPrice > 0)) return null;
+  const idx = history.length - 1 - lookbackDays;
+  const pastClose = idx >= 0 ? Number(history[idx]?.close) : null;
+  if (!Number.isFinite(pastClose) || !pastClose || pastClose <= 0) return null;
+  return ((currentPrice - pastClose) / pastClose) * 100;
+}
+
+function momentumScoreFromRoc(history: any[], currentPrice: number): number | null {
+  const roc = priceRateOfChangePct(history, 10, currentPrice);
+  if (roc == null) return null;
+  return Math.max(5, Math.min(95, Math.round(50 + roc * 2.5)));
+}
+
+/**
  * Build QuantumEngineInput from OHLCV + optional full-analysis enrichments.
  * Chart-derived fields are identical for Find a Trade and App; enrich only upgrades inputs.
  */
@@ -188,6 +209,7 @@ export function buildQuantumInputFromMarketData(opts: {
       (Number.isFinite(chartSentiment) ? chartSentiment : 58),
     momentumScore:
       enrich.momentumScore ??
+      momentumScoreFromRoc(history, px) ??
       (tech?.indicators?.rsi != null ? Math.round(tech.indicators.rsi) : 55),
     newsBias: enrich.newsBias ?? null,
     smartMoneyScore:
@@ -202,5 +224,6 @@ export function buildQuantumInputFromMarketData(opts: {
     ticker: opts.ticker,
     userHasPosition: Boolean(opts.userHasPosition),
     technicalBreakdown: tech ?? null,
+    marketRegime: inst?.marketRegime ?? null,
   };
 }
