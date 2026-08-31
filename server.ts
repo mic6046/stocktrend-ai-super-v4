@@ -3363,30 +3363,10 @@ ${rating}
         ],
         markdownAnalysis,
         aiStockScore,
-        whaleAccumulation: parsed.whaleAccumulation || {
-          score: 75,
-          strengthClassification: "Strong Accumulation",
-          assignedScore: 18,
-          institutionalSentiment: "Bullish",
-          whaleStrength: "Strong",
-          buyProbability: 72,
-          sellProbability: 15,
-          explanation: "Institutional whales show persistent accumulation index (+18.4%), supported by dark pool block activity and net positive large order flows.",
-          metrics: {
-            whaleAccumulationIndex: 75.0,
-            whaleFlowSentry: "+$8.2M block-orders building",
-            whaleVolumeVector: 1.12,
-            megaWhaleBlockTrades: 24,
-            darkPoolActivity: "Mild accumulation trends in dark pools",
-            largeOrderFlow: 65.4,
-            institutionalFundFlow: 82.5,
-            netMoneyFlow: 94.2,
-            blockTradeImbalance: 55.0,
-            accumulationDistributionTrend: "Accumulation bias active",
-            totalFlowIn: 184.5,
-            totalFlowOut: 90.3
-          }
-        }
+        // No fabricated fallback: if the model didn't return whale-flow data for this
+        // ticker, report it as unavailable rather than defaulting to a fake "Strong
+        // Accumulation" claim that would contradict the real technical whale signal.
+        whaleAccumulation: parsed.whaleAccumulation || null
       };
     }
 
