@@ -300,6 +300,28 @@ const HORIZON_DAYS: Record<HorizonKey, number> = {
   '1Y': 252,
 };
 
+/**
+ * Confidence previously depended only on the committee's read of *current*
+ * technical/fundamental conditions (netWeight/overall/decisive), which don't
+ * change based on which horizon is selected — so the same evidence produced
+ * identical confidence at 1W and 1Y. That's inconsistent with the rest of the
+ * engine: fairTargetPrice's own maxAbs bound widens 12% -> 28% -> 55% -> 110%
+ * across 1W/1M/3M/1Y (correctly acknowledging more can happen the further out
+ * you look), yet confidence in the point estimate stayed flat regardless. This
+ * model is also technical/flow-heavy (Technical+Whale+Momentum = ~50% of
+ * committee weight), and those signals are inherently more predictive for
+ * near-term price action than for a 1-year outlook, where fundamentals/macro
+ * dominate more than this week's RSI reading. 1M is the anchor (0 adjustment,
+ * matching its role as the reference horizon elsewhere — see `scale = days/21`
+ * in fairTargetPrice); modest on either side, not dramatic.
+ */
+const HORIZON_CONFIDENCE_ADJUSTMENT: Record<HorizonKey, number> = {
+  '1W': 4,
+  '1M': 0,
+  '3M': -4,
+  '1Y': -8,
+};
+
 function clamp(n: number, lo: number, hi: number) {
   return Math.min(hi, Math.max(lo, n));
 }
@@ -2181,6 +2203,7 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
     // bullish call with decent momentum could otherwise sail through at full
     // confidence right at a ceiling. Temper confidence directly instead.
     const resistanceProximityPenalty = evidence.nearResistance && evidence.netWeight >= 0 ? 10 : 0;
+    const horizonAdjustment = HORIZON_CONFIDENCE_ADJUSTMENT[input.horizon] ?? 0;
     let confidence = Math.round(
       clamp(
         baseConf * 0.2 +
@@ -2190,7 +2213,8 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
           decisive * 12 -
           dispersionPenalty -
           completenessPenalty -
-          resistanceProximityPenalty,
+          resistanceProximityPenalty +
+          horizonAdjustment,
         30,
         94
       )
