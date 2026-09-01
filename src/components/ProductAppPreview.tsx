@@ -20,7 +20,7 @@ import {
 export function ProductAppPreview() {
   return (
     <div className="min-h-screen bg-[#050505] text-[#e0e0e0] flex overflow-hidden">
-      <aside className="w-56 shrink-0 border-r border-white/5 bg-[#08080a] flex flex-col">
+      <aside className="hidden lg:flex w-56 shrink-0 border-r border-white/5 bg-[#08080a] flex-col">
         <div className="px-3 py-3 border-b border-white/5">
           <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-gray-500 px-1">Navigate</p>
         </div>
@@ -66,26 +66,27 @@ export function ProductAppPreview() {
       </aside>
 
       <div className="flex-1 min-w-0 flex flex-col">
-        <header className="border-b border-white/5 px-4 py-2 flex items-center gap-3 bg-[#050505]/92">
-          <div className="flex items-center gap-2 shrink-0">
-            <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center">
+        <header className="border-b border-white/5 px-3 sm:px-4 py-2 flex items-center gap-2 sm:gap-3 bg-[#050505]/92">
+          <div className="flex items-center gap-2 shrink-0 min-w-0">
+            <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center shrink-0">
               <Activity className="w-4 h-4 text-black" />
             </div>
-            <span className="text-sm font-extrabold tracking-tight uppercase">
+            <span className="text-sm font-extrabold tracking-tight uppercase truncate">
               QUANTUM<span className="text-emerald-500">NODE</span>
             </span>
           </div>
-          <div className="flex-1 max-w-xl mx-auto">
+          <div className="hidden sm:block flex-1 max-w-xl mx-auto">
             <div className="h-9 rounded-full border border-white/10 bg-[#111113] px-4 flex items-center text-sm text-gray-500 font-mono">
               Search ticker...
             </div>
           </div>
+          <div className="flex-1 sm:flex-none" />
           <div className="flex items-center gap-2 shrink-0">
-            <div className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 h-9 inline-flex items-center gap-1.5 text-[10px] font-mono text-emerald-300">
+            <div className="hidden sm:inline-flex rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 h-9 items-center gap-1.5 text-[10px] font-mono text-emerald-300">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Live
             </div>
-            <div className="h-9 w-9 rounded-full border border-white/10" />
-            <div className="relative h-9 w-9 rounded-full border border-white/10 flex items-center justify-center">
+            <div className="h-9 w-9 rounded-full border border-white/10 shrink-0" />
+            <div className="relative h-9 w-9 rounded-full border border-white/10 flex items-center justify-center shrink-0">
               <Bell className="h-4 w-4 text-gray-300" />
               <span className="absolute -top-0.5 -right-0.5 h-4 min-w-[1rem] px-1 rounded-full bg-amber-500 text-black text-[9px] font-bold flex items-center justify-center">
                 2
@@ -94,7 +95,7 @@ export function ProductAppPreview() {
           </div>
         </header>
 
-        <div className="bg-[#0A0A0C] border-b border-white/5 py-2 px-4 flex gap-6 font-mono text-[11px]">
+        <div className="bg-[#0A0A0C] border-b border-white/5 py-2 px-3 sm:px-4 flex gap-4 sm:gap-6 font-mono text-[11px] overflow-x-auto [-webkit-overflow-scrolling:touch]">
           {[
             ['S&P 500', '5,310.50', '+0.23%', true],
             ['NASDAQ', '16,580.20', '+0.42%', true],
@@ -112,23 +113,23 @@ export function ProductAppPreview() {
           ))}
         </div>
 
-        <main className="flex-1 p-6 space-y-5 overflow-hidden">
-          <div className="flex items-end justify-between gap-3">
+        <main className="flex-1 p-4 sm:p-6 space-y-5 overflow-hidden">
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
             <div>
               <p className="text-[10px] font-mono uppercase tracking-[0.22em] text-emerald-400">
                 Market Command Center
               </p>
-              <h2 className="mt-1 text-3xl font-bold text-white tracking-tight">Market Today</h2>
+              <h2 className="mt-1 text-2xl sm:text-3xl font-bold text-white tracking-tight">Market Today</h2>
               <p className="mt-1 text-[13px] text-gray-500">
                 A quick read of major indices and AI-ranked opportunities.
               </p>
             </div>
-            <div className="rounded-xl bg-emerald-500 px-4 min-h-[44px] inline-flex items-center text-[12px] font-bold uppercase text-black">
+            <div className="rounded-xl bg-emerald-500 px-4 min-h-[44px] inline-flex items-center justify-center text-[12px] font-bold uppercase text-black shrink-0">
               Find Trades
             </div>
           </div>
 
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {[
               ['S&P 500', '5310.50', '+0.23%', true],
               ['NASDAQ', '16580.20', '+0.42%', true],
@@ -153,8 +154,8 @@ export function ProductAppPreview() {
                 AI Market Outlook
               </p>
             </div>
-            <div className="flex gap-6 items-center">
-              <div>
+            <div className="flex flex-col sm:flex-row gap-4 sm:gap-6 sm:items-center">
+              <div className="shrink-0">
                 <p className="text-[10px] uppercase text-gray-500">AI Market Sentiment</p>
                 <p className="mt-1 text-2xl font-black text-emerald-400">BULLISH</p>
                 <p className="mt-1 text-[12px] font-mono text-cyan-300">Confidence 78%</p>
@@ -165,7 +166,7 @@ export function ProductAppPreview() {
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {[
               ['Top AI Opportunities', [['NVDA', 'BUY', '87%'], ['MSFT', 'BUY', '81%'], ['AAPL', 'HOLD', '64%']]],
               ['Watch', [['TSLA', 'WAIT', '58%'], ['AMD', 'HOLD', '61%']]],
