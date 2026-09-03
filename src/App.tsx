@@ -11963,6 +11963,95 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* Master Decision Feed — single recommendation + conflict brief.
+                      Moved to the top of this card so it's visible immediately,
+                      ahead of the tuning panels and diagnostics below. */}
+                  <div className="bg-[#0A0A0C] border border-white/5 p-4 rounded-xl space-y-3">
+                    <div className="text-[9.5px] font-mono font-bold uppercase tracking-widest text-gray-500 border-b border-white/5 pb-1.5 flex justify-between items-center">
+                      <span>Master Decision Engine</span>
+                      <span className="text-[8px] bg-violet-500/10 text-violet-300 border border-violet-500/20 px-1.5 py-0.5 rounded text-right tracking-tight uppercase">
+                        {horizonView.horizonLabel}
+                      </span>
+                    </div>
+                    <div
+                      className={cn(
+                        'border rounded-lg p-3 space-y-2',
+                        horizonView.chartStance === 'bull'
+                          ? 'border-emerald-500/25 bg-emerald-500/5'
+                          : horizonView.chartStance === 'bear'
+                            ? 'border-rose-500/25 bg-rose-500/5'
+                            : 'border-amber-500/25 bg-amber-500/5'
+                      )}
+                    >
+                      <div className="flex justify-between items-center gap-2">
+                        <span
+                          className={cn(
+                            'text-[11px] px-2 py-1 rounded font-black tracking-wider uppercase',
+                            horizonView.chartStance === 'bull'
+                              ? 'bg-emerald-500/20 text-emerald-300'
+                              : horizonView.chartStance === 'bear'
+                                ? 'bg-rose-500/20 text-rose-300'
+                                : 'bg-amber-500/20 text-amber-300'
+                          )}
+                        >
+                          {horizonView.finalVerdict}
+                        </span>
+                        <span className="text-[10px] font-mono text-gray-400">
+                          {horizonView.confidence}% conf
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-[10px] font-mono">
+                        <div>
+                          <span className="text-gray-500 block text-[7px] uppercase">Expected Return</span>
+                          <span
+                            className={cn(
+                              'font-bold',
+                              horizonView.expectedReturn >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                            )}
+                          >
+                            {horizonView.expectedReturn >= 0 ? '+' : ''}
+                            {horizonView.expectedReturn.toFixed(1)}%
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500 block text-[7px] uppercase">Suggested Action</span>
+                          <span className="font-bold text-gray-200 leading-tight">
+                            {horizonView.suggestedAction}
+                          </span>
+                        </div>
+                      </div>
+                      <p className="text-[10px] text-gray-300 leading-relaxed">{horizonView.whyWins}</p>
+                      {(horizonView.bullishFactors.length > 0 || horizonView.bearishFactors.length > 0) && (
+                        <div className="grid grid-cols-1 gap-1.5 pt-1 border-t border-white/5">
+                          {horizonView.bullishFactors.slice(0, 3).map((f) => (
+                            <p key={`md-b-${f.label}`} className="text-[9px] text-emerald-300/90">
+                              ✔ {f.label}
+                            </p>
+                          ))}
+                          {horizonView.bearishFactors.slice(0, 3).map((f) => (
+                            <p key={`md-e-${f.label}`} className="text-[9px] text-rose-300/90">
+                              ✖ {f.label}
+                            </p>
+                          ))}
+                        </div>
+                      )}
+                      <div className="grid grid-cols-3 gap-1 pt-1 border-t border-white/5 text-[8px] font-mono text-gray-500">
+                        {horizonView.committee.slice(0, 6).map((m) => (
+                          <p key={m.seat} className="truncate">
+                            {m.seat.slice(0, 4)} {m.score}
+                          </p>
+                        ))}
+                      </div>
+                      <p className="text-[9px] text-amber-200/80 leading-relaxed">
+                        Invalidation: {horizonView.invalidationLevel}
+                      </p>
+                      <p className="text-[9px] text-sky-200/80 leading-relaxed">
+                        Next review: {horizonView.nextReviewTrigger}
+                      </p>
+                      <p className="text-[8px] font-mono text-violet-300/80">{horizonView.validationStatus}</p>
+                    </div>
+                  </div>
+
                   <AnimatePresence>
                     {showAdvisoryInfo && (
                       <motion.div
@@ -12514,93 +12603,6 @@ export default function App() {
                     >
                       Probe Uplink
                     </button>
-                  </div>
-
-                  {/* Master Decision Feed — single recommendation + conflict brief */}
-                  <div className="bg-[#0A0A0C] border border-white/5 p-4 rounded-xl space-y-3">
-                    <div className="text-[9.5px] font-mono font-bold uppercase tracking-widest text-gray-500 border-b border-white/5 pb-1.5 flex justify-between items-center">
-                      <span>Master Decision Engine</span>
-                      <span className="text-[8px] bg-violet-500/10 text-violet-300 border border-violet-500/20 px-1.5 py-0.5 rounded text-right tracking-tight uppercase">
-                        {horizonView.horizonLabel}
-                      </span>
-                    </div>
-                    <div
-                      className={cn(
-                        'border rounded-lg p-3 space-y-2',
-                        horizonView.chartStance === 'bull'
-                          ? 'border-emerald-500/25 bg-emerald-500/5'
-                          : horizonView.chartStance === 'bear'
-                            ? 'border-rose-500/25 bg-rose-500/5'
-                            : 'border-amber-500/25 bg-amber-500/5'
-                      )}
-                    >
-                      <div className="flex justify-between items-center gap-2">
-                        <span
-                          className={cn(
-                            'text-[11px] px-2 py-1 rounded font-black tracking-wider uppercase',
-                            horizonView.chartStance === 'bull'
-                              ? 'bg-emerald-500/20 text-emerald-300'
-                              : horizonView.chartStance === 'bear'
-                                ? 'bg-rose-500/20 text-rose-300'
-                                : 'bg-amber-500/20 text-amber-300'
-                          )}
-                        >
-                          {horizonView.finalVerdict}
-                        </span>
-                        <span className="text-[10px] font-mono text-gray-400">
-                          {horizonView.confidence}% conf
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2 text-[10px] font-mono">
-                        <div>
-                          <span className="text-gray-500 block text-[7px] uppercase">Expected Return</span>
-                          <span
-                            className={cn(
-                              'font-bold',
-                              horizonView.expectedReturn >= 0 ? 'text-emerald-400' : 'text-rose-400'
-                            )}
-                          >
-                            {horizonView.expectedReturn >= 0 ? '+' : ''}
-                            {horizonView.expectedReturn.toFixed(1)}%
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-gray-500 block text-[7px] uppercase">Suggested Action</span>
-                          <span className="font-bold text-gray-200 leading-tight">
-                            {horizonView.suggestedAction}
-                          </span>
-                        </div>
-                      </div>
-                      <p className="text-[10px] text-gray-300 leading-relaxed">{horizonView.whyWins}</p>
-                      {(horizonView.bullishFactors.length > 0 || horizonView.bearishFactors.length > 0) && (
-                        <div className="grid grid-cols-1 gap-1.5 pt-1 border-t border-white/5">
-                          {horizonView.bullishFactors.slice(0, 3).map((f) => (
-                            <p key={`md-b-${f.label}`} className="text-[9px] text-emerald-300/90">
-                              ✔ {f.label}
-                            </p>
-                          ))}
-                          {horizonView.bearishFactors.slice(0, 3).map((f) => (
-                            <p key={`md-e-${f.label}`} className="text-[9px] text-rose-300/90">
-                              ✖ {f.label}
-                            </p>
-                          ))}
-                        </div>
-                      )}
-                      <div className="grid grid-cols-3 gap-1 pt-1 border-t border-white/5 text-[8px] font-mono text-gray-500">
-                        {horizonView.committee.slice(0, 6).map((m) => (
-                          <p key={m.seat} className="truncate">
-                            {m.seat.slice(0, 4)} {m.score}
-                          </p>
-                        ))}
-                      </div>
-                      <p className="text-[9px] text-amber-200/80 leading-relaxed">
-                        Invalidation: {horizonView.invalidationLevel}
-                      </p>
-                      <p className="text-[9px] text-sky-200/80 leading-relaxed">
-                        Next review: {horizonView.nextReviewTrigger}
-                      </p>
-                      <p className="text-[8px] font-mono text-violet-300/80">{horizonView.validationStatus}</p>
-                    </div>
                   </div>
 
                   <div className="text-[9px] text-gray-600 font-mono tracking-normal leading-relaxed text-center">
