@@ -8655,6 +8655,7 @@ export default function App() {
                       null
                     }
                   />
+                  <DecisionBriefPanel decision={horizonView} />
                   <AiInsightsStrip
                     keyRisks={keyRisks}
                     technical={{
@@ -8698,7 +8699,6 @@ export default function App() {
                     srSignal={quantumSr.label}
                     srDetail={quantumSr.detail}
                   />
-                  <DecisionBriefPanel decision={horizonView} />
                   <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                     <TradeZonesPanel
                       lastClose={
