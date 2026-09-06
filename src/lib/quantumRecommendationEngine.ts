@@ -1806,6 +1806,12 @@ function positionAwareHeadline(
       live.action === 'REDUCE' ||
       ((live.action === 'TAKE PROFIT' || live.action === 'PARTIAL TAKE PROFIT') && rec !== 'HOLD')
     ) {
+      // USER RULE: reaching resistance with institutional/whale flow reducing
+      // reads as "lock in some gains here" (take partial profit), not the
+      // generic "trim on weakening flow" framing used for REDUCE elsewhere.
+      if (rec === 'REDUCE' && evidence.nearResistance) {
+        return { headline: `TAKE PARTIAL PROFIT${tag}`, action: 'REDUCE' };
+      }
       return { headline: `REDUCE PARTIAL${tag}`, action: 'REDUCE' };
     }
     return { headline: `HOLD${tag}`, action: 'HOLD' };
@@ -2614,6 +2620,18 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
         : 'the underlying technical and flow evidence';
       criticalCaveat = `This ${rec} call is supported by ${driver}, but ${warnParts.join(' and ')} — a short-term pullback or stall is common here even inside a longer uptrend. Consider scaling in rather than a full entry, or waiting for momentum to reset before adding size.`;
     } else if (
+      rec === 'REDUCE' &&
+      userHasPosition &&
+      evidence.nearResistance &&
+      evidence.resistanceLevel != null &&
+      px > 0
+    ) {
+      // USER RULE: reaching resistance while institutional/whale flow is
+      // reducing reads as "lock in some gains here," not a generic weakening-
+      // flow trim — frame it as taking partial profit into the level instead.
+      const distPct = (((evidence.resistanceLevel - px) / px) * 100).toFixed(1);
+      criticalCaveat = `Price is ${distPct}% below resistance (~${evidence.resistanceLevel.toFixed(2)}) while institutional/whale flow is reducing — a good spot to take partial profit rather than chase the level, not a call to exit the full position.`;
+    } else if (
       (rec === 'SELL' || rec === 'AVOID NEW POSITION' || (rec === 'REDUCE' && userHasPosition)) &&
       (evidence.supportBroken || evidence.nearSupport) &&
       evidence.supportLevel != null &&
@@ -2629,6 +2647,18 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
       // It isn't: REDUCE here means trim size on softening flow/momentum, a
       // different and less severe call than SELL (structural breakdown).
       criticalCaveat = `REDUCE means trim position size on weakening momentum or flow — not a bearish price call. Support is still holding, so the near-term target stays in a narrow range instead of projecting a decline; that's why it can look mild or even slightly positive next to "REDUCE".`;
+    } else if (evidence.nearResistance && evidence.resistanceLevel != null && px > 0) {
+      // USER RULE: whenever a stock is reaching or has reached resistance,
+      // always warn the user regardless of what the specific call is — this is
+      // the single most relevant nearby level and shouldn't only be surfaced
+      // for BUY/STRONG BUY or REDUCE calls (the branches above already cover
+      // those with more specific framing; this is the general fallback for
+      // every other case — HOLD, SELL, AVOID NEW POSITION, or a flat account).
+      const distPct = (((evidence.resistanceLevel - px) / px) * 100).toFixed(1);
+      criticalCaveat =
+        distPct === '0.0'
+          ? `Price has reached resistance (~${evidence.resistanceLevel.toFixed(2)}). Rejection at this level is common — watch for a confirmed close above it before expecting continued upside.`
+          : `Price is ${distPct}% below resistance (~${evidence.resistanceLevel.toFixed(2)}) — the stock is approaching a level where rejection is common. Watch for a confirmed close above it before expecting continued upside.`;
     }
 
     const whyWins = buildWhyWins(rec, evidence);
