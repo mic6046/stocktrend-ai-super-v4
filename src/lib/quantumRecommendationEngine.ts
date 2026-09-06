@@ -2388,12 +2388,25 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
 
     // USER RULE: a stock reaching support should never surface as REDUCE — that
     // is exactly where accumulation typically happens, not where to tell someone
-    // to trim. Catches REDUCE regardless of which branch above produced it.
-    // Accumulation present (flow not weakening) resolves to HOLD; accumulation
-    // plus price+volume actually rising off the level resolves to a modest BUY.
-    if (rec === 'REDUCE' && evidence.nearSupport && !evidence.supportBroken) {
+    // to trim. Catches REDUCE (and a HOLD candidate at the same spot) regardless
+    // of which branch produced it:
+    //  - weak/no accumulation -> HOLD (never REDUCE).
+    //  - accumulation present, but the underlying trend/structure foundation
+    //    isn't confirmed yet -> HOLD.
+    //  - accumulation present AND (price+volume already confirming, OR the
+    //    trend/structure foundation is intact) -> a modest "scale in" BUY
+    //    rather than waiting on the sideline.
+    if ((rec === 'REDUCE' || rec === 'HOLD') && evidence.nearSupport && !evidence.supportBroken) {
       const accumulationPresent = !evidence.flowWeakening;
-      rec = accumulationPresent && evidence.priceVolumeSurge ? 'BUY' : 'HOLD';
+      // "Foundation is good" means an affirmatively bullish structural signal —
+      // structureIntact alone (used elsewhere to gate SELL) only means "not
+      // clearly deteriorating," which is too lenient a bar for "good" here.
+      const trendNow = String(input.technical?.trend || '').toUpperCase();
+      const goodFoundation =
+        evidence.structureIntact &&
+        (trendNow.includes('BULL') || input.technical?.emaBias === 'bull' || input.technical?.smaBias === 'bull');
+      const shouldScaleIn = accumulationPresent && (evidence.priceVolumeSurge || goodFoundation);
+      rec = shouldScaleIn ? 'BUY' : 'HOLD';
       if (rec === 'HOLD') {
         expectedReturn = round2(clamp(expectedReturn, -2.9, 2.9));
       } else {
@@ -2402,13 +2415,28 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
       target = roundPrice(px * (1 + expectedReturn / 100));
     }
 
-    const score = scoreFromRecommendation(rec, expectedReturn, evidence.netWeight * 10);
-
     const vol =
       input.technical?.volatility ??
       api.vol ??
       (input.horizon === '1W' ? 26 : input.horizon === '1Y' ? 17 : 21);
     const risk = riskFromVolatility(vol, input.horizon);
+
+    // USER RULE: very-low risk or a genuinely oversold RSI should not surface as
+    // REDUCE — trimming into either condition is poor practice (very-low risk
+    // means the position isn't in a volatile state warranting defensive action;
+    // oversold usually precedes a bounce, so selling into it locks in the worst
+    // price). REDUCE only becomes appropriate again once RSI recovers out of
+    // oversold territory on a bounce, not while still oversold.
+    const rsiNow = input.technical?.rsi;
+    const isOversoldNow = rsiNow != null && Number.isFinite(rsiNow) && rsiNow < 30;
+    if (rec === 'REDUCE' && (risk.level === 'Very Low' || isOversoldNow) && !evidence.supportBroken) {
+      rec = 'HOLD';
+      expectedReturn = round2(clamp(expectedReturn, -2.9, 2.9));
+      target = roundPrice(px * (1 + expectedReturn / 100));
+    }
+
+    const score = scoreFromRecommendation(rec, expectedReturn, evidence.netWeight * 10);
+
     const zoneOpts = {
       px,
       target,
