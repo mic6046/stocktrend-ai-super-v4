@@ -2385,6 +2385,23 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
         target = roundPrice(px * (1 + expectedReturn / 100));
       }
     }
+
+    // USER RULE: a stock reaching support should never surface as REDUCE — that
+    // is exactly where accumulation typically happens, not where to tell someone
+    // to trim. Catches REDUCE regardless of which branch above produced it.
+    // Accumulation present (flow not weakening) resolves to HOLD; accumulation
+    // plus price+volume actually rising off the level resolves to a modest BUY.
+    if (rec === 'REDUCE' && evidence.nearSupport && !evidence.supportBroken) {
+      const accumulationPresent = !evidence.flowWeakening;
+      rec = accumulationPresent && evidence.priceVolumeSurge ? 'BUY' : 'HOLD';
+      if (rec === 'HOLD') {
+        expectedReturn = round2(clamp(expectedReturn, -2.9, 2.9));
+      } else {
+        expectedReturn = round2(clamp(floorWithSignal(expectedReturn, 3.2, 5), 3.2, 18));
+      }
+      target = roundPrice(px * (1 + expectedReturn / 100));
+    }
+
     const score = scoreFromRecommendation(rec, expectedReturn, evidence.netWeight * 10);
 
     const vol =
