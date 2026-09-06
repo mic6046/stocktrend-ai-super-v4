@@ -2598,8 +2598,12 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
     // "NO NEW POSITION" for SELL) even when the exact label text differs.
     let criticalCaveat: string | null = null;
     if ((rec === 'BUY' || rec === 'STRONG BUY') && evidence.nearResistance && evidence.resistanceLevel != null && px > 0) {
+      // USER RULE: even when price+volume are rising and accumulation is
+      // detected — the exact evidence that can drive this call to BUY/STRONG
+      // BUY on its own — reaching resistance still deserves a care warning
+      // with concrete alternatives, not just an assumption the level breaks.
       const distPct = (((evidence.resistanceLevel - px) / px) * 100).toFixed(1);
-      criticalCaveat = `Price is only ${distPct}% below resistance (~${evidence.resistanceLevel.toFixed(2)}). Rejection at this level is common — this ${rec} call assumes the level breaks with confirmation, not that it already has. Consider a smaller entry or waiting for a confirmed close above resistance.`;
+      criticalCaveat = `Price is only ${distPct}% below resistance (~${evidence.resistanceLevel.toFixed(2)}). Rejection at this level is common even when accumulation and rising volume support the case — this ${rec} call assumes the level breaks with confirmation, not that it already has. Buy with care: use a smaller size, wait for a pullback toward support before adding, or wait for a real breakout — a confirmed close above resistance with volume — rather than chasing the level now.`;
     } else if (
       (rec === 'BUY' || rec === 'STRONG BUY') &&
       input.technical?.rsi != null &&
