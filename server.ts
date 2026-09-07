@@ -2673,28 +2673,31 @@ app.post('/api/predict', async (req, res) => {
     bestMatches.push(...allMatchesList.slice(0, 4));
   }
 
-  // Refine fallback matches
-  const mockDates = ['2025-09-12', '2025-11-18', '2026-02-04', '2026-04-20'];
-  let matchIdx = 0;
-  while (bestMatches.length < 4) {
-    const simulatedCorr = parseFloat((82 + Math.random() * 15).toFixed(1));
-    const biasModifier = (indicators?.directionalBias ? (indicators.directionalBias - 50) / 10 : 0.5);
-    const simulatedReturn = parseFloat((biasModifier + (Math.random() - 0.4) * 6).toFixed(2));
-    const simulatedDrawdown = parseFloat((-dailyVolPercent * (Math.random() * 1.5 + 1.2)).toFixed(2));
-    bestMatches.push({
-      matchDate: mockDates[matchIdx % mockDates.length],
-      similarity: simulatedCorr,
-      outcomeReturn: simulatedReturn,
-      outcomeDrawdown: simulatedDrawdown,
-      success: simulatedReturn > 0
-    });
-    matchIdx++;
-  }
-
+  // Historical analog matches are real when found (Pearson correlation > 0.45
+  // against the stock's own price history) — this used to pad out to 4 entries
+  // with Math.random()-generated fake matches (fake dates from a hardcoded
+  // list, similarity always 82-97%, random return/drawdown) whenever fewer
+  // than 4 real matches existed, which is common for tickers with limited
+  // history or few genuinely similar past setups. That fake data fed directly
+  // into patternMatchingModelVal, which is blended into the multi-horizon
+  // price forecast (ensembleCombinedForecast) and the bullish-probability
+  // calculation below — meaning a made-up number could silently steer the
+  // actual price prediction shown to the user. Report the real sample size
+  // instead, however small; a small honest sample is more useful than a
+  // padded fake one, and this is the same "genuinely unavailable rather than
+  // fabricated" principle already applied to the adaptive-learning ledger.
+  const realMatchCount = bestMatches.length;
   const patternSuccessSummary = {
-    successRate: parseFloat(((bestMatches.filter(m => m.success).length / bestMatches.length) * 100).toFixed(1)),
-    averageReturn: parseFloat((bestMatches.reduce((sum, m) => sum + m.outcomeReturn, 0) / bestMatches.length).toFixed(2)),
-    maximumDrawdown: parseFloat((bestMatches.reduce((min, m) => m.outcomeDrawdown < min ? m.outcomeDrawdown : min, 0)).toFixed(2))
+    successRate: realMatchCount > 0
+      ? parseFloat(((bestMatches.filter(m => m.success).length / realMatchCount) * 100).toFixed(1))
+      : null,
+    averageReturn: realMatchCount > 0
+      ? parseFloat((bestMatches.reduce((sum, m) => sum + m.outcomeReturn, 0) / realMatchCount).toFixed(2))
+      : null,
+    maximumDrawdown: realMatchCount > 0
+      ? parseFloat((bestMatches.reduce((min, m) => m.outcomeDrawdown < min ? m.outcomeDrawdown : min, 0)).toFixed(2))
+      : null,
+    sampleSize: realMatchCount,
   };
 
   // Ensemble Forecast Weight Calibration
@@ -2731,7 +2734,12 @@ app.post('/api/predict', async (req, res) => {
   const sentimentModelVal = parseFloat(((passedNews?.length || 5) * 0.2 + sentScoreParam).toFixed(2));
   
   const marketRegimeModelVal = parseFloat((1.2 - dailyVolPercent * 0.12 + (indicators?.scores?.bollingerScore || 50) * 0.01).toFixed(2));
-  const patternMatchingModelVal = patternSuccessSummary.averageReturn;
+  // A single historical analog isn't a reliable pattern signal — require at
+  // least 2 real matches before letting this component vote; otherwise it
+  // contributes 0 (neutral) rather than skewing the blend on a thin sample.
+  const patternMatchingModelVal = patternSuccessSummary.sampleSize >= 2
+    ? (patternSuccessSummary.averageReturn ?? 0)
+    : 0;
 
   const ensembleCombinedForecast = parseFloat((
     (trendModelVal * weights.trend +
@@ -2761,7 +2769,7 @@ app.post('/api/predict', async (req, res) => {
 
     const directionalStrength = (indicators?.directionalBias ? (indicators.directionalBias - 50) : 10) * 0.5;
     let baseBullProb = 50 + directionalStrength;
-    if (patternSuccessSummary.successRate > 50) baseBullProb += 3;
+    if (patternSuccessSummary.sampleSize >= 2 && (patternSuccessSummary.successRate ?? 0) > 50) baseBullProb += 3;
     
     const bullishProbability = Math.max(18, Math.min(82, Math.round(baseBullProb * Math.sqrt(1 + h / 90))));
     const neutralProbability = Math.max(8, Math.min(40, Math.round(32 / Math.sqrt(h))));

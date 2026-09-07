@@ -4774,17 +4774,23 @@ export default function App() {
 
     const totalSignals = totalBuys + totalSells;
     const totalWins = successfulBuys + successfulSells;
-    const overallWinRate = totalSignals > 0 ? (totalWins / totalSignals) * 100 : 81.3;
+    // This backtest is real (it walks historical buy/sell signal markers and
+    // checks what the price actually did afterward), but when a ticker's
+    // walked window produced zero signals, the win-rate fields used to fall
+    // back to fixed, always-positive numbers (81.3%/75%/82.5%/80%, "RSI" as
+    // the top factor) instead of honestly reporting "no historical signals to
+    // backtest here." Report null in that case rather than a fabricated rate.
+    const overallWinRate = totalSignals > 0 ? (totalWins / totalSignals) * 100 : null;
 
     // Calculate individual factor win rates
     const factorWinRates: Record<string, number> = {};
     Object.keys(factorStats).forEach((fact) => {
       const stats = factorStats[fact];
-      factorWinRates[fact] = stats.total > 0 ? (stats.wins / stats.total) * 100 : 75.0;
+      if (stats.total > 0) factorWinRates[fact] = (stats.wins / stats.total) * 100;
     });
 
     // Determine the top performing element for this ticker
-    let topFactor = 'RSI';
+    let topFactor: string | null = null;
     let highestWinRateOfFactor = 0;
     Object.keys(factorWinRates).forEach((fact) => {
       if (factorWinRates[fact] > highestWinRateOfFactor && factorStats[fact].total > 0) {
@@ -4800,8 +4806,8 @@ export default function App() {
         totalSignals,
         totalWins,
         overallWinRate,
-        buyWinRate: totalBuys > 0 ? (successfulBuys / totalBuys) * 100 : 82.5,
-        sellWinRate: totalSells > 0 ? (successfulSells / totalSells) * 100 : 80.0,
+        buyWinRate: totalBuys > 0 ? (successfulBuys / totalBuys) * 100 : null,
+        sellWinRate: totalSells > 0 ? (successfulSells / totalSells) * 100 : null,
         topFactor,
         factorScores: factorWinRates
       };
@@ -5427,7 +5433,11 @@ export default function App() {
     
     const riskScore = Math.round(aiStockScore?.components?.riskProfile?.score ? (aiStockScore.components.riskProfile.score / 20 * 100) : 45);
     
-    const patternMatchScore = Math.round(patternSuccessSummary?.successRate || 82);
+    // successRate is honestly null when the server found no real historical
+    // analog matches — don't paper over that with a fabricated 82.
+    const patternMatchScore = patternSuccessSummary?.successRate != null
+      ? Math.round(patternSuccessSummary.successRate)
+      : null;
     
     // 3. CAPITAL FLOW ENGINE — derived from the real Accumulation/Distribution line
     // (adConfidence is a genuine 50-98 conviction score from volume-weighted close
@@ -12543,32 +12553,41 @@ export default function App() {
                         </span>
                       </div>
 
-                      {/* Check 5: Neural Model Backtest Accuracy with Past Performance */}
+                      {/* Check 5: Neural Model Backtest Accuracy with Past Performance.
+                          overallWinRate/topFactor/etc. are now honestly null when the
+                          walked history produced zero real buy/sell signals to backtest —
+                          show that plainly instead of a fabricated percentage. */}
                       {(() => {
                         const backtest = decoratedChartData && decoratedChartData.length > 0 ? (decoratedChartData[0] as any).backtestStats : null;
-                        const accuracyPercent = backtest ? backtest.overallWinRate : (chartSignals && (chartSignals as any).accuracy ? (chartSignals as any).accuracy : 81.3);
+                        const accuracyPercent: number | null =
+                          backtest?.overallWinRate ??
+                          (chartSignals && (chartSignals as any).accuracy ? (chartSignals as any).accuracy : null);
                         return (
                           <>
                             <div className="flex items-center justify-between border-t border-white/[0.03] pt-2">
                               <span className="text-gray-500">Quant Backtest Win Rate</span>
                               <span className="text-emerald-400 font-mono font-bold">
-                                {accuracyPercent.toFixed(1)}%
+                                {accuracyPercent != null ? `${accuracyPercent.toFixed(1)}%` : 'Not enough signals'}
                               </span>
                             </div>
-                            
+
                             {backtest && backtest.totalSignals > 0 && (
                               <div className="border-t border-white/[0.02] pt-2 mt-1.5 space-y-1 text-[9px] font-mono text-gray-500">
                                 <div className="flex justify-between">
                                   <span>Backtest Success Margin</span>
                                   <span className="text-gray-300 font-semibold">{backtest.totalWins} of {backtest.totalSignals} Signals</span>
                                 </div>
-                                <div className="flex justify-between">
-                                  <span>Peak Alpha Generator</span>
-                                  <span className="text-amber-400 font-semibold uppercase">{backtest.topFactor} Indicator ({Math.round(backtest.factorScores[backtest.topFactor] || 75)}% Acc)</span>
-                                </div>
+                                {backtest.topFactor && (
+                                  <div className="flex justify-between">
+                                    <span>Peak Alpha Generator</span>
+                                    <span className="text-amber-400 font-semibold uppercase">{backtest.topFactor} Indicator ({Math.round(backtest.factorScores[backtest.topFactor])}% Acc)</span>
+                                  </div>
+                                )}
                                 <div className="flex justify-between">
                                   <span>Buy / Sell Reliability</span>
-                                  <span className="text-gray-400">Buy: {Math.round(backtest.buyWinRate)}% | Sell: {Math.round(backtest.sellWinRate)}%</span>
+                                  <span className="text-gray-400">
+                                    Buy: {backtest.buyWinRate != null ? `${Math.round(backtest.buyWinRate)}%` : 'N/A'} | Sell: {backtest.sellWinRate != null ? `${Math.round(backtest.sellWinRate)}%` : 'N/A'}
+                                  </span>
                                 </div>
                                 <div className="bg-white/[0.02] border border-white/5 p-1.5 rounded mt-1 text-[8px] text-gray-400 leading-normal">
                                   💡 <span className="text-gray-300 font-bold">Self-Optimizing System:</span> Confidence values are dynamically weighted in real time based on this asset's historical trend win-ratios.
