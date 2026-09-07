@@ -29,6 +29,15 @@ export interface TechnicalIndicators {
   } | null;
   relativeVolume: number;
   volatility: number;
+  /** Annualized volatility (stdev of daily returns × √252, as a percentage — e.g. 22 means 22%/yr).
+   * This is the scale the recommendation engine's risk bucketing expects, unlike `volatility`
+   * above (raw mean-absolute-daily-return fraction, e.g. 0.02) which some display cards use directly. */
+  annualizedVolatilityPct: number;
+  /** Downside-only annualized volatility (Sortino-style semi-deviation: only negative daily
+   * returns count, zero-filled otherwise, then annualized the same way). A stock that is choppy
+   * but symmetric scores low here even with a high `annualizedVolatilityPct`; one prone to sharp
+   * drops scores high on both — this is what should drive "risk," not the blended average alone. */
+  downsideVolatilityPct: number;
   vwap: number | null;
   institutionalFlow: {
     netFlowPct: number;
@@ -807,6 +816,38 @@ export function computeTechnicalIndicators(history: any[], lastQuote: any): Tech
   }
   if (returns.length > 0) {
     volatility = returns.reduce((a, b) => a + b, 0) / returns.length;
+  }
+
+  // 8b. Annualized volatility (stdev of SIGNED daily returns × √252, as a
+  // percentage) + downside-only semi-deviation, windowed to the most recent
+  // ~60 trading days so risk reflects the current regime rather than a full
+  // year blended together. This is the scale/methodology the recommendation
+  // engine's risk bucketing (Very Low..Very High, thresholds ~12-40) actually
+  // expects — `volatility` above is a differently-scaled proxy kept as-is
+  // since other display cards already read it as a raw fraction.
+  const TRADING_DAYS_PER_YEAR = 252;
+  const VOL_WINDOW = 60;
+  const recentCloses = datasetCloses.slice(-(VOL_WINDOW + 1));
+  const signedReturns: number[] = [];
+  for (let i = 1; i < recentCloses.length; i++) {
+    if (recentCloses[i - 1] !== 0) {
+      signedReturns.push((recentCloses[i] - recentCloses[i - 1]) / recentCloses[i - 1]);
+    }
+  }
+  let annualizedVolatilityPct = 20; // matches the engine's own horizon-based fallback
+  let downsideVolatilityPct = 20;
+  if (signedReturns.length > 1) {
+    const meanReturn = signedReturns.reduce((a, b) => a + b, 0) / signedReturns.length;
+    const variance =
+      signedReturns.reduce((a, b) => a + (b - meanReturn) ** 2, 0) / signedReturns.length;
+    annualizedVolatilityPct = Math.sqrt(variance * TRADING_DAYS_PER_YEAR) * 100;
+
+    // Sortino-style semi-deviation: negative returns only, zero-filled otherwise,
+    // divided by the FULL sample size (not just the count of down days) — the
+    // standard definition, so a stock with few but severe drops still reads high.
+    const downsideVariance =
+      signedReturns.reduce((a, b) => a + (b < 0 ? b * b : 0), 0) / signedReturns.length;
+    downsideVolatilityPct = Math.sqrt(downsideVariance * TRADING_DAYS_PER_YEAR) * 100;
   }
 
   // 9. Calculate Volume-Weighted Average Price (VWAP) (20-day standard rolling)
@@ -2972,6 +3013,8 @@ export function computeTechnicalIndicators(history: any[], lastQuote: any): Tech
       bollinger,
       relativeVolume,
       volatility,
+      annualizedVolatilityPct,
+      downsideVolatilityPct,
       vwap,
       institutionalFlow: {
         netFlowPct,

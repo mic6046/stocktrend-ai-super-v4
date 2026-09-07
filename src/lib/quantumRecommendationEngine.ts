@@ -177,6 +177,9 @@ export type QuantumEngineInput = {
     macdBullish?: boolean | null;
     trend?: string | null;
     volatility?: number | null;
+    /** Downside-only annualized volatility (Sortino-style semi-deviation, same
+     * percentage scale as `volatility`) — see riskFromVolatility(). */
+    downsideVolatility?: number | null;
     adx?: number | null;
     emaBias?: 'bull' | 'bear' | 'neutral' | null;
     smaBias?: 'bull' | 'bear' | 'neutral' | null;
@@ -444,12 +447,22 @@ function scoreFromRecommendation(rec: RecommendationLabel, expectedReturn: numbe
   return Math.round(clamp(baseByRec[rec] + fine + bias * 0.15, 1, 99));
 }
 
-function riskFromVolatility(vol: number | null, horizon: HorizonKey): { level: RiskLevel; score: number } {
+function riskFromVolatility(
+  vol: number | null,
+  horizon: HorizonKey,
+  downsideVol?: number | null
+): { level: RiskLevel; score: number } {
   const v = vol ?? (horizon === '1W' ? 28 : horizon === '1Y' ? 18 : 22);
-  if (v < 12) return { level: 'Very Low', score: 18 };
-  if (v < 18) return { level: 'Low', score: 32 };
-  if (v < 28) return { level: 'Medium', score: 48 };
-  if (v < 40) return { level: 'High', score: 68 };
+  // A stock that's choppy but symmetric (small up/down swings) and one that's
+  // quiet most days but prone to sharp drops can share the same blended
+  // volatility average — only the second is the kind of "risk" that matters
+  // for position sizing. Bucket off whichever reading is worse so a bad
+  // downside skew can't hide behind a modest overall average.
+  const effective = downsideVol != null && Number.isFinite(downsideVol) ? Math.max(v, downsideVol) : v;
+  if (effective < 12) return { level: 'Very Low', score: 18 };
+  if (effective < 18) return { level: 'Low', score: 32 };
+  if (effective < 28) return { level: 'Medium', score: 48 };
+  if (effective < 40) return { level: 'High', score: 68 };
   return { level: 'Very High', score: 84 };
 }
 
@@ -2451,7 +2464,7 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
       input.technical?.volatility ??
       api.vol ??
       (input.horizon === '1W' ? 26 : input.horizon === '1Y' ? 17 : 21);
-    const risk = riskFromVolatility(vol, input.horizon);
+    const risk = riskFromVolatility(vol, input.horizon, input.technical?.downsideVolatility);
 
     // USER RULE: very-low risk or a genuinely oversold RSI should not surface as
     // REDUCE — trimming into either condition is poor practice (very-low risk

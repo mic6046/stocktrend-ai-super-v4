@@ -593,3 +593,59 @@ describe('price rounding precision for low-priced tickers (AMC-style regression)
     expect(out.validationStatus).toBe('✓ Internal Consistency Passed');
   });
 });
+
+describe('risk level uses downside volatility, not just the blended average (Sortino-style)', () => {
+  // baseInput()'s technical.volatility defaults to 20 (-> Medium on its own).
+  it('a negatively-skewed stock (choppy overall, sharp-drop-prone) reads at least as risky as its downside volatility', () => {
+    const out = run(baseInput({
+      technical: {
+        rsi: 45,
+        macdBullish: false,
+        trend: 'SIDEWAYS',
+        volatility: 15, // Low on its own
+        downsideVolatility: 35, // but High on the downside — this should win
+        adx: 18,
+        emaBias: 'neutral',
+        smaBias: 'neutral',
+        bollingerBias: 'mid',
+        volumeBias: 'normal',
+      } as any,
+    }));
+    expect(out.riskLabel).toBe('High');
+  });
+
+  it('a symmetric stock (downside volatility no worse than the average) is not penalized beyond its blended volatility', () => {
+    const out = run(baseInput({
+      technical: {
+        rsi: 45,
+        macdBullish: false,
+        trend: 'SIDEWAYS',
+        volatility: 15, // Low
+        downsideVolatility: 10, // better than the average — should not raise the bucket
+        adx: 18,
+        emaBias: 'neutral',
+        smaBias: 'neutral',
+        bollingerBias: 'mid',
+        volumeBias: 'normal',
+      } as any,
+    }));
+    expect(out.riskLabel).toBe('Low');
+  });
+
+  it('missing downside volatility data falls back to the blended average alone (no crash, no phantom penalty)', () => {
+    const out = run(baseInput({
+      technical: {
+        rsi: 45,
+        macdBullish: false,
+        trend: 'SIDEWAYS',
+        volatility: 15,
+        adx: 18,
+        emaBias: 'neutral',
+        smaBias: 'neutral',
+        bollingerBias: 'mid',
+        volumeBias: 'normal',
+      },
+    }));
+    expect(out.riskLabel).toBe('Low');
+  });
+});

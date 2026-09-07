@@ -196,7 +196,12 @@ export function buildQuantumInputFromMarketData(opts: {
           ? tech.indicators.macd.macdLine > tech.indicators.macd.signalLine
           : null,
       trend: tech?.quantumRefinement?.trendStrength?.status ?? null,
-      volatility: tech?.indicators?.volatility ?? null,
+      // Engine risk bucketing expects an annualized percentage (e.g. 22 = 22%/yr),
+      // not the raw mean-absolute-daily-return fraction `indicators.volatility`
+      // holds (that field is kept as-is for other display cards that already
+      // read it as a fraction). See technical.ts's annualizedVolatilityPct.
+      volatility: tech?.indicators?.annualizedVolatilityPct ?? null,
+      downsideVolatility: tech?.indicators?.downsideVolatilityPct ?? null,
       emaBias:
         tech?.indicators?.ema20 != null && px > 0
           ? px > tech.indicators.ema20
