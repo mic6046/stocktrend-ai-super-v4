@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronDown, ChevronUp, Zap, TrendingUp, Landmark, Loader2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, Zap, TrendingUp, Landmark, Loader2, Bell, BellRing, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { scoutDayTrades, type DayTradeCandidate } from '../../lib/dayTradeScout';
 import { findATrade } from '../../lib/findATrade';
 import { buildSuggestUniverse, type SuggestMarket } from '../../lib/suggestTradeUniverses';
 import type { StockRecommendation } from '../../lib/recommendation';
 import { formatRecommendationDisplay } from '../../lib/recommendation';
+import { useBuyNowWatcher, type BuyNowFireEvent } from '../../lib/useBuyNowWatcher';
 
 const MARKETS: { key: SuggestMarket; label: string }[] = [
   { key: 'US', label: 'United States' },
@@ -69,6 +70,9 @@ export function TodaysPicksStrip({ onOpenTicker }: { onOpenTicker: (ticker: stri
     }
   });
   const [state, setState] = useState<PicksState>(EMPTY_STATE);
+  const [fires, setFires] = useState<BuyNowFireEvent[]>([]);
+  const watcher = useBuyNowWatcher((event) => setFires((prev) => [event, ...prev].slice(0, 5)));
+  const dismissFire = (at: number) => setFires((prev) => prev.filter((f) => f.at !== at));
 
   useEffect(() => {
     if (collapsed) return; // don't scan while collapsed — no point paying the cost
@@ -119,7 +123,36 @@ export function TodaysPicksStrip({ onOpenTicker }: { onOpenTicker: (ticker: stri
   };
 
   return (
-    <div className="rounded-2xl border border-white/10 bg-[#111113]/90 backdrop-blur-md overflow-hidden">
+    <div className="relative rounded-2xl border border-white/10 bg-[#111113]/90 backdrop-blur-md overflow-hidden">
+      {fires.length > 0 && (
+        <div className="absolute top-2 right-2 z-20 flex flex-col gap-1.5 w-[min(320px,calc(100%-1rem))]">
+          {fires.map((f) => (
+            <div
+              key={f.at}
+              className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 backdrop-blur-md px-3 py-2 shadow-lg flex items-start gap-2"
+            >
+              <BellRing className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+              <div className="min-w-0 flex-1">
+                <button
+                  type="button"
+                  onClick={() => onOpenTicker(f.ticker)}
+                  className="text-[11px] font-bold text-emerald-300 hover:underline cursor-pointer"
+                >
+                  Buy Now: {f.ticker}
+                </button>
+                <p className="text-[9px] text-gray-300 leading-snug mt-0.5">{f.reason}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => dismissFire(f.at)}
+                className="text-gray-500 hover:text-gray-300 cursor-pointer shrink-0"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       <button
         type="button"
         onClick={toggleCollapsed}
@@ -209,30 +242,7 @@ export function TodaysPicksStrip({ onOpenTicker }: { onOpenTicker: (ticker: stri
                 empty="No BUY / STRONG BUY names cleared this scan."
               >
                 {state.oneMonth.map((c) => (
-                  <button
-                    key={c.ticker}
-                    type="button"
-                    onClick={() => onOpenTicker(c.ticker)}
-                    className="w-full text-left rounded-xl border border-white/5 bg-black/30 hover:border-emerald-500/30 hover:bg-black/50 p-2.5 transition-all cursor-pointer"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-mono font-bold text-white text-[12px] truncate">{c.ticker}</span>
-                      <span className={cn('text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border', toneForRecommendation(c.recommendation))}>
-                        {formatRecommendationDisplay(c)}
-                      </span>
-                    </div>
-                    <p className="mt-0.5 text-[10px] text-gray-500 truncate">{c.companyName}</p>
-                    <p className="mt-1 text-[9px] font-mono text-gray-400">
-                      score {c.overallScore} · conf {c.confidence}% · {c.expectedReturn >= 0 ? '+' : ''}
-                      {c.expectedReturn.toFixed(1)}%
-                      {c.riskLabel && (
-                        <>
-                          {' '}
-                          · <span className={riskTextTone(c.riskLabel)}>{c.riskLabel} risk</span>
-                        </>
-                      )}
-                    </p>
-                  </button>
+                  <PickCard key={c.ticker} candidate={c} onOpenTicker={onOpenTicker} watcher={watcher} />
                 ))}
               </PicksColumn>
 
@@ -243,30 +253,7 @@ export function TodaysPicksStrip({ onOpenTicker }: { onOpenTicker: (ticker: stri
                 empty="No BUY / STRONG BUY names cleared this scan."
               >
                 {state.longTerm.map((c) => (
-                  <button
-                    key={c.ticker}
-                    type="button"
-                    onClick={() => onOpenTicker(c.ticker)}
-                    className="w-full text-left rounded-xl border border-white/5 bg-black/30 hover:border-emerald-500/30 hover:bg-black/50 p-2.5 transition-all cursor-pointer"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-mono font-bold text-white text-[12px] truncate">{c.ticker}</span>
-                      <span className={cn('text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border', toneForRecommendation(c.recommendation))}>
-                        {formatRecommendationDisplay(c)}
-                      </span>
-                    </div>
-                    <p className="mt-0.5 text-[10px] text-gray-500 truncate">{c.companyName}</p>
-                    <p className="mt-1 text-[9px] font-mono text-gray-400">
-                      score {c.overallScore} · conf {c.confidence}% · {c.expectedReturn >= 0 ? '+' : ''}
-                      {c.expectedReturn.toFixed(1)}%
-                      {c.riskLabel && (
-                        <>
-                          {' '}
-                          · <span className={riskTextTone(c.riskLabel)}>{c.riskLabel} risk</span>
-                        </>
-                      )}
-                    </p>
-                  </button>
+                  <PickCard key={c.ticker} candidate={c} onOpenTicker={onOpenTicker} watcher={watcher} />
                 ))}
               </PicksColumn>
             </div>
@@ -304,6 +291,81 @@ function PicksColumn({
       <div className="space-y-1.5">
         {hasChildren ? children : <p className="text-[10px] text-gray-600 italic py-2">{empty}</p>}
       </div>
+    </div>
+  );
+}
+
+function PickCard({
+  candidate: c,
+  onOpenTicker,
+  watcher,
+}: {
+  candidate: StockRecommendation;
+  onOpenTicker: (ticker: string) => void;
+  watcher: ReturnType<typeof useBuyNowWatcher>;
+}) {
+  const armed = watcher.isArmed(c.ticker);
+  const hasZone = !!c.entryZone && c.entryZone.hi > 0;
+  const status = watcher.statuses[c.ticker];
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onOpenTicker(c.ticker)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') onOpenTicker(c.ticker);
+      }}
+      className="w-full text-left rounded-xl border border-white/5 bg-black/30 hover:border-emerald-500/30 hover:bg-black/50 p-2.5 transition-all cursor-pointer"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-mono font-bold text-white text-[12px] truncate">{c.ticker}</span>
+        <div className="flex items-center gap-1 shrink-0">
+          <span className={cn('text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border', toneForRecommendation(c.recommendation))}>
+            {formatRecommendationDisplay(c)}
+          </span>
+          {hasZone && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (armed) {
+                  watcher.disarm(c.ticker);
+                } else {
+                  watcher.arm({ ticker: c.ticker, zone: { low: c.entryZone.lo, high: c.entryZone.hi } });
+                }
+              }}
+              title={
+                armed
+                  ? 'Stop watching for entry'
+                  : `Watch for Buy Now entry (zone ${c.entryZone.lo}-${c.entryZone.hi})`
+              }
+              className={cn(
+                'rounded p-0.5 transition-colors cursor-pointer',
+                armed ? 'text-emerald-400' : 'text-gray-600 hover:text-gray-400'
+              )}
+            >
+              {armed ? <BellRing className="w-3 h-3" /> : <Bell className="w-3 h-3" />}
+            </button>
+          )}
+        </div>
+      </div>
+      <p className="mt-0.5 text-[10px] text-gray-500 truncate">{c.companyName}</p>
+      <p className="mt-1 text-[9px] font-mono text-gray-400">
+        score {c.overallScore} · conf {c.confidence}% · {c.expectedReturn >= 0 ? '+' : ''}
+        {c.expectedReturn.toFixed(1)}%
+        {c.riskLabel && (
+          <>
+            {' '}
+            · <span className={riskTextTone(c.riskLabel)}>{c.riskLabel} risk</span>
+          </>
+        )}
+      </p>
+      {armed && status && (
+        <p className="mt-1 text-[8.5px] font-mono text-emerald-400/70 truncate" title={status.reason}>
+          watching: {status.error || status.reason}
+        </p>
+      )}
     </div>
   );
 }

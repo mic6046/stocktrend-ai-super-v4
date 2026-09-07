@@ -22,9 +22,6 @@ import {
 export type BuyNowWatchTarget = {
   ticker: string;
   zone: BuyZone;
-  /** Baseline average daily volume (e.g. the 10-day average from data already
-   * fetched when the candidate was qualified) used to turn live volume into RVOL. */
-  avgDailyVolume: number;
 };
 
 export type BuyNowStatus = {
@@ -99,11 +96,12 @@ export function useBuyNowWatcher(
           const data = await res.json();
           const price = Number(data?.quote?.regularMarketPrice);
           const volume = Number(data?.quote?.regularMarketVolume);
+          const avgVolume = Number(data?.quote?.averageDailyVolume10Day) || Number(data?.quote?.averageDailyVolume3Month);
           const marketState = data?.quote?.marketState ?? null;
           if (!Number.isFinite(price) || !Number.isFinite(volume)) {
             throw new Error('Quote missing price/volume');
           }
-          const rvol = target.avgDailyVolume > 0 ? volume / target.avgDailyVolume : 1;
+          const rvol = avgVolume > 0 ? volume / avgVolume : 1;
           const sample: QuoteSample = { price, rvol, at: Date.now(), marketState };
 
           const prior = armedStateRef.current.get(target.ticker) ?? createBuyNowArmedState();
