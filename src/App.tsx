@@ -43,7 +43,8 @@ import { PortfolioPage } from './components/pages/PortfolioPage';
 import { SettingsPage } from './components/pages/SettingsPage';
 import { SelfLearningSettings } from './components/pages/SelfLearningSettings';
 import { AlertsPage } from './components/pages/AlertsPage';
-import { loadSignalCache, mergeSignalCache, removeSignalCache, saveSignalCache, loadLocalSignalCacheUpdatedAt, classifySignalBucket, isSignalRowFresh, type CachedSignalRow } from './lib/signalCache';
+import { loadSignalCache, mergeSignalCache, removeSignalCache, saveSignalCache, loadLocalSignalCacheUpdatedAt, classifySignalBucket, isSignalRowFresh, applyPositionAwareness, type CachedSignalRow } from './lib/signalCache';
+import { ownsTicker } from './lib/portfolioStore';
 import { srSignalFromEngine } from './lib/srProximity';
 import {
   loadAppTheme,
@@ -8082,45 +8083,36 @@ export default function App() {
           </div>
         )}
 
-        {activePage === 'DASHBOARD' && (
+        {activePage === 'DASHBOARD' && (() => {
+          const positionAwareSignals = signalCache
+            .filter(isSignalRowFresh)
+            .map((r) => applyPositionAwareness(r, ownsTicker(r.ticker)));
+          const toRow = (r: CachedSignalRow) => ({
+            ticker: r.ticker,
+            name: r.name,
+            price: r.price,
+            changePct: r.changePct,
+            signal: r.recommendation,
+            confidence: r.confidence,
+          });
+          return (
           <MarketCommandCenter
             indices={indices}
             sentiment={marketSentiment}
             loadingSentiment={loadingSentiment}
             market={dashboardMarket}
-            opportunities={signalCache
-              .filter((r) => isSignalRowFresh(r) && (r.bucket || classifySignalBucket(r.recommendation)) === 'opportunity')
+            opportunities={positionAwareSignals
+              .filter((r) => (r.bucket || classifySignalBucket(r.recommendation)) === 'opportunity')
               .slice(0, 8)
-              .map((r) => ({
-                ticker: r.ticker,
-                name: r.name,
-                price: r.price,
-                changePct: r.changePct,
-                signal: r.recommendation,
-                confidence: r.confidence,
-              }))}
-            watch={signalCache
-              .filter((r) => isSignalRowFresh(r) && (r.bucket || classifySignalBucket(r.recommendation)) === 'watch')
+              .map(toRow)}
+            watch={positionAwareSignals
+              .filter((r) => (r.bucket || classifySignalBucket(r.recommendation)) === 'watch')
               .slice(0, 8)
-              .map((r) => ({
-                ticker: r.ticker,
-                name: r.name,
-                price: r.price,
-                changePct: r.changePct,
-                signal: r.recommendation,
-                confidence: r.confidence,
-              }))}
-            riskAlerts={signalCache
-              .filter((r) => isSignalRowFresh(r) && (r.bucket || classifySignalBucket(r.recommendation)) === 'risk')
+              .map(toRow)}
+            riskAlerts={positionAwareSignals
+              .filter((r) => (r.bucket || classifySignalBucket(r.recommendation)) === 'risk')
               .slice(0, 8)
-              .map((r) => ({
-                ticker: r.ticker,
-                name: r.name,
-                price: r.price,
-                changePct: r.changePct,
-                signal: r.recommendation,
-                confidence: r.confidence,
-              }))}
+              .map(toRow)}
             onOpenTicker={(sym) => {
               if (!assertAnalysisCredits()) return;
               runTickerSearch(sym);
@@ -8134,7 +8126,8 @@ export default function App() {
               void updateAiSignals();
             }}
           />
-        )}
+          );
+        })()}
 
         {activePage === 'FIND_TRADES' && (
           <FindTradesPage

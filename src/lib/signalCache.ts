@@ -39,6 +39,22 @@ export function classifySignalBucket(recommendation?: string | null): SignalBuck
   return 'watch';
 }
 
+/**
+ * REDUCE/SELL/TRIM assume an existing position to act on. This cache is a
+ * generic market scan with no notion of what you actually hold, so it stores
+ * that raw label as-is — but showing "REDUCE" for a stock you don't own is
+ * the same "reduce what?" conflict the detail page's position-aware Primary
+ * Action already solves for. Reframe it here for display so the Dashboard's
+ * Risk Alerts card only ever shows REDUCE/SELL/TRIM for tickers you hold.
+ * AVOID is left untouched — it's already a no-position "don't buy" call.
+ */
+export function applyPositionAwareness(row: CachedSignalRow, owns: boolean): CachedSignalRow {
+  const rec = String(row.recommendation || '');
+  const isReduceLike = /sell|trim|reduce/i.test(rec) && !/avoid/i.test(rec);
+  if (!isReduceLike || owns) return row;
+  return { ...row, recommendation: 'WAIT — NO NEW POSITION', bucket: 'watch' };
+}
+
 /** How old a cached row can be before the Dashboard should stop treating it as current. */
 export const SIGNAL_ROW_STALE_MS = 48 * 60 * 60 * 1000;
 

@@ -128,6 +128,16 @@ export function upsertHolding(
   return list;
 }
 
+/** Whether the user currently holds `ticker` — the same qn-owns-<ticker> flag the
+ * detail page's position-aware Primary Action reads, kept in sync by savePortfolio(). */
+export function ownsTicker(ticker: string): boolean {
+  try {
+    return localStorage.getItem(`qn-owns-${ticker.trim().toUpperCase()}`) === '1';
+  } catch {
+    return false;
+  }
+}
+
 export function removeHolding(ticker: string): PortfolioHolding[] {
   const t = ticker.trim().toUpperCase();
   const list = loadPortfolio().filter((x) => x.ticker !== t);
