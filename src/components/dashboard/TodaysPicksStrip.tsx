@@ -35,6 +35,13 @@ function toneForRecommendation(rec: string): string {
   return 'text-gray-300 bg-white/5 border-white/10';
 }
 
+function riskTextTone(risk?: string): string {
+  const r = (risk || '').toLowerCase();
+  if (r === 'very high' || r === 'high') return 'text-rose-400';
+  if (r === 'medium') return 'text-amber-400';
+  return 'text-gray-400';
+}
+
 function toneForBias(bias: string): string {
   if (bias === 'LONG') return 'text-emerald-300 bg-emerald-500/10 border-emerald-500/25';
   if (bias === 'SHORT') return 'text-rose-300 bg-rose-500/10 border-rose-500/25';
@@ -218,6 +225,12 @@ export function TodaysPicksStrip({ onOpenTicker }: { onOpenTicker: (ticker: stri
                     <p className="mt-1 text-[9px] font-mono text-gray-400">
                       score {c.overallScore} · conf {c.confidence}% · {c.expectedReturn >= 0 ? '+' : ''}
                       {c.expectedReturn.toFixed(1)}%
+                      {c.riskLabel && (
+                        <>
+                          {' '}
+                          · <span className={riskTextTone(c.riskLabel)}>{c.riskLabel} risk</span>
+                        </>
+                      )}
                     </p>
                   </button>
                 ))}
@@ -246,6 +259,12 @@ export function TodaysPicksStrip({ onOpenTicker }: { onOpenTicker: (ticker: stri
                     <p className="mt-1 text-[9px] font-mono text-gray-400">
                       score {c.overallScore} · conf {c.confidence}% · {c.expectedReturn >= 0 ? '+' : ''}
                       {c.expectedReturn.toFixed(1)}%
+                      {c.riskLabel && (
+                        <>
+                          {' '}
+                          · <span className={riskTextTone(c.riskLabel)}>{c.riskLabel} risk</span>
+                        </>
+                      )}
                     </p>
                   </button>
                 ))}
