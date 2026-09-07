@@ -35,6 +35,7 @@ import {
   type AppPage,
 } from './components/layout/navTypes';
 import { MarketCommandCenter } from './components/dashboard/MarketCommandCenter';
+import { TodaysPicksStrip } from './components/dashboard/TodaysPicksStrip';
 import { FindTradesPage } from './components/pages/FindTradesPage';
 import { AiSignalsPage } from './components/pages/AiSignalsPage';
 import { WatchlistPage } from './components/pages/WatchlistPage';
@@ -8066,6 +8067,17 @@ export default function App() {
               message={quotaBanner.message}
               email={user?.email}
               onDismiss={() => setQuotaBanner(null)}
+            />
+          </div>
+        )}
+
+        {activePage === 'DASHBOARD' && (
+          <div className="mb-6">
+            <TodaysPicksStrip
+              onOpenTicker={(sym) => {
+                if (!assertAnalysisCredits()) return;
+                runTickerSearch(sym);
+              }}
             />
           </div>
         )}
