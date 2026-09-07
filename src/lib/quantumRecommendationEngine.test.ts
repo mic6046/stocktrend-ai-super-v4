@@ -499,6 +499,73 @@ describe('STRONG BUY signal priority (price/volume/breakout/accumulation/pullbac
   });
 });
 
+describe('low P/E is extra-high conviction only when confirmed by flow, not on its own', () => {
+  const peInput = (overrides: Partial<QuantumEngineInput> = {}) =>
+    baseInput({
+      currentPrice: 100,
+      levels: { s1: 90, s2: 85, r1: 115, r2: 125 },
+      technical: {
+        rsi: 55,
+        macdBullish: true,
+        trend: 'BULLISH',
+        volatility: 18,
+        adx: 22,
+        emaBias: 'bull',
+        smaBias: 'neutral',
+        bollingerBias: 'mid',
+        volumeBias: 'high',
+      },
+      whaleScore: 82,
+      institutionalScore: 82,
+      smartMoneyScore: 82,
+      sentimentScore: 50,
+      momentumScore: 60,
+      userHasPosition: false,
+      ...overrides,
+    });
+
+  it('low P/E + strong accumulation + rising price/volume -> confidence boosted', () => {
+    const withPE = run(peInput({ peRatio: 12 }));
+    const withoutConfirmedPE = run(peInput({ peRatio: 30 })); // same accum/volume, P/E not low
+    expect(withPE.finalVerdict).toBe('STRONG BUY');
+    expect(bullishLabels(withPE)).toEqual(
+      expect.arrayContaining(['Undervalued (P/E < 15) confirmed by accumulation and rising price/volume'])
+    );
+    expect(withPE.confidence).toBeGreaterThan(withoutConfirmedPE.confidence);
+  });
+
+  it('control: low P/E alone (no accumulation or rising volume) does not trigger the bonus — avoids value-trap false positives', () => {
+    const out = run(peInput({
+      peRatio: 10,
+      whaleScore: 40,
+      institutionalScore: 40,
+      smartMoneyScore: 40,
+      technical: {
+        rsi: 45,
+        macdBullish: false,
+        trend: 'SIDEWAYS',
+        volatility: 20,
+        adx: 18,
+        emaBias: 'neutral',
+        smaBias: 'neutral',
+        bollingerBias: 'mid',
+        volumeBias: 'normal',
+      },
+    }));
+    expect(bullishLabels(out)).not.toEqual(
+      expect.arrayContaining(['Undervalued (P/E < 15) confirmed by accumulation and rising price/volume'])
+    );
+  });
+
+  it('control: missing P/E data does not crash and does not trigger the bonus', () => {
+    const out = run(peInput({ peRatio: null }));
+    expect(out.validationStatus).toBe('✓ Internal Consistency Passed');
+    expect(bullishLabels(out)).not.toEqual(
+      expect.arrayContaining(['Undervalued (P/E < 15) confirmed by accumulation and rising price/volume'])
+    );
+  });
+});
+
 describe('price rounding precision for low-priced tickers (AMC-style regression)', () => {
   it('target price and expected return stay consistent for a sub-$3 stock (no cent-rounding drift)', () => {
     // AMC bug: rounding the target price to cents on a low-priced stock (1 cent

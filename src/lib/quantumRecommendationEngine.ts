@@ -194,6 +194,8 @@ export type QuantumEngineInput = {
   smartMoneyScore?: number | null;
   fundFlowBias?: 'inflow' | 'outflow' | 'neutral' | null;
   sectorBias?: 'leader' | 'laggard' | 'neutral' | null;
+  /** Trailing P/E, when available — used for the low-P/E + accumulation + rising price/volume high-conviction rule. */
+  peRatio?: number | null;
   stopLossHint?: number | null;
   ticker?: string;
   /** Whether the user already owns the name — changes displayed actions */
@@ -513,6 +515,8 @@ type EvidenceBag = {
   strongAccumulation: boolean;
   /** Uptrend structure intact with price pulled back into the support zone. */
   pullbackToSupportInUptrend: boolean;
+  /** Low P/E (<15) confirmed by strong accumulation and rising price/volume — extra-high conviction. */
+  undervaluedWithFlowConfirmation: boolean;
 };
 
 function pushSignal(
@@ -896,6 +900,14 @@ function collectEvidence(input: QuantumEngineInput): EvidenceBag {
     Number.isFinite(s1) &&
     px >= s1 * 0.995 &&
     (px - s1) / px <= 0.03;
+  // USER RULE: a low trailing P/E (<15, matching technical.ts's own valuation
+  // tier) is a value-trap risk on its own — a stock can be "cheap" because the
+  // business is genuinely declining, not because it's mispriced. It only
+  // becomes an extra-high-conviction signal when the flow/price evidence
+  // independently confirms it: strong accumulation AND price+volume actually
+  // rising, not valuation alone.
+  const hasLowPE = input.peRatio != null && input.peRatio > 0 && input.peRatio < 15;
+  const undervaluedWithFlowConfirmation = hasLowPE && strongAccumulation && priceVolumeSurge;
 
   if (priceVolumeSurge) {
     bullish.push({
@@ -915,6 +927,13 @@ function collectEvidence(input: QuantumEngineInput): EvidenceBag {
     bullish.push({
       label: 'Uptrend pullback to support — classic high-quality entry',
       weight: 0.35,
+      polarity: 'bull',
+    });
+  }
+  if (undervaluedWithFlowConfirmation) {
+    bullish.push({
+      label: 'Undervalued (P/E < 15) confirmed by accumulation and rising price/volume',
+      weight: 0.5,
       polarity: 'bull',
     });
   }
@@ -1145,6 +1164,7 @@ function collectEvidence(input: QuantumEngineInput): EvidenceBag {
     breakoutWithVolume,
     strongAccumulation,
     pullbackToSupportInUptrend,
+    undervaluedWithFlowConfirmation,
   };
 }
 
@@ -2365,6 +2385,12 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
         94
       )
     );
+    // USER RULE: low P/E confirmed by strong accumulation and rising
+    // price/volume is extra-high conviction — the label is already capped at
+    // STRONG BUY, so the conviction shows up as a confidence boost instead.
+    if (evidence.undervaluedWithFlowConfirmation && (rec === 'BUY' || rec === 'STRONG BUY')) {
+      confidence = Math.min(94, confidence + 8);
+    }
     // Confidence = conviction in THIS recommendation, not bullishness of indicators.
     if (!evidence.buyGatePass && !evidence.sellGatePass) {
       confidence = Math.min(confidence, mixedSignals ? 62 : 68);

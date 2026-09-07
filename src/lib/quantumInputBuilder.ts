@@ -247,6 +247,10 @@ export function buildQuantumInputFromMarketData(opts: {
     fundFlowBias:
       ad === 'ACCUMULATION' ? 'inflow' : ad === 'DISTRIBUTION' ? 'outflow' : 'neutral',
     sectorBias: sector === 'LEADER' ? 'leader' : sector === 'LAGGARD' ? 'laggard' : 'neutral',
+    peRatio:
+      Number.isFinite(opts.quote?.trailingPE) && Number(opts.quote?.trailingPE) > 0
+        ? Number(opts.quote.trailingPE)
+        : null,
     stopLossHint:
       enrich.stopLossHint ??
       (Number.isFinite(stopFromTech) && stopFromTech > 0 ? stopFromTech : null),
