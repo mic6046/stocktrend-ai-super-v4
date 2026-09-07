@@ -40,18 +40,25 @@ export function classifySignalBucket(recommendation?: string | null): SignalBuck
 }
 
 /**
- * REDUCE/SELL/TRIM assume an existing position to act on. This cache is a
- * generic market scan with no notion of what you actually hold, so it stores
- * that raw label as-is — but showing "REDUCE" for a stock you don't own is
- * the same "reduce what?" conflict the detail page's position-aware Primary
- * Action already solves for. Reframe it here for display so the Dashboard's
- * Risk Alerts card only ever shows REDUCE/SELL/TRIM for tickers you hold.
- * AVOID is left untouched — it's already a no-position "don't buy" call.
+ * REDUCE/SELL/TRIM/TAKE PROFIT all assume an existing position to act on —
+ * including the engine's own position-aware headlines like "REDUCE PARTIAL"
+ * and "TAKE PARTIAL PROFIT" (see positionAwareHeadline() in
+ * quantumRecommendationEngine.ts, only ever emitted when userHasPosition is
+ * true at analysis time). This cache is a generic market scan with no notion
+ * of what you actually hold, so it stores that raw label as-is — but showing
+ * "REDUCE" or a stale "TAKE PARTIAL PROFIT" for a stock you don't currently
+ * own is the same "act on what?" conflict the detail page's position-aware
+ * Primary Action already solves for (and can arise even from an
+ * already-position-aware label if you sold out after it was cached).
+ * Reframe it here for display, checked against your *current* holdings, so
+ * the Dashboard's Risk Alerts card only ever shows these for tickers you
+ * hold right now. AVOID is left untouched — it's already a no-position
+ * "don't buy" call.
  */
 export function applyPositionAwareness(row: CachedSignalRow, owns: boolean): CachedSignalRow {
   const rec = String(row.recommendation || '');
-  const isReduceLike = /sell|trim|reduce/i.test(rec) && !/avoid/i.test(rec);
-  if (!isReduceLike || owns) return row;
+  const isPositionDependent = /sell|trim|reduce|take.*profit/i.test(rec) && !/avoid/i.test(rec);
+  if (!isPositionDependent || owns) return row;
   return { ...row, recommendation: 'WAIT — NO NEW POSITION', bucket: 'watch' };
 }
 

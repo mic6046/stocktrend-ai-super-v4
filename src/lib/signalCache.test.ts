@@ -30,6 +30,17 @@ describe('applyPositionAwareness — Dashboard Risk Alerts should not show REDUC
     expect(out.bucket).toBe('risk');
   });
 
+  it('relabels TAKE PARTIAL PROFIT (a position-aware engine headline) when the user no longer owns the ticker', () => {
+    const out = applyPositionAwareness(row('TAKE PARTIAL PROFIT — LOW CONVICTION', 'risk'), false);
+    expect(out.recommendation).toBe('WAIT — NO NEW POSITION');
+    expect(out.bucket).toBe('watch');
+  });
+
+  it('leaves TAKE PARTIAL PROFIT untouched when the user still owns the ticker', () => {
+    const out = applyPositionAwareness(row('TAKE PARTIAL PROFIT', 'risk'), true);
+    expect(out.recommendation).toBe('TAKE PARTIAL PROFIT');
+  });
+
   it('leaves AVOID NEW POSITION untouched regardless of ownership — it is already position-agnostic', () => {
     const withoutPosition = applyPositionAwareness(row('AVOID NEW POSITION'), false);
     const withPosition = applyPositionAwareness(row('AVOID NEW POSITION'), true);
