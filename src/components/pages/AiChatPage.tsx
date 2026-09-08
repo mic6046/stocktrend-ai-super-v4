@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { MessageCircle, Send, Loader2, LineChart } from 'lucide-react';
+import { MessageCircle, Send, Loader2, LineChart, X } from 'lucide-react';
 import { GlassCard, SectionLabel } from '../analysis/GlassCard';
 import { cn } from '../../lib/utils';
 import {
@@ -109,13 +109,23 @@ export function AiChatPage({ ticker, snapshot, email, onGoToAnalysis }: AiChatPa
   return (
     <div className="max-w-2xl mx-auto py-4 px-4 flex flex-col h-full">
       <GlassCard className="flex flex-col flex-1 min-h-[60vh]" padding="none">
-        <div className="px-4 sm:px-5 py-3 border-b border-white/10">
-          <SectionLabel icon={<MessageCircle className="w-3.5 h-3.5 text-emerald-400" />}>
-            AI Chat · {activeTicker}
-          </SectionLabel>
-          <p className="text-[10px] text-gray-500 mt-1">
-            Answers are grounded in {activeTicker}'s current on-screen analysis — not a second opinion.
-          </p>
+        <div className="px-4 sm:px-5 py-3 border-b border-white/10 flex items-start justify-between gap-2">
+          <div>
+            <SectionLabel icon={<MessageCircle className="w-3.5 h-3.5 text-emerald-400" />}>
+              AI Chat · {activeTicker}
+            </SectionLabel>
+            <p className="text-[10px] text-gray-500 mt-1">
+              Answers are grounded in {activeTicker}'s current on-screen analysis — not a second opinion.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onGoToAnalysis}
+            title={`Close and go to ${activeTicker}'s Analysis`}
+            className="shrink-0 p-1 rounded-lg text-gray-500 hover:text-gray-200 hover:bg-white/5 transition-colors cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
 
         <div className="flex-1 overflow-y-auto px-4 sm:px-5 py-4 space-y-3">
