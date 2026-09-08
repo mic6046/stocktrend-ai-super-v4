@@ -216,15 +216,17 @@ export function AppHeader({
           </div>
 
           {/* Costs a credit — kept visually distinct (emerald tint) from the neutral
-              icon buttons beside it so it doesn't invite an accidental tap. Always
-              carries a visible "Refresh" label, not just an icon + hover title —
-              hover tooltips don't exist on touch devices, so an icon-only version
-              of this button reads as unlabeled on mobile. */}
+              icon buttons beside it so it doesn't invite an accidental tap. Carries
+              a visible "Refresh" label on sm+ screens, not just an icon + hover
+              title (hover tooltips don't exist on touch devices) — but on phones
+              specifically, icon-only is back per direct feedback after seeing it
+              live: refresh is a universally recognized symbol, unlike a novel
+              feature icon, so the label isn't pulling its weight there. */}
           <button
             type="button"
             disabled={loading || marketDataStatus === 'loading'}
             onClick={onRefresh}
-            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-full border border-emerald-500/25 bg-emerald-500/[0.06] text-emerald-300 hover:bg-emerald-500/15 disabled:opacity-50 cursor-pointer"
+            className="inline-flex items-center justify-center gap-1.5 h-9 w-9 sm:w-auto sm:px-3 rounded-full border border-emerald-500/25 bg-emerald-500/[0.06] text-emerald-300 hover:bg-emerald-500/15 disabled:opacity-50 cursor-pointer"
             aria-label="Refresh analysis (uses 1 credit)"
             title="Refresh analysis · uses 1 AI credit"
           >
@@ -233,15 +235,17 @@ export function AppHeader({
             ) : (
               <RefreshCw className="h-3.5 w-3.5 shrink-0" />
             )}
-            <span className="text-[11px] font-bold uppercase tracking-wide">Refresh</span>
+            <span className="hidden sm:inline text-[11px] font-bold uppercase tracking-wide">Refresh</span>
           </button>
 
           <div className="hidden sm:block h-5 w-px bg-white/10 shrink-0" aria-hidden="true" />
 
+          {/* Alerts bell: hidden on phones (Alerts is also one tap away in the
+              sidebar there), shown from sm+ where header space isn't as tight. */}
           <button
             type="button"
             onClick={onOpenAlerts}
-            className="relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 text-gray-300 hover:bg-white/5 cursor-pointer"
+            className="relative hidden sm:inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 text-gray-300 hover:bg-white/5 cursor-pointer"
             aria-label="Alerts"
           >
             <Bell className="h-4 w-4" />
