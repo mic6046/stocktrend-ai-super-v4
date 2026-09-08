@@ -91,11 +91,10 @@ export function TodaysPicksStrip({ onOpenTicker }: { onOpenTicker: (ticker: stri
   const [fires, setFires] = useState<FireItem[]>([]);
   // Portfolio-wide watcher for the exit side: fires when a HELD position's
   // own engine call reaches "TAKE PARTIAL PROFIT" (reaching resistance +
-  // outflow), independent of whichever market this strip is browsing. Unlike
-  // Buy Now below, this one does run on its own periodic cadence (see
-  // usePortfolioProfitWatcher) since it watches your actual holdings, not the
-  // picks currently on screen.
-  usePortfolioProfitWatcher((event) =>
+  // outflow), independent of whichever market this strip is browsing. No
+  // background timer — re-checked only on the same refresh cycle Buy Now
+  // uses below (mount, market switch, or re-expanding the strip).
+  const { scanNow: scanProfitWatch } = usePortfolioProfitWatcher((event) =>
     setFires((prev) =>
       [{ kind: 'profit' as const, ticker: event.ticker, reason: event.reason, at: event.at }, ...prev].slice(0, 5)
     )
@@ -106,6 +105,7 @@ export function TodaysPicksStrip({ onOpenTicker }: { onOpenTicker: (ticker: stri
     if (collapsed) return; // don't scan while collapsed — no point paying the cost
     let cancelled = false;
     setState((s) => ({ ...s, loading: true, buyNowLoading: true, error: null }));
+    void scanProfitWatch();
 
     (async () => {
       try {
@@ -150,7 +150,7 @@ export function TodaysPicksStrip({ onOpenTicker }: { onOpenTicker: (ticker: stri
     return () => {
       cancelled = true;
     };
-  }, [market, collapsed]);
+  }, [market, collapsed, scanProfitWatch]);
 
   const toggleCollapsed = () => {
     setCollapsed((prev) => {
