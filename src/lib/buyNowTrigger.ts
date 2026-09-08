@@ -1,180 +1,79 @@
 /**
- * "Buy Now" real-time entry trigger — a gate layered on top of the existing
- * recommendation engines, not a replacement for them. The Quantum engine /
- * day-trade scout already decide WHICH tickers are buy-worthy and WHERE the
- * entry zone is; this evaluates live price/volume samples against that zone
- * and only fires when price is genuinely still at a good entry, not after
- * it has already run (the overshoot case).
+ * "Buy Now" entry check — a gate layered on top of the existing
+ * recommendation engines, not a replacement for them. The Quantum engine
+ * already decides WHICH tickers are buy-worthy and WHERE the entry zone is;
+ * this checks a live price/volume snapshot against that zone so a pick only
+ * qualifies as "Buy Now" if price is genuinely still at a good entry right
+ * now, not after it has already run (the overshoot case).
  *
- * Pure and polling-agnostic on purpose: the caller supplies one live sample
- * at a time plus the prior armed state, gets back a decision plus the next
- * state to persist. No I/O, no timers — those live in the watcher hook.
+ * Deliberately a one-shot, stateless check re-run whenever Today's Picks is
+ * refreshed — not a background poller. "Reaching the buy zone with
+ * confirming volume" is worth re-checking against fresh data each time you
+ * look, not something that needs a live loop running in between.
  */
 
 export type BuyZone = { low: number; high: number };
 
-export type QuoteSample = {
+export type BuyNowSnapshot = {
   price: number;
   /** Relative volume vs. typical pace (e.g. today's volume / 10-day average). */
   rvol: number;
-  /** Epoch ms this sample was taken. */
-  at: number;
-  /** Yahoo-style market state; anything other than 'REGULAR' suppresses firing. */
+  /** Yahoo-style market state; anything other than 'REGULAR' disqualifies. */
   marketState?: string | null;
 };
 
 export type BuyNowConfig = {
-  /** Below this, volume isn't confirming the move yet. */
+  /** Below this, volume isn't confirming the move. */
   rvolMin: number;
   /** Above this, volume looks climactic — likely the blow-off, not the entry. */
   rvolMax: number;
-  /** Consecutive qualifying polls required before firing. */
-  persistPolls: number;
-  /** Minimum time between fires for the same ticker, unless it exits and re-enters the zone. */
-  cooldownMs: number;
 };
 
 export const DEFAULT_BUY_NOW_CONFIG: BuyNowConfig = {
   rvolMin: 1.3,
   rvolMax: 2.5,
-  persistPolls: 3,
-  cooldownMs: 60 * 60 * 1000,
 };
 
-export type BuyNowArmedState = {
-  /** Rolling recent samples, most-recent last. */
-  history: QuoteSample[];
-  /** Epoch ms of the last fire, or null if it has never fired. */
-  lastFiredAt: number | null;
-  /** Whether the most recently seen sample was inside the zone. */
-  wasInZone: boolean;
-};
-
-export function createBuyNowArmedState(): BuyNowArmedState {
-  return { history: [], lastFiredAt: null, wasInZone: false };
-}
-
-export type BuyNowEvaluation = {
-  fire: boolean;
+export type BuyNowCheck = {
+  qualifies: boolean;
   reason: string;
-  /** How many consecutive qualifying polls have been seen so far, capped at persistPolls — for a "confirming 2/3" style readout. */
-  confirmingCount: number;
-  /** Updated armed state to persist for the next poll. */
-  state: BuyNowArmedState;
 };
 
-function sampleQualifies(s: QuoteSample, zone: BuyZone, config: BuyNowConfig): boolean {
-  const inZone = s.price >= zone.low && s.price <= zone.high;
-  const rvolOk = s.rvol >= config.rvolMin && s.rvol <= config.rvolMax;
-  return inZone && rvolOk;
-}
-
-function consecutiveQualifyingStreak(history: QuoteSample[], zone: BuyZone, config: BuyNowConfig): number {
-  let streak = 0;
-  for (let i = history.length - 1; i >= 0; i--) {
-    if (sampleQualifies(history[i], zone, config)) streak++;
-    else break;
-  }
-  return streak;
-}
-
-export function evaluateBuyNowTrigger(
-  sample: QuoteSample,
+export function checkBuyNow(
+  sample: BuyNowSnapshot,
   zone: BuyZone,
-  prior: BuyNowArmedState,
   config: BuyNowConfig = DEFAULT_BUY_NOW_CONFIG
-): BuyNowEvaluation {
-  const historyCap = config.persistPolls + 2;
-  const history = [...prior.history, sample].slice(-historyCap);
-  const inZone = sample.price >= zone.low && sample.price <= zone.high;
+): BuyNowCheck {
   const isRegularSession = sample.marketState == null || sample.marketState === 'REGULAR';
-  const exitedThenReentered = prior.wasInZone === false && inZone;
-  const inCooldown =
-    prior.lastFiredAt != null &&
-    sample.at - prior.lastFiredAt < config.cooldownMs &&
-    !exitedThenReentered;
-
-  // Once price has exited and re-come back into the zone, treat it as a
-  // genuinely new setup: clear the old cooldown timestamp for good (not just
-  // for this one sample) so the persistence streak building back up over the
-  // next few polls isn't blocked by a cooldown from the previous visit.
-  const carriedLastFiredAt = exitedThenReentered ? null : prior.lastFiredAt;
-
-  const nextState = (overrides: Partial<BuyNowArmedState> = {}): BuyNowArmedState => ({
-    history,
-    lastFiredAt: carriedLastFiredAt,
-    wasInZone: inZone,
-    ...overrides,
-  });
-
   if (!isRegularSession) {
-    return { fire: false, reason: 'Outside regular trading session.', confirmingCount: 0, state: nextState() };
+    return { qualifies: false, reason: 'Outside regular trading session.' };
   }
 
+  const inZone = sample.price >= zone.low && sample.price <= zone.high;
   if (!inZone) {
     const reason =
       sample.price > zone.high
-        ? 'Price has moved past the buy zone — waiting for a pullback, not chasing.'
-        : 'Price is below the buy zone.';
-    return { fire: false, reason, confirmingCount: 0, state: nextState() };
-  }
-
-  if (inCooldown) {
-    return {
-      fire: false,
-      reason: 'Already alerted recently for this ticker — on cooldown.',
-      confirmingCount: 0,
-      state: nextState(),
-    };
+        ? 'Price has moved past the buy zone — not a fresh entry right now.'
+        : 'Price has not yet reached the buy zone.';
+    return { qualifies: false, reason };
   }
 
   if (sample.rvol < config.rvolMin) {
     return {
-      fire: false,
+      qualifies: false,
       reason: `Volume not yet confirming (RVOL ${sample.rvol.toFixed(1)}x, need ${config.rvolMin}x+).`,
-      confirmingCount: 0,
-      state: nextState(),
     };
   }
 
   if (sample.rvol > config.rvolMax) {
     return {
-      fire: false,
+      qualifies: false,
       reason: `Volume looks climactic (RVOL ${sample.rvol.toFixed(1)}x) — this may already be the blow-off, not the entry.`,
-      confirmingCount: 0,
-      state: nextState(),
-    };
-  }
-
-  const streak = consecutiveQualifyingStreak(history, zone, config);
-  const streakSamples = history.slice(-streak);
-  const directionOk =
-    streakSamples.length < 2 || streakSamples[streakSamples.length - 1].price >= streakSamples[0].price;
-
-  if (!directionOk) {
-    return {
-      fire: false,
-      reason: 'Price is rolling over within the zone — waiting for direction to hold.',
-      confirmingCount: 0,
-      state: nextState(),
-    };
-  }
-
-  const confirmingCount = Math.min(streak, config.persistPolls);
-
-  if (streak < config.persistPolls) {
-    return {
-      fire: false,
-      reason: `Confirming — ${confirmingCount}/${config.persistPolls} checks so far.`,
-      confirmingCount,
-      state: nextState(),
     };
   }
 
   return {
-    fire: true,
-    reason: `In buy zone (${zone.low}-${zone.high}) with confirming volume (RVOL ${sample.rvol.toFixed(1)}x) held for ${config.persistPolls} checks.`,
-    confirmingCount: config.persistPolls,
-    state: nextState({ lastFiredAt: sample.at }),
+    qualifies: true,
+    reason: `In buy zone (${zone.low}-${zone.high}) with confirming volume (RVOL ${sample.rvol.toFixed(1)}x).`,
   };
 }

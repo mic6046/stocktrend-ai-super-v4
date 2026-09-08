@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronDown, ChevronUp, Zap, TrendingUp, Landmark, Loader2, Bell, BellRing, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Zap, TrendingUp, Landmark, Loader2, BellRing, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { scoutDayTrades, type DayTradeCandidate } from '../../lib/dayTradeScout';
 import { findATrade } from '../../lib/findATrade';
 import { buildSuggestUniverse, type SuggestMarket } from '../../lib/suggestTradeUniverses';
 import type { StockRecommendation } from '../../lib/recommendation';
 import { formatRecommendationDisplay } from '../../lib/recommendation';
-import { useBuyNowWatcher } from '../../lib/useBuyNowWatcher';
+import { scanForBuyNow, type BuyNowPick } from '../../lib/buyNowScan';
 import { usePortfolioProfitWatcher } from '../../lib/usePortfolioProfitWatcher';
 
 const MARKETS: { key: SuggestMarket; label: string }[] = [
@@ -24,14 +24,24 @@ type PicksState = {
   dayTrades: DayTradeCandidate[];
   oneMonth: StockRecommendation[];
   longTerm: StockRecommendation[];
+  buyNow: BuyNowPick[];
+  buyNowLoading: boolean;
   loading: boolean;
   error: string | null;
 };
 
-const EMPTY_STATE: PicksState = { dayTrades: [], oneMonth: [], longTerm: [], loading: true, error: null };
+const EMPTY_STATE: PicksState = {
+  dayTrades: [],
+  oneMonth: [],
+  longTerm: [],
+  buyNow: [],
+  buyNowLoading: true,
+  loading: true,
+  error: null,
+};
 
 type FireItem = {
-  kind: 'buy' | 'profit';
+  kind: 'profit';
   ticker: string;
   reason: string;
   at: number;
@@ -79,15 +89,12 @@ export function TodaysPicksStrip({ onOpenTicker }: { onOpenTicker: (ticker: stri
   });
   const [state, setState] = useState<PicksState>(EMPTY_STATE);
   const [fires, setFires] = useState<FireItem[]>([]);
-  const watcher = useBuyNowWatcher((event) =>
-    setFires((prev) =>
-      [{ kind: 'buy' as const, ticker: event.ticker, reason: event.reason, at: event.at }, ...prev].slice(0, 5)
-    )
-  );
-  // Slower, portfolio-wide sibling of the Buy Now watcher above: same banner
-  // stack, but for the exit side — fires when a HELD position's own engine
-  // call reaches "TAKE PARTIAL PROFIT" (reaching resistance + outflow),
-  // independent of whichever market this strip is currently browsing.
+  // Portfolio-wide watcher for the exit side: fires when a HELD position's
+  // own engine call reaches "TAKE PARTIAL PROFIT" (reaching resistance +
+  // outflow), independent of whichever market this strip is browsing. Unlike
+  // Buy Now below, this one does run on its own periodic cadence (see
+  // usePortfolioProfitWatcher) since it watches your actual holdings, not the
+  // picks currently on screen.
   usePortfolioProfitWatcher((event) =>
     setFires((prev) =>
       [{ kind: 'profit' as const, ticker: event.ticker, reason: event.reason, at: event.at }, ...prev].slice(0, 5)
@@ -98,7 +105,7 @@ export function TodaysPicksStrip({ onOpenTicker }: { onOpenTicker: (ticker: stri
   useEffect(() => {
     if (collapsed) return; // don't scan while collapsed — no point paying the cost
     let cancelled = false;
-    setState((s) => ({ ...s, loading: true, error: null }));
+    setState((s) => ({ ...s, loading: true, buyNowLoading: true, error: null }));
 
     (async () => {
       try {
@@ -112,16 +119,30 @@ export function TodaysPicksStrip({ onOpenTicker }: { onOpenTicker: (ticker: stri
         ]);
         if (cancelled) return;
 
+        const oneMonth = oneMonthResult.buyCandidates.slice(0, 3);
+        const longTerm = longTermResult.buyCandidates.slice(0, 3);
+
         setState({
           dayTrades: dayTradeResult.candidates.slice(0, 3),
-          oneMonth: oneMonthResult.buyCandidates.slice(0, 3),
-          longTerm: longTermResult.buyCandidates.slice(0, 3),
+          oneMonth,
+          longTerm,
+          buyNow: [],
+          buyNowLoading: true,
           loading: false,
           error: null,
         });
+
+        // Re-check the picks already selected above against a fresh live
+        // quote — this is what actually answers "is one of these a good
+        // entry right now," not the daily-bar data the picks themselves
+        // were chosen from.
+        const buyNow = await scanForBuyNow([...oneMonth, ...longTerm]);
+        if (!cancelled) {
+          setState((s) => ({ ...s, buyNow, buyNowLoading: false }));
+        }
       } catch (err: any) {
         if (!cancelled) {
-          setState({ ...EMPTY_STATE, loading: false, error: err?.message || 'Could not load picks' });
+          setState({ ...EMPTY_STATE, loading: false, buyNowLoading: false, error: err?.message || 'Could not load picks' });
         }
       }
     })();
@@ -150,24 +171,16 @@ export function TodaysPicksStrip({ onOpenTicker }: { onOpenTicker: (ticker: stri
           {fires.map((f) => (
             <div
               key={f.at}
-              className={cn(
-                'rounded-xl border backdrop-blur-md px-3 py-2 shadow-lg flex items-start gap-2',
-                f.kind === 'buy' ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-amber-500/30 bg-amber-500/10'
-              )}
+              className="rounded-xl border border-amber-500/30 bg-amber-500/10 backdrop-blur-md px-3 py-2 shadow-lg flex items-start gap-2"
             >
-              <BellRing
-                className={cn('w-3.5 h-3.5 shrink-0 mt-0.5', f.kind === 'buy' ? 'text-emerald-400' : 'text-amber-400')}
-              />
+              <BellRing className="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-400" />
               <div className="min-w-0 flex-1">
                 <button
                   type="button"
                   onClick={() => onOpenTicker(f.ticker)}
-                  className={cn(
-                    'text-[11px] font-bold hover:underline cursor-pointer',
-                    f.kind === 'buy' ? 'text-emerald-300' : 'text-amber-300'
-                  )}
+                  className="text-[11px] font-bold hover:underline cursor-pointer text-amber-300"
                 >
-                  {f.kind === 'buy' ? 'Buy Now' : 'Take Partial Profit'}: {f.ticker}
+                  Take Partial Profit: {f.ticker}
                 </button>
                 <p className="text-[9px] text-gray-300 leading-snug mt-0.5">{f.reason}</p>
               </div>
@@ -236,7 +249,39 @@ export function TodaysPicksStrip({ onOpenTicker }: { onOpenTicker: (ticker: stri
           ) : state.error ? (
             <p className="text-[11px] text-rose-400 font-mono py-4 text-center">{state.error}</p>
           ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
+              <PicksColumn
+                icon={<BellRing className="w-3.5 h-3.5 text-emerald-400" />}
+                title="Buy Now"
+                subtitle="Live re-check of the picks below"
+                empty="None of today's picks are at a fresh entry right now — refresh to re-check."
+              >
+                {state.buyNowLoading ? (
+                  <div className="flex items-center gap-1.5 text-[9px] text-gray-500 font-mono py-2 justify-center">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    Checking live price &amp; volume…
+                  </div>
+                ) : (
+                  state.buyNow.map((p) => (
+                    <button
+                      key={p.ticker}
+                      type="button"
+                      onClick={() => onOpenTicker(p.ticker)}
+                      className="w-full text-left rounded-xl border border-emerald-500/25 bg-emerald-500/5 hover:border-emerald-500/40 hover:bg-emerald-500/10 p-2.5 transition-all cursor-pointer"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono font-bold text-white text-[12px] truncate">{p.ticker}</span>
+                        <span className={cn('text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border', toneForRecommendation(p.recommendation))}>
+                          {p.recommendation}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 text-[10px] text-gray-500 truncate">{p.companyName}</p>
+                      <p className="mt-1 text-[9px] font-mono text-emerald-400/80 leading-snug">{p.reason}</p>
+                    </button>
+                  ))
+                )}
+              </PicksColumn>
+
               <PicksColumn
                 icon={<Zap className="w-3.5 h-3.5 text-amber-400" />}
                 title="Day Trade"
@@ -271,7 +316,7 @@ export function TodaysPicksStrip({ onOpenTicker }: { onOpenTicker: (ticker: stri
                 empty="No BUY / STRONG BUY names cleared this scan."
               >
                 {state.oneMonth.map((c) => (
-                  <PickCard key={c.ticker} candidate={c} onOpenTicker={onOpenTicker} watcher={watcher} />
+                  <PickCard key={c.ticker} candidate={c} onOpenTicker={onOpenTicker} />
                 ))}
               </PicksColumn>
 
@@ -282,7 +327,7 @@ export function TodaysPicksStrip({ onOpenTicker }: { onOpenTicker: (ticker: stri
                 empty="No BUY / STRONG BUY names cleared this scan."
               >
                 {state.longTerm.map((c) => (
-                  <PickCard key={c.ticker} candidate={c} onOpenTicker={onOpenTicker} watcher={watcher} />
+                  <PickCard key={c.ticker} candidate={c} onOpenTicker={onOpenTicker} />
                 ))}
               </PicksColumn>
             </div>
@@ -327,16 +372,10 @@ function PicksColumn({
 function PickCard({
   candidate: c,
   onOpenTicker,
-  watcher,
 }: {
   candidate: StockRecommendation;
   onOpenTicker: (ticker: string) => void;
-  watcher: ReturnType<typeof useBuyNowWatcher>;
 }) {
-  const armed = watcher.isArmed(c.ticker);
-  const hasZone = !!c.entryZone && c.entryZone.hi > 0;
-  const status = watcher.statuses[c.ticker];
-
   return (
     <div
       role="button"
@@ -349,35 +388,9 @@ function PickCard({
     >
       <div className="flex items-center justify-between gap-2">
         <span className="font-mono font-bold text-white text-[12px] truncate">{c.ticker}</span>
-        <div className="flex items-center gap-1 shrink-0">
-          <span className={cn('text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border', toneForRecommendation(c.recommendation))}>
-            {formatRecommendationDisplay(c)}
-          </span>
-          {hasZone && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                if (armed) {
-                  watcher.disarm(c.ticker);
-                } else {
-                  watcher.arm({ ticker: c.ticker, zone: { low: c.entryZone.lo, high: c.entryZone.hi } });
-                }
-              }}
-              title={
-                armed
-                  ? 'Stop watching for entry'
-                  : `Watch for Buy Now entry (zone ${c.entryZone.lo}-${c.entryZone.hi})`
-              }
-              className={cn(
-                'rounded p-0.5 transition-colors cursor-pointer',
-                armed ? 'text-emerald-400' : 'text-gray-600 hover:text-gray-400'
-              )}
-            >
-              {armed ? <BellRing className="w-3 h-3" /> : <Bell className="w-3 h-3" />}
-            </button>
-          )}
-        </div>
+        <span className={cn('text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border shrink-0', toneForRecommendation(c.recommendation))}>
+          {formatRecommendationDisplay(c)}
+        </span>
       </div>
       <p className="mt-0.5 text-[10px] text-gray-500 truncate">{c.companyName}</p>
       <p className="mt-1 text-[9px] font-mono text-gray-400">
@@ -390,11 +403,6 @@ function PickCard({
           </>
         )}
       </p>
-      {armed && status && (
-        <p className="mt-1 text-[8.5px] font-mono text-emerald-400/70 truncate" title={status.reason}>
-          watching: {status.error || status.reason}
-        </p>
-      )}
     </div>
   );
 }
