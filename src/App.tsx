@@ -43,6 +43,8 @@ import { PortfolioPage } from './components/pages/PortfolioPage';
 import { SettingsPage } from './components/pages/SettingsPage';
 import { SelfLearningSettings } from './components/pages/SelfLearningSettings';
 import { AlertsPage } from './components/pages/AlertsPage';
+import { AiChatPage } from './components/pages/AiChatPage';
+import { buildAnalysisAskSnapshot } from './lib/analysisAskSnapshot';
 import { loadSignalCache, mergeSignalCache, removeSignalCache, saveSignalCache, loadLocalSignalCacheUpdatedAt, classifySignalBucket, isSignalRowFresh, applyPositionAwareness, type CachedSignalRow } from './lib/signalCache';
 import { ownsTicker } from './lib/portfolioStore';
 import { srSignalFromEngine } from './lib/srProximity';
@@ -7518,6 +7520,21 @@ export default function App() {
 
   const quantumSr = React.useMemo(() => srSignalFromEngine(horizonView), [horizonView]);
 
+  /** AI Chat's grounding context — built from the same masterRecommendation
+   * every other panel reads, so chat answers can only explain the on-screen
+   * call, never quietly disagree with it. */
+  const analysisAskSnapshot = React.useMemo(
+    () =>
+      buildAnalysisAskSnapshot({
+        masterRecommendation,
+        quote: data?.quote,
+        technicalBreakdown,
+        horizon: analysisHorizon,
+        keyRisks,
+      }),
+    [masterRecommendation, data?.quote, technicalBreakdown, analysisHorizon, keyRisks]
+  );
+
   React.useEffect(() => {
     if (!masterRecommendation || !horizonView) return;
     assertMatchesQuantumRecommendation(
@@ -8197,6 +8214,15 @@ export default function App() {
             }}
             cloudSyncStatus={portfolioSyncStatus}
             onSyncNow={() => void portfolioSyncRef.current?.pullNow()}
+          />
+        )}
+
+        {activePage === 'AI_CHAT' && (
+          <AiChatPage
+            ticker={data?.ticker}
+            snapshot={analysisAskSnapshot}
+            email={user?.email}
+            onGoToAnalysis={() => setActivePage('ANALYSIS')}
           />
         )}
 

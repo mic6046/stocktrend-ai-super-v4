@@ -2089,6 +2089,8 @@ const PAGE_ASSISTANT_GUIDES: Record<string, string> = {
     'User is on Analysis for a specific ticker. Use the ANALYSIS SNAPSHOT below to explain scores, current action, RSI/MACD/trend, risk, and what the panels mean. Answer from that page data; do not invent prices or signals not in the snapshot.',
   NEWS_CENTER:
     'User is on News Center: headlines and AI news summaries (news credits). Explain how to load news and summarize.',
+  AI_CHAT:
+    'User is on AI Chat, asking about the ticker they currently have open in Analysis. Use the ANALYSIS SNAPSHOT below to answer — do not invent prices or signals not in the snapshot. If no ticker/snapshot is present, tell them to open a stock in Analysis first.',
   ALERTS:
     'User is on Alerts: price/RSI alert rules and triggered alerts. Explain creating and managing alerts.',
   SETTINGS:
@@ -2119,22 +2121,33 @@ app.post('/api/assistant-chat', async (req, res) => {
     return res.status(400).json({ error: 'Message is too long (max 600 characters).' });
   }
 
-  const usageSnapPre = await getUsageSnapshot(email).catch(() => null);
-  if (usageSnapPre && !usageSnapPre.unlimited && usageSnapPre.analysesRemaining <= 0) {
-    return res.status(402).json({
-      error: 'Daily AI search/analysis usage is out. Please reload credits (+5 RM5 or Pack RM10) to continue.',
-      code: 'analysis_quota_exceeded',
-      usage: usageSnapPre,
-    });
-  }
+  // AI Chat charges once per ticker-conversation, not per message (the client
+  // sends chargeCredit: false for every message after the first one it sent
+  // for a given ticker) — a real back-and-forth would otherwise burn through
+  // the daily quota fast for what's really one paid-for analysis session.
+  const shouldCharge = req.body?.chargeCredit !== false;
 
-  const billed = await consumeUsageCredit(email, 'analysis');
-  if (billed.ok === false) {
-    return res.status(billed.status).json({
-      error: billed.error || 'Daily AI search/analysis usage is out. Please reload credits to continue.',
-      code: billed.code,
-      usage: billed.usage,
-    });
+  const usageSnapPre = await getUsageSnapshot(email).catch(() => null);
+  let usageForResponse: typeof usageSnapPre = usageSnapPre;
+
+  if (shouldCharge) {
+    if (usageSnapPre && !usageSnapPre.unlimited && usageSnapPre.analysesRemaining <= 0) {
+      return res.status(402).json({
+        error: 'Daily AI search/analysis usage is out. Please reload credits (+5 RM5 or Pack RM10) to continue.',
+        code: 'analysis_quota_exceeded',
+        usage: usageSnapPre,
+      });
+    }
+
+    const billed = await consumeUsageCredit(email, 'analysis');
+    if (billed.ok === false) {
+      return res.status(billed.status).json({
+        error: billed.error || 'Daily AI search/analysis usage is out. Please reload credits to continue.',
+        code: billed.code,
+        usage: billed.usage,
+      });
+    }
+    usageForResponse = billed.usage;
   }
 
   const page = typeof context.page === 'string' ? context.page : 'DASHBOARD';
@@ -2203,7 +2216,7 @@ app.post('/api/assistant-chat', async (req, res) => {
     .filter(Boolean)
     .join('\n');
 
-  const prompt = `You are the Quantum Node Analysis assistant on the Analysis page.
+  const prompt = `You are the Quantum Node in-app assistant.
 Help the user understand the CURRENT ticker analysis shown on screen.
 Be concise (2–5 short sentences or a few bullets). No markdown tables.
 Explain scores, indicators, action labels, and risks using the ANALYSIS SNAPSHOT when present.
@@ -2242,15 +2255,14 @@ ${message}
       reply = `${reply}\nNot financial advice.`;
     }
 
-    return res.json({ reply, usage: billed.usage });
+    return res.json({ reply, usage: usageForResponse });
   } catch (error: any) {
     const errMsg = error?.message || String(error);
     console.log('[assistant-chat] Gemini failed:', errMsg.substring(0, 120));
     return res.json({
-      reply:
-        'The assistant is temporarily unavailable. Your analysis credit was used — try again shortly, or check Settings for quota.\nNot financial advice.',
+      reply: `The assistant is temporarily unavailable.${shouldCharge ? ' Your analysis credit was used —' : ''} Try again shortly, or check Settings for quota.\nNot financial advice.`,
       fallback: true,
-      usage: billed.usage,
+      usage: usageForResponse,
     });
   }
 });

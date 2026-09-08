@@ -53,6 +53,10 @@ export async function postAssistantChat(params: {
   message: string;
   context: AssistantChatContext;
   history?: AssistantChatMessage[];
+  /** Pass false for every message after the first one sent for a given ticker
+   * conversation — chat charges one credit per ticker, not per message. Omit
+   * (or true) for the first message. */
+  chargeCredit?: boolean;
 }): Promise<AssistantChatResult> {
   const res = await loggedFetch(apiUrl('/api/assistant-chat'), {
     method: 'POST',
@@ -62,6 +66,7 @@ export async function postAssistantChat(params: {
       message: params.message,
       context: params.context,
       history: (params.history || []).slice(-6),
+      chargeCredit: params.chargeCredit !== false,
     }),
     __qnMeta: { reason: 'assistant-chat', userAction: 'Analysis Ask AI' },
   });
@@ -93,6 +98,7 @@ export const PAGE_LABELS: Record<AppPage, string> = {
   PORTFOLIO: 'Portfolio',
   ANALYSIS: 'Analysis',
   NEWS_CENTER: 'News',
+  AI_CHAT: 'AI Chat',
   ALERTS: 'Alerts',
   SETTINGS: 'Settings',
 };

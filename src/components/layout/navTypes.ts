@@ -6,6 +6,7 @@ export type AppPage =
   | 'PORTFOLIO'
   | 'ANALYSIS'
   | 'NEWS_CENTER'
+  | 'AI_CHAT'
   | 'ALERTS'
   | 'SETTINGS';
 

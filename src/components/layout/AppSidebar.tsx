@@ -7,6 +7,7 @@ import {
   Briefcase,
   LineChart,
   Newspaper,
+  MessageCircle,
   Bell,
   Settings,
   PanelLeftClose,
@@ -49,6 +50,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'WATCHLIST', label: 'Watchlist', icon: Star },
       { id: 'PORTFOLIO', label: 'Portfolio', icon: Briefcase },
       { id: 'NEWS_CENTER', label: 'News', icon: Newspaper },
+      { id: 'AI_CHAT', label: 'AI Chat', icon: MessageCircle },
     ],
   },
   {
