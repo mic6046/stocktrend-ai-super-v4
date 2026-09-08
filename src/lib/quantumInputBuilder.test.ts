@@ -82,3 +82,42 @@ describe('buildQuantumInputFromMarketData — Support/Resistance level selection
     expect(input.levels).toEqual(override);
   });
 });
+
+/**
+ * Regression coverage for the AMD case: +5.9% on 1.78x normal volume used to
+ * classify as "high" (confirming) volume at the old 1.4x bar, alone enough to
+ * escalate straight to STRONG BUY. 1.4-2x is common, routine variation, not a
+ * genuinely notable volume event — raised to 2.0x, matching technical.ts's
+ * own "STRONG_BULLISH: volume explosion" tier.
+ */
+describe('volumeBias threshold — 1.4x normal volume was too lenient to count as "confirming"', () => {
+  function buildFlatHistory(days: number, dailyVolume: number): any[] {
+    const history: any[] = [];
+    for (let i = 0; i < days; i++) {
+      history.push({ date: new Date(2024, 0, i + 1), open: 100, high: 101, low: 99, close: 100, volume: dailyVolume });
+    }
+    return history;
+  }
+
+  it('1.78x normal volume (the real AMD reading) no longer counts as "high"', () => {
+    const history = buildFlatHistory(30, 1_000_000);
+    const input = buildQuantumInputFromMarketData({
+      horizon: '1M',
+      ticker: 'TEST',
+      quote: { regularMarketPrice: 100, regularMarketVolume: 1_780_000 },
+      history,
+    });
+    expect(input.technical?.volumeBias).not.toBe('high');
+  });
+
+  it('2.0x normal volume still counts as "high"', () => {
+    const history = buildFlatHistory(30, 1_000_000);
+    const input = buildQuantumInputFromMarketData({
+      horizon: '1M',
+      ticker: 'TEST',
+      quote: { regularMarketPrice: 100, regularMarketVolume: 2_000_000 },
+      history,
+    });
+    expect(input.technical?.volumeBias).toBe('high');
+  });
+});

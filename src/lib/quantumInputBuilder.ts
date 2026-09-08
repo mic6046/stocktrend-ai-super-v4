@@ -259,8 +259,14 @@ export function buildQuantumInputFromMarketData(opts: {
         tech?.indicators?.atr != null && px > 0
           ? (tech.indicators.atr / px) * 100
           : null,
+      // USER RULE: 1.4x normal volume was too lenient a bar for a "high volume
+      // confirming this move" signal — 1.4-2x is common, routine variation,
+      // not a genuinely notable event. Raised to 2.0x, matching technical.ts's
+      // own "STRONG_BULLISH: volume explosion" tier (rvolStatus), since this
+      // feeds directly into priceVolumeSurge/breakoutWithVolume — signals
+      // explicitly meant to justify high-conviction calls.
       volumeBias:
-        (tech?.quantumRefinement?.rvol?.ratio ?? 1) >= 1.4
+        (tech?.quantumRefinement?.rvol?.ratio ?? 1) >= 2.0
           ? 'high'
           : (tech?.quantumRefinement?.rvol?.ratio ?? 1) <= 0.7
             ? 'low'

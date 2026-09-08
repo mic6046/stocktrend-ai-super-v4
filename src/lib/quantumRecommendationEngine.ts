@@ -2110,16 +2110,29 @@ function decideRecommendation(evidence: EvidenceBag, rawReturn: number): Recomme
   // fundamentals-heavy committee score or buy gate is lukewarm. They never flip a
   // genuine, gated SELL/REDUCE/AVOID call — a confirmed support break, or an
   // active sell gate, stays a hard block.
+  //
+  // USER RULE: STRONG BUY requires genuine confluence — at least TWO of these
+  // four signals together, not any single one alone. A real example exposed
+  // why: AMD at +5.9% on 1.78x normal volume cleared the old single "high
+  // volume" bar on its own (previously 1.4x, now requires 2x — see
+  // quantumInputBuilder.ts's volumeBias), which alone used to be enough to
+  // escalate straight to STRONG BUY. A lone signal now only lifts a HOLD to
+  // BUY (or leaves an already-STRONG-BUY committee/return verdict alone —
+  // this block only grants the label, it never revokes one earned elsewhere).
   const hardBearishBlock = evidence.sellGatePass || evidence.supportBroken;
-  if (
-    !hardBearishBlock &&
-    (candidate === 'HOLD' || candidate === 'BUY' || candidate === 'STRONG BUY') &&
-    (evidence.priceVolumeSurge ||
-      evidence.breakoutWithVolume ||
-      evidence.strongAccumulation ||
-      evidence.pullbackToSupportInUptrend)
-  ) {
-    return 'STRONG BUY';
+  const strongSignalCount = [
+    evidence.priceVolumeSurge,
+    evidence.breakoutWithVolume,
+    evidence.strongAccumulation,
+    evidence.pullbackToSupportInUptrend,
+  ].filter(Boolean).length;
+  if (!hardBearishBlock && (candidate === 'HOLD' || candidate === 'BUY' || candidate === 'STRONG BUY')) {
+    if (strongSignalCount >= 2) {
+      return 'STRONG BUY';
+    }
+    if (strongSignalCount === 1) {
+      return candidate === 'STRONG BUY' ? 'STRONG BUY' : 'BUY';
+    }
   }
 
   if ((candidate === 'BUY' || candidate === 'STRONG BUY') && !evidence.buyGatePass) {

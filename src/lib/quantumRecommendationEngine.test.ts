@@ -305,7 +305,7 @@ describe('reaching resistance', () => {
 });
 
 describe('STRONG BUY signal priority (price/volume/breakout/accumulation/pullback > fundamentals)', () => {
-  it('price rising with confirming volume alone -> STRONG BUY', () => {
+  it('price rising with confirming volume alone -> BUY, not STRONG BUY (confluence required — see below)', () => {
     const out = run(baseInput({
       currentPrice: 100,
       baseScore: 45,
@@ -327,13 +327,13 @@ describe('STRONG BUY signal priority (price/volume/breakout/accumulation/pullbac
       sentimentScore: 40,
       userHasPosition: false,
     }));
-    expect(out.finalVerdict).toBe('STRONG BUY');
+    expect(out.finalVerdict).toBe('BUY');
     expect(bullishLabels(out)).toEqual(
       expect.arrayContaining(['Price rising with confirming volume — high-conviction buy signal'])
     );
   });
 
-  it('breakout confirmed by volume alone -> STRONG BUY', () => {
+  it('breakout confirmed by volume alone -> BUY, not STRONG BUY', () => {
     const out = run(baseInput({
       currentPrice: 107,
       baseScore: 45,
@@ -354,13 +354,13 @@ describe('STRONG BUY signal priority (price/volume/breakout/accumulation/pullbac
       smartMoneyScore: 50,
       userHasPosition: false,
     }));
-    expect(out.finalVerdict).toBe('STRONG BUY');
+    expect(out.finalVerdict).toBe('BUY');
     expect(bullishLabels(out)).toEqual(
       expect.arrayContaining(['Breakout above resistance confirmed by volume'])
     );
   });
 
-  it('strong (80+) accumulation alone -> STRONG BUY', () => {
+  it('strong (80+) accumulation alone -> BUY, not STRONG BUY', () => {
     const out = run(baseInput({
       currentPrice: 100,
       baseScore: 45,
@@ -370,10 +370,10 @@ describe('STRONG BUY signal priority (price/volume/breakout/accumulation/pullbac
       smartMoneyScore: 82,
       userHasPosition: false,
     }));
-    expect(out.finalVerdict).toBe('STRONG BUY');
+    expect(out.finalVerdict).toBe('BUY');
   });
 
-  it('uptrend pullback to support alone -> STRONG BUY', () => {
+  it('uptrend pullback to support alone -> BUY, not STRONG BUY', () => {
     const out = run(baseInput({
       currentPrice: 96, // within 3% of s1=95, at/above it
       baseScore: 45,
@@ -394,7 +394,7 @@ describe('STRONG BUY signal priority (price/volume/breakout/accumulation/pullbac
       smartMoneyScore: 50,
       userHasPosition: false,
     }));
-    expect(out.finalVerdict).toBe('STRONG BUY');
+    expect(out.finalVerdict).toBe('BUY');
   });
 
   it('control: none of the four patterns, weak fundamentals -> stays HOLD', () => {
@@ -461,7 +461,7 @@ describe('STRONG BUY signal priority (price/volume/breakout/accumulation/pullbac
     expect(out.finalVerdict).not.toBe('STRONG BUY');
   });
 
-  it('a single 80+ flow reading with at least one other measure not bearish still triggers the override', () => {
+  it('a single 80+ flow reading with at least one other measure not bearish qualifies as strongAccumulation, but alone still only reaches BUY', () => {
     const out = run(baseInput({
       currentPrice: 100,
       baseScore: 50,
@@ -482,7 +482,7 @@ describe('STRONG BUY signal priority (price/volume/breakout/accumulation/pullbac
       },
       userHasPosition: false,
     }));
-    expect(out.finalVerdict).toBe('STRONG BUY');
+    expect(out.finalVerdict).toBe('BUY');
   });
 
   it('combined breakout + price/volume + accumulation -> STRONG BUY (all three signals present at once)', () => {
@@ -496,6 +496,30 @@ describe('STRONG BUY signal priority (price/volume/breakout/accumulation/pullbac
         'Accumulation conviction very high (80+)',
       ])
     );
+  });
+
+  it('exactly two signals together (price/volume surge + strong accumulation, no breakout or pullback) -> STRONG BUY', () => {
+    const out = run(baseInput({
+      currentPrice: 100, // well inside the range, away from r1 — no breakout, no pullback
+      baseScore: 45,
+      levels: { s1: 80, s2: 70, r1: 130, r2: 140 },
+      technical: {
+        rsi: 58,
+        macdBullish: true,
+        trend: 'BULLISH',
+        volatility: 18,
+        adx: 22,
+        emaBias: 'bull',
+        smaBias: 'neutral',
+        bollingerBias: 'mid',
+        volumeBias: 'high', // + trend BULLISH -> priceVolumeSurge
+      },
+      whaleScore: 82,
+      institutionalScore: 82,
+      smartMoneyScore: 82, // -> strongAccumulation
+      userHasPosition: false,
+    }));
+    expect(out.finalVerdict).toBe('STRONG BUY');
   });
 });
 
