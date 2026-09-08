@@ -2204,6 +2204,39 @@ app.post('/api/assistant-chat', async (req, res) => {
     push('Key risks', analysis.keyRisks);
     push('Bullish factors', analysis.bullishFactors);
     push('Bearish factors', analysis.bearishFactors);
+    push('Recent headlines', analysis.recentHeadlines);
+
+    // Real Wall Street analyst consensus — genuine 3rd-party opinion, distinct
+    // from the Quantum Score's own view. Lives in Yahoo's quoteSummary
+    // 'financialData' module, not the plain quote the client already has, so
+    // fetch it here rather than adding a second fetch to every ticker page
+    // just for this. Only on the first (billed) message of a conversation —
+    // this data barely changes minute to minute, and once stated it persists
+    // into later turns via RECENT CHAT below, so it doesn't need refetching
+    // on every follow-up message.
+    if (ticker && shouldCharge) {
+      try {
+        const financialData = (await safeQuoteSummary(ticker, ['financialData']))?.financialData;
+        if (financialData) {
+          const ratingKey = financialData.recommendationKey;
+          const rating =
+            typeof ratingKey === 'string' && ratingKey && ratingKey !== 'none'
+              ? ratingKey.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, (c: string) => c.toUpperCase())
+              : null;
+          push('Wall Street analyst rating', rating);
+          push('Analyst avg. target price', financialData.targetMeanPrice);
+          push(
+            'Analyst target range',
+            financialData.targetLowPrice != null && financialData.targetHighPrice != null
+              ? `${financialData.targetLowPrice}-${financialData.targetHighPrice}`
+              : null
+          );
+          push('Number of analysts', financialData.numberOfAnalystOpinions);
+        }
+      } catch (err: any) {
+        console.warn('[assistant-chat] analyst data fetch failed:', err?.message || err);
+      }
+    }
   }
 
   const historyLines = prior
@@ -2218,9 +2251,10 @@ app.post('/api/assistant-chat', async (req, res) => {
 
   const prompt = `You are the Quantum Node in-app assistant.
 Help the user understand the CURRENT ticker analysis shown on screen.
-Be concise (2–5 short sentences or a few bullets). No markdown tables.
-Explain scores, indicators, action labels, and risks using the ANALYSIS SNAPSHOT when present.
-Do NOT invent numbers not in the snapshot. Do NOT give personalized investment advice or tell the user to buy/sell — educational interpretation of on-page data only.
+Write like a knowledgeable person talking to them, not a data readout — a short natural paragraph beats a list of restated fields. Weave numbers in where they support a point instead of reciting the snapshot field by field. Bullets are fine for a genuine list (e.g. several risks), not as the default format.
+When the snapshot includes a Wall Street analyst rating, target price, or recent headlines, bring that outside perspective into your answer where relevant — that's real 3rd-party opinion, not the Quantum Score's own view, so frame it as such (e.g. "Analysts, separately, ..."). If analyst coverage is thin (few analysts) or headlines are stale/absent, say so plainly rather than treating sparse data as authoritative.
+Be concise (2–5 sentences, or a short paragraph plus a couple of bullets if there's a real list to give). No markdown tables.
+Do NOT invent numbers not in the snapshot. Do NOT give personalized investment advice or tell the user to buy/sell — educational interpretation of on-page data (and the cited outside opinion) only.
 If the question is off-topic, refuse briefly and steer back to this analysis.
 Always end with this exact one-line disclaimer on its own line: "Not financial advice."
 

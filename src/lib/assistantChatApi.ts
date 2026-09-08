@@ -24,6 +24,12 @@ export type AnalysisAskSnapshot = {
   bullishFactors?: string[];
   bearishFactors?: string[];
   summaryLead?: string | null;
+  /** Recent real headlines for this ticker, for outside context beyond the
+   * Quantum Score's own numbers. (Wall Street analyst consensus is also
+   * surfaced as outside opinion, but the server fetches that itself — see
+   * server.ts's /api/assistant-chat — since it lives in a Yahoo data module
+   * this app doesn't otherwise fetch for the Analysis page.) */
+  recentHeadlines?: string[];
 };
 
 export type AssistantChatContext = {

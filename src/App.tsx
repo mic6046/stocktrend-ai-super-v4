@@ -7531,8 +7531,9 @@ export default function App() {
         technicalBreakdown,
         horizon: analysisHorizon,
         keyRisks,
+        news,
       }),
-    [masterRecommendation, data?.quote, technicalBreakdown, analysisHorizon, keyRisks]
+    [masterRecommendation, data?.quote, technicalBreakdown, analysisHorizon, keyRisks, news]
   );
 
   React.useEffect(() => {

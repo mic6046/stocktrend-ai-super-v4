@@ -29,13 +29,20 @@ export function buildAnalysisAskSnapshot(params: {
   technicalBreakdown?: TechnicalBreakdown | null;
   horizon?: HorizonKey;
   keyRisks?: string[];
+  /** Real news articles already fetched for this ticker — just the headlines, for outside context. */
+  news?: Array<{ title?: string | null; headline?: string | null }>;
 }): AnalysisAskSnapshot | null {
-  const { masterRecommendation: rec, quote, technicalBreakdown: tech, horizon, keyRisks } = params;
+  const { masterRecommendation: rec, quote, technicalBreakdown: tech, horizon, keyRisks, news } = params;
   if (!rec) return null;
 
   const macd = tech?.indicators?.macd;
   const macdBullish = macd != null ? macd.macdLine > macd.signalLine : null;
   const volatilityPct = tech?.indicators?.annualizedVolatilityPct;
+
+  const recentHeadlines = (news || [])
+    .map((n) => (n.title || n.headline || '').trim())
+    .filter(Boolean)
+    .slice(0, 3);
 
   return {
     ticker: rec.ticker,
@@ -59,5 +66,13 @@ export function buildAnalysisAskSnapshot(params: {
     bullishFactors: rec.engine?.bullishFactors?.map((f) => f.label).slice(0, 6),
     bearishFactors: rec.engine?.bearishFactors?.map((f) => f.label).slice(0, 6),
     summaryLead: rec.aiExplanation || null,
+    // Analyst consensus (analystRating/analystTargetPrice/...) is deliberately
+    // NOT set here: it lives in Yahoo's quoteSummary 'financialData' module,
+    // not the plain quote object already fetched for this page — verified
+    // empirically (a real AAPL quote() call returns undefined for all of
+    // recommendationKey/targetMeanPrice/etc). Rather than add a second fetch
+    // to every ticker page just to populate a chat field, the server fetches
+    // it directly (once per chat conversation) when building the prompt.
+    recentHeadlines: recentHeadlines.length ? recentHeadlines : undefined,
   };
 }

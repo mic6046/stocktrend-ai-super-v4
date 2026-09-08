@@ -81,4 +81,26 @@ describe('buildAnalysisAskSnapshot — grounds the AI Chat context in the same S
     const snap = buildAnalysisAskSnapshot({ masterRecommendation: rec(), horizon: '1M' });
     expect(snap?.horizon).toBe('1 Month');
   });
+
+  it('extracts up to 3 real headline titles, tolerating title or headline field naming', () => {
+    const snap = buildAnalysisAskSnapshot({
+      masterRecommendation: rec(),
+      news: [
+        { title: 'Apple beats earnings estimates' },
+        { headline: 'iPhone sales surge in Q4' },
+        { title: 'Analysts raise price targets' },
+        { title: 'A fourth headline that should be dropped' },
+      ],
+    });
+    expect(snap?.recentHeadlines).toEqual([
+      'Apple beats earnings estimates',
+      'iPhone sales surge in Q4',
+      'Analysts raise price targets',
+    ]);
+  });
+
+  it('omits recentHeadlines entirely when there is no real news', () => {
+    const snap = buildAnalysisAskSnapshot({ masterRecommendation: rec(), news: [] });
+    expect(snap?.recentHeadlines).toBeUndefined();
+  });
 });
