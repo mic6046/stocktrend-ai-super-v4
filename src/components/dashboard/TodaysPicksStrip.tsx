@@ -6,7 +6,8 @@ import { findATrade } from '../../lib/findATrade';
 import { buildSuggestUniverse, type SuggestMarket } from '../../lib/suggestTradeUniverses';
 import type { StockRecommendation } from '../../lib/recommendation';
 import { formatRecommendationDisplay } from '../../lib/recommendation';
-import { useBuyNowWatcher, type BuyNowFireEvent } from '../../lib/useBuyNowWatcher';
+import { useBuyNowWatcher } from '../../lib/useBuyNowWatcher';
+import { usePortfolioProfitWatcher } from '../../lib/usePortfolioProfitWatcher';
 
 const MARKETS: { key: SuggestMarket; label: string }[] = [
   { key: 'US', label: 'United States' },
@@ -28,6 +29,13 @@ type PicksState = {
 };
 
 const EMPTY_STATE: PicksState = { dayTrades: [], oneMonth: [], longTerm: [], loading: true, error: null };
+
+type FireItem = {
+  kind: 'buy' | 'profit';
+  ticker: string;
+  reason: string;
+  at: number;
+};
 
 function toneForRecommendation(rec: string): string {
   const r = rec.toUpperCase();
@@ -70,8 +78,21 @@ export function TodaysPicksStrip({ onOpenTicker }: { onOpenTicker: (ticker: stri
     }
   });
   const [state, setState] = useState<PicksState>(EMPTY_STATE);
-  const [fires, setFires] = useState<BuyNowFireEvent[]>([]);
-  const watcher = useBuyNowWatcher((event) => setFires((prev) => [event, ...prev].slice(0, 5)));
+  const [fires, setFires] = useState<FireItem[]>([]);
+  const watcher = useBuyNowWatcher((event) =>
+    setFires((prev) =>
+      [{ kind: 'buy' as const, ticker: event.ticker, reason: event.reason, at: event.at }, ...prev].slice(0, 5)
+    )
+  );
+  // Slower, portfolio-wide sibling of the Buy Now watcher above: same banner
+  // stack, but for the exit side — fires when a HELD position's own engine
+  // call reaches "TAKE PARTIAL PROFIT" (reaching resistance + outflow),
+  // independent of whichever market this strip is currently browsing.
+  usePortfolioProfitWatcher((event) =>
+    setFires((prev) =>
+      [{ kind: 'profit' as const, ticker: event.ticker, reason: event.reason, at: event.at }, ...prev].slice(0, 5)
+    )
+  );
   const dismissFire = (at: number) => setFires((prev) => prev.filter((f) => f.at !== at));
 
   useEffect(() => {
@@ -129,16 +150,24 @@ export function TodaysPicksStrip({ onOpenTicker }: { onOpenTicker: (ticker: stri
           {fires.map((f) => (
             <div
               key={f.at}
-              className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 backdrop-blur-md px-3 py-2 shadow-lg flex items-start gap-2"
+              className={cn(
+                'rounded-xl border backdrop-blur-md px-3 py-2 shadow-lg flex items-start gap-2',
+                f.kind === 'buy' ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-amber-500/30 bg-amber-500/10'
+              )}
             >
-              <BellRing className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+              <BellRing
+                className={cn('w-3.5 h-3.5 shrink-0 mt-0.5', f.kind === 'buy' ? 'text-emerald-400' : 'text-amber-400')}
+              />
               <div className="min-w-0 flex-1">
                 <button
                   type="button"
                   onClick={() => onOpenTicker(f.ticker)}
-                  className="text-[11px] font-bold text-emerald-300 hover:underline cursor-pointer"
+                  className={cn(
+                    'text-[11px] font-bold hover:underline cursor-pointer',
+                    f.kind === 'buy' ? 'text-emerald-300' : 'text-amber-300'
+                  )}
                 >
-                  Buy Now: {f.ticker}
+                  {f.kind === 'buy' ? 'Buy Now' : 'Take Partial Profit'}: {f.ticker}
                 </button>
                 <p className="text-[9px] text-gray-300 leading-snug mt-0.5">{f.reason}</p>
               </div>
