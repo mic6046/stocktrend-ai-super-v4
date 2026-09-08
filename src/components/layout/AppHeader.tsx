@@ -216,20 +216,24 @@ export function AppHeader({
           </div>
 
           {/* Costs a credit — kept visually distinct (emerald tint) from the neutral
-              icon buttons beside it so it doesn't invite an accidental tap. */}
+              icon buttons beside it so it doesn't invite an accidental tap. Always
+              carries a visible "Refresh" label, not just an icon + hover title —
+              hover tooltips don't exist on touch devices, so an icon-only version
+              of this button reads as unlabeled on mobile. */}
           <button
             type="button"
             disabled={loading || marketDataStatus === 'loading'}
             onClick={onRefresh}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-emerald-500/25 bg-emerald-500/[0.06] text-emerald-300 hover:bg-emerald-500/15 disabled:opacity-50 cursor-pointer"
+            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-full border border-emerald-500/25 bg-emerald-500/[0.06] text-emerald-300 hover:bg-emerald-500/15 disabled:opacity-50 cursor-pointer"
             aria-label="Refresh analysis (uses 1 credit)"
             title="Refresh analysis · uses 1 AI credit"
           >
             {marketDataStatus === 'loading' || loading ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
             ) : (
-              <RefreshCw className="h-3.5 w-3.5" />
+              <RefreshCw className="h-3.5 w-3.5 shrink-0" />
             )}
+            <span className="text-[11px] font-bold uppercase tracking-wide">Refresh</span>
           </button>
 
           <div className="hidden sm:block h-5 w-px bg-white/10 shrink-0" aria-hidden="true" />
