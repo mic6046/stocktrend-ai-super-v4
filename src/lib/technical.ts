@@ -1346,7 +1346,21 @@ export function computeTechnicalIndicators(history: any[], lastQuote: any): Tech
     }
 
     netCapitalInflow = extraLargeInflow + largeInflow;
-    instBuyingScore = 50 + (netCapitalInflow * 3.5) + (rvolRatio > 1.5 && currentPrice > trendMA20 ? 10 : 0);
+
+    // The score must be normalized to this stock's OWN dollar-volume scale.
+    // netCapitalInflow is a raw $-millions figure — for a mega-cap this can be
+    // in the thousands — so multiplying it directly into a score meant for a
+    // small fractional input blew past the clamp for virtually every liquid
+    // stock, pinning instBuyingScore to exactly 5 or 98 with no real
+    // gradation. Express it instead as a fraction of the full 10-day dollar
+    // volume it was drawn from: netCapitalInflow is a signed subset-sum of
+    // that same total, so the ratio is naturally bounded to [-1, 1] and is
+    // comparable across stocks of any size.
+    const totalDollarVolume10d =
+      last10.reduce((s, h) => s + (h.close || 0) * (h.volume || 10000), 0) / 1000000;
+    const netCapitalInflowRatio = totalDollarVolume10d > 0 ? netCapitalInflow / totalDollarVolume10d : 0;
+
+    instBuyingScore = 50 + netCapitalInflowRatio * 45 + (rvolRatio > 1.5 && currentPrice > trendMA20 ? 3 : 0);
     instBuyingScore = Math.max(5, Math.min(98, instBuyingScore));
 
     if (instBuyingScore > 75) {
