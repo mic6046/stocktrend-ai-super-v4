@@ -49,6 +49,38 @@ function pivotLevels(history: any[], px: number) {
   };
 }
 
+/**
+ * Prefer the volume-profile levels already computed in technical.ts
+ * (srSupports/srResistances — "high volume node" clustering: where the stock
+ * actually traded the most volume) over pivotLevels()'s 60-day range
+ * midpoint. Volume profile is the more standard, more respected S/R
+ * methodology (grounded in real trading activity, not just price extremes)
+ * — it was already being computed for an internal scoring bucket but never
+ * surfaced as the levels the rest of the engine (buy zones, "reaching
+ * support/resistance" rules, Risk Meter proximity) actually reads.
+ */
+function levelsFromVolumeProfile(
+  tech: ReturnType<typeof computeTechnicalIndicators>,
+  px: number
+): { s1: number; s2: number; r1: number; r2: number } | null {
+  const supports = tech?.quantumRefinement?.supportResistance?.supports;
+  const resistances = tech?.quantumRefinement?.supportResistance?.resistances;
+  if (!supports?.length || !resistances?.length) return null;
+
+  const s1 = supports[0];
+  const s2 = supports[1] ?? s1 * 0.97;
+  const r1 = resistances[0];
+  const r2 = resistances[1] ?? r1 * 1.03;
+
+  // Sanity-check the invariant the rest of the engine assumes — volume-profile
+  // clusters are picked by volume, not proximity, so in a thin/unusual
+  // distribution the top cluster could technically land on the wrong side of
+  // price. Fall back to pivotLevels() rather than hand the engine inverted levels.
+  if (!(s2 <= s1 && s1 < px && px < r1 && r1 <= r2)) return null;
+
+  return { s1, s2, r1, r2 };
+}
+
 function scenarioTarget(inst: any, name: 'Base Case' | 'Bull Case' | 'Bear Case'): number | null {
   const row = inst?.scenarios?.find((s: any) => s?.name === name);
   const n = Number(row?.targetPrice);
@@ -127,7 +159,8 @@ export function buildQuantumInputFromMarketData(opts: {
     0;
 
   const tech = computeTechnicalIndicators(history, opts.quote);
-  const levels = opts.enrich?.levels ?? pivotLevels(history, px);
+  const levels =
+    opts.enrich?.levels ?? levelsFromVolumeProfile(tech, px) ?? pivotLevels(history, px);
 
   const instFlow = tech?.indicators?.institutionalFlow?.status;
   const ad = tech?.quantumRefinement?.accumulationDistribution?.status;
