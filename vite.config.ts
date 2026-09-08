@@ -46,6 +46,15 @@ export default defineConfig(() => {
           ],
         },
         workbox: {
+          // Without these, a new service worker installs but sits "waiting"
+          // until every open tab/instance of the OLD version is fully closed
+          // before it ever activates — on a phone PWA that's rarely closed
+          // (just backgrounded), a deploy can go unseen indefinitely even
+          // with registerType: 'autoUpdate'. This makes a new SW take over
+          // immediately once installed, and autoUpdate's own reload-on-
+          // controllerchange then actually has a new controller to reload to.
+          skipWaiting: true,
+          clientsClaim: true,
           navigateFallback: '/index.html',
           globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff2}'],
           runtimeCaching: [
