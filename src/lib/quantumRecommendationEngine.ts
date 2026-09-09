@@ -266,7 +266,7 @@ export type QuantumEngineOutput = {
   /** Named setup badge for the UI when a specific, recognizable pattern
    * clearly applies (trend intact + at support + funds accumulating, etc).
    * Null when the call doesn't match a distinct named setup. */
-  setupTag: 'PULLBACK BUY' | null;
+  setupTag: 'PULLBACK BUY' | 'BREAKOUT BUY' | null;
   summaryLead: string;
   explanation: string;
   chartStance: ChartStance;
@@ -2678,10 +2678,18 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
     // drives the STRONG BUY confluence escalation above; this just gives it a
     // recognizable badge instead of blending into a generic BUY/STRONG BUY
     // with no indication of *why* (vs. a breakout buy, an oversold bounce…).
-    const setupTag: 'PULLBACK BUY' | null =
+    // USER RULE: "Breakout Buy" — the mirror of Pullback Buy. Price has
+    // cleared resistance AND volume confirmed it (evidence.breakoutWithVolume
+    // already requires both), so this is the clean opposite of the
+    // unconfirmedBreakout warning above. Mutually exclusive with Pullback Buy
+    // by construction: one requires price at/above resistance, the other
+    // requires price near support.
+    const setupTag: 'PULLBACK BUY' | 'BREAKOUT BUY' | null =
       (rec === 'BUY' || rec === 'STRONG BUY') && evidence.pullbackToSupportInUptrend && evidence.strongAccumulation
         ? 'PULLBACK BUY'
-        : null;
+        : (rec === 'BUY' || rec === 'STRONG BUY') && evidence.breakoutWithVolume
+          ? 'BREAKOUT BUY'
+          : null;
 
     let criticalCaveat: string | null = null;
     const rsiSoft = input.technical?.rsi != null && Number.isFinite(input.technical.rsi) && input.technical.rsi < 40;

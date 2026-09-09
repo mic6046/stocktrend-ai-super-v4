@@ -300,6 +300,7 @@ describe('reaching resistance', () => {
     expect(bearishLabels(out)).toContain('Breakout above resistance not confirmed by volume');
     expect(out.criticalCaveat).toMatch(/cleared resistance/i);
     expect(out.criticalCaveat).toMatch(/volume hasn't confirmed/i);
+    expect(out.setupTag).toBeNull(); // unconfirmed breakout is not a "BREAKOUT BUY" setup
   });
 
   it('BUY/STRONG BUY with RSI overbought or bearish MACD gets a momentum-exhaustion warning', () => {
@@ -596,6 +597,19 @@ describe('Pullback Buy setup tag (trend intact + at support + funds accumulating
     expect(out.setupTag).toBe('PULLBACK BUY');
     expect(out.criticalCaveat).toMatch(/start of a breakdown/i);
     expect(out.criticalCaveat).toMatch(/MACD bearish/i);
+  });
+});
+
+describe('Breakout Buy setup tag (price cleared resistance, volume confirmed it)', () => {
+  it('price above resistance confirmed by volume -> tagged BREAKOUT BUY', () => {
+    const out = run(bullishSignalInput()); // currentPrice 107 > r1=105, volumeBias 'high' -> breakoutWithVolume
+    expect(['BUY', 'STRONG BUY']).toContain(out.finalVerdict);
+    expect(out.setupTag).toBe('BREAKOUT BUY');
+  });
+
+  it('Breakout Buy and Pullback Buy are mutually exclusive — a breakout never also reads as a pullback', () => {
+    const out = run(bullishSignalInput());
+    expect(out.setupTag).not.toBe('PULLBACK BUY');
   });
 });
 

@@ -44,6 +44,19 @@ export function DecisionBriefPanel({ decision }: DecisionBriefPanelProps) {
         <Metric label="Suggested Action" value={decision.suggestedAction} tone={decision.chartStance} />
       </div>
 
+      {decision.setupTag && (
+        <span
+          className={cn(
+            'inline-block text-[10px] font-bold uppercase px-2 py-1 rounded-lg border tracking-wide',
+            decision.setupTag === 'BREAKOUT BUY'
+              ? 'text-cyan-300 bg-cyan-500/10 border-cyan-500/25'
+              : 'text-violet-300 bg-violet-500/10 border-violet-500/25'
+          )}
+        >
+          {decision.setupTag === 'BREAKOUT BUY' ? '🚀 Breakout Buy' : '↩ Pullback Buy'} setup
+        </span>
+      )}
+
       <p className="text-[10px] text-gray-500 font-mono leading-relaxed">
         One current price = one primary action. Horizon thesis ({decision.finalVerdict}) is separate from
         live action. Buy Zones are future opportunities unless confirmation selects BUY/ADD.
