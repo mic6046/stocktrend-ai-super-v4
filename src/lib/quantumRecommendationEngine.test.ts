@@ -279,6 +279,29 @@ describe('reaching resistance', () => {
     expect(out.criticalCaveat).toMatch(/real breakout/i);
   });
 
+  it('price above resistance without volume confirmation is flagged as an unconfirmed breakout, not silently treated as a clean one', () => {
+    // Real-world trigger: a stock clearing resistance intraday while volume
+    // stays routine — nearResistance flips false once price > r1, so without
+    // this rule the whole caveat chain would go silent right when the
+    // breakout most needs scrutiny.
+    const out = run(bullishSignalInput({
+      technical: {
+        rsi: 58,
+        macdBullish: true,
+        trend: 'BULLISH',
+        volatility: 18,
+        adx: 22,
+        emaBias: 'bull',
+        smaBias: 'neutral',
+        bollingerBias: 'mid',
+        volumeBias: 'normal', // not high -> volume never confirmed the breakout
+      },
+    }));
+    expect(bearishLabels(out)).toContain('Breakout above resistance not confirmed by volume');
+    expect(out.criticalCaveat).toMatch(/cleared resistance/i);
+    expect(out.criticalCaveat).toMatch(/volume hasn't confirmed/i);
+  });
+
   it('BUY/STRONG BUY with RSI overbought or bearish MACD gets a momentum-exhaustion warning', () => {
     const out = run(baseInput({
       currentPrice: 100,
@@ -395,6 +418,7 @@ describe('STRONG BUY signal priority (price/volume/breakout/accumulation/pullbac
       userHasPosition: false,
     }));
     expect(out.finalVerdict).toBe('BUY');
+    expect(out.setupTag).toBeNull(); // pullback alone, no strong accumulation -> not tagged PULLBACK BUY
   });
 
   it('control: none of the four patterns, weak fundamentals -> stays HOLD', () => {
@@ -520,6 +544,58 @@ describe('STRONG BUY signal priority (price/volume/breakout/accumulation/pullbac
       userHasPosition: false,
     }));
     expect(out.finalVerdict).toBe('STRONG BUY');
+    expect(out.setupTag).toBeNull(); // price/volume surge + accumulation, not the pullback-to-support pattern
+  });
+});
+
+describe('Pullback Buy setup tag (trend intact + at support + funds accumulating)', () => {
+  const pullbackInput = (overrides: Partial<QuantumEngineInput> = {}) =>
+    baseInput({
+      currentPrice: 96, // within 3% of s1=95, at/above it -> pullbackToSupportInUptrend
+      baseScore: 45,
+      levels: { s1: 95, s2: 90, r1: 105, r2: 110 },
+      technical: {
+        rsi: 50,
+        macdBullish: true,
+        trend: 'BULLISH',
+        volatility: 20,
+        adx: 20,
+        emaBias: 'bull',
+        smaBias: 'neutral',
+        bollingerBias: 'mid',
+        volumeBias: 'normal',
+      },
+      whaleScore: 82,
+      institutionalScore: 82,
+      smartMoneyScore: 82, // -> strongAccumulation
+      userHasPosition: false,
+      ...overrides,
+    });
+
+  it('trend intact + pullback to support + strong accumulation -> tagged PULLBACK BUY', () => {
+    const out = run(pullbackInput());
+    expect(['BUY', 'STRONG BUY']).toContain(out.finalVerdict);
+    expect(out.setupTag).toBe('PULLBACK BUY');
+    expect(out.criticalCaveat ?? '').not.toMatch(/start of a breakdown/i);
+  });
+
+  it('the "disease": momentum already cracking underneath the pullback warns it may be a breakdown starting, not a routine dip', () => {
+    const out = run(pullbackInput({
+      technical: {
+        rsi: 50,
+        macdBullish: false, // momentum already turning while price is still "at support"
+        trend: 'BULLISH',
+        volatility: 20,
+        adx: 20,
+        emaBias: 'bull',
+        smaBias: 'neutral',
+        bollingerBias: 'mid',
+        volumeBias: 'normal',
+      },
+    }));
+    expect(out.setupTag).toBe('PULLBACK BUY');
+    expect(out.criticalCaveat).toMatch(/start of a breakdown/i);
+    expect(out.criticalCaveat).toMatch(/MACD bearish/i);
   });
 });
 

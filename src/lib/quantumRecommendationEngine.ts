@@ -263,6 +263,10 @@ export type QuantumEngineOutput = {
    * triggered by a support breakdown/proximity, or a REDUCE call whose clamped
    * expected return can look inconsistent with the label. Null otherwise. */
   criticalCaveat: string | null;
+  /** Named setup badge for the UI when a specific, recognizable pattern
+   * clearly applies (trend intact + at support + funds accumulating, etc).
+   * Null when the call doesn't match a distinct named setup. */
+  setupTag: 'PULLBACK BUY' | null;
   summaryLead: string;
   explanation: string;
   chartStance: ChartStance;
@@ -524,6 +528,8 @@ type EvidenceBag = {
   priceVolumeSurge: boolean;
   /** Price above resistance AND volume confirms the breakout. */
   breakoutWithVolume: boolean;
+  /** Price above resistance WITHOUT volume confirmation — pullback/rejection risk. */
+  unconfirmedBreakout: boolean;
   /** Whale/institutional/smart-money accumulation at a high-conviction threshold (80+). */
   strongAccumulation: boolean;
   /** Uptrend structure intact with price pulled back into the support zone. */
@@ -894,6 +900,19 @@ function collectEvidence(input: QuantumEngineInput): EvidenceBag {
 
   const priceVolumeSurge = volumeHigh && priceRisingConfirmed && input.technical?.macdBullish !== false;
   const breakoutWithVolume = priceAboveResistanceNow && volumeHigh;
+  // USER RULE: a real example (SPCX-style pattern) exposed a gap — once price
+  // clears resistance, nearResistance flips false (it requires r1 >= px), so
+  // the whole "reaching resistance" caveat chain goes silent right when a
+  // breakout most needs scrutiny. Flag it explicitly: price cleared resistance
+  // but volume didn't confirm it — the textbook setup for a fakeout/pullback.
+  const unconfirmedBreakout = priceAboveResistanceNow && !volumeHigh;
+  if (unconfirmedBreakout) {
+    bearish.push({
+      label: 'Breakout above resistance not confirmed by volume',
+      weight: 0.5,
+      polarity: 'bear',
+    });
+  }
   // A single 80+ flow reading isn't "strong accumulation" if the OTHER two flow
   // measures are both actively bearish (<40) — that's whale/institutional flow
   // disagreeing with itself, not conviction. Require at least one of the other
@@ -1115,6 +1134,9 @@ function collectEvidence(input: QuantumEngineInput): EvidenceBag {
   if (nearResistance && !hasAccum && (input.technical?.macdBullish === false || rsiWeak)) {
     buyGateFails.push('Weak momentum into resistance — do not chase');
   }
+  if (unconfirmedBreakout && !hasAccum) {
+    buyGateFails.push('Breakout not confirmed by volume — do not chase');
+  }
   const buyGatePass = buyGateFails.length === 0 && netWeight > 0.12;
 
   const sellGateFails: string[] = [];
@@ -1175,6 +1197,7 @@ function collectEvidence(input: QuantumEngineInput): EvidenceBag {
     majorResistance: r2 != null && Number.isFinite(r2) ? r2 : null,
     priceVolumeSurge,
     breakoutWithVolume,
+    unconfirmedBreakout,
     strongAccumulation,
     pullbackToSupportInUptrend,
     undervaluedWithFlowConfirmation,
@@ -2222,6 +2245,7 @@ function emptyOutput(horizon: HorizonKey, horizonLabel: string, input: QuantumEn
     zonesConsistent: false,
     keyReasons: ['Awaiting price data'],
     criticalCaveat: null,
+    setupTag: null,
     summaryLead: 'Awaiting price data to generate a QuantumNode Consensus recommendation.',
     explanation: `All metrics are locked to the ${horizonLabel} Investment Horizon.`,
     chartStance: 'neutral',
@@ -2648,8 +2672,41 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
     // branch on userHasPosition; SELL/AVOID/BUY don't need this guard since
     // they still map to a semantically-aligned flat-account action (e.g.
     // "NO NEW POSITION" for SELL) even when the exact label text differs.
+    // USER RULE: "Pullback Buy" — a named setup for when trend is intact,
+    // price has pulled back into support, and whale/institutional/smart-money
+    // flow is accumulating there. This combination already independently
+    // drives the STRONG BUY confluence escalation above; this just gives it a
+    // recognizable badge instead of blending into a generic BUY/STRONG BUY
+    // with no indication of *why* (vs. a breakout buy, an oversold bounce…).
+    const setupTag: 'PULLBACK BUY' | null =
+      (rec === 'BUY' || rec === 'STRONG BUY') && evidence.pullbackToSupportInUptrend && evidence.strongAccumulation
+        ? 'PULLBACK BUY'
+        : null;
+
     let criticalCaveat: string | null = null;
-    if ((rec === 'BUY' || rec === 'STRONG BUY') && evidence.nearResistance && evidence.resistanceLevel != null && px > 0) {
+    const rsiSoft = input.technical?.rsi != null && Number.isFinite(input.technical.rsi) && input.technical.rsi < 40;
+    if (
+      setupTag === 'PULLBACK BUY' &&
+      (input.technical?.macdBullish === false || rsiSoft) &&
+      evidence.supportLevel != null
+    ) {
+      // The "disease" case: a pullback to support in an uptrend can also be
+      // the START of a reversal, not just a dip — the tell is whether momentum
+      // is already cracking underneath it. Frame this differently from a
+      // generic overbought-exhaustion warning, since the risk here is support
+      // failing, not the rally running too hot.
+      const weakBits: string[] = [];
+      if (input.technical?.macdBullish === false) weakBits.push('MACD bearish');
+      if (rsiSoft) weakBits.push('RSI soft');
+      criticalCaveat = `This is a pullback buy — trend intact, price at support (~${evidence.supportLevel.toFixed(2)}), funds accumulating — but momentum is already weakening (${weakBits.join(' and ')}), which raises the odds this is the start of a breakdown rather than a routine dip. Wait for confirmation the level actually holds — a bounce on rising volume — before adding size.`;
+    } else if ((rec === 'BUY' || rec === 'STRONG BUY') && evidence.unconfirmedBreakout && evidence.resistanceLevel != null && px > 0) {
+      // USER RULE: once price actually clears resistance, nearResistance flips
+      // false (it requires r1 >= px) and the branch below goes silent right
+      // when a breakout most needs scrutiny. Price above a level without
+      // volume behind it is the textbook fakeout/pullback setup — call it out
+      // by name instead of only warning pre-breakout.
+      criticalCaveat = `Price has cleared resistance (~${evidence.resistanceLevel.toFixed(2)}) but volume hasn't confirmed the move — this looks like a breakout without the buying pressure to sustain it. Pullbacks/rejections back below the level are common in this setup. This ${rec} call isn't relying on the breakout holding, but treat it as unconfirmed: wait for a high-volume close above the level, or for a pullback toward support, before adding size.`;
+    } else if ((rec === 'BUY' || rec === 'STRONG BUY') && evidence.nearResistance && evidence.resistanceLevel != null && px > 0) {
       // USER RULE: even when price+volume are rising and accumulation is
       // detected — the exact evidence that can drive this call to BUY/STRONG
       // BUY on its own — reaching resistance still deserves a care warning
@@ -2782,6 +2839,7 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
       zonesConsistent,
       keyReasons,
       criticalCaveat,
+      setupTag,
       summaryLead,
       explanation: `PRIMARY ACTION ${actionLabel}. ${whyLine}${nextLine} Consensus for ${horizonLabel}: ${note}`,
       chartStance: chartStanceFromRecommendation(rec),

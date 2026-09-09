@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronDown, ChevronUp, Zap, TrendingUp, Landmark, Loader2, BellRing, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Zap, TrendingUp, Landmark, Loader2, BellRing, X, AlertTriangle } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { scoutDayTrades, type DayTradeCandidate } from '../../lib/dayTradeScout';
 import { findATrade } from '../../lib/findATrade';
@@ -403,6 +403,12 @@ function PickCard({
           </>
         )}
       </p>
+      {c.boardMetrics?.fundFlow === 'Outflow' && (
+        <p className="mt-1 flex items-center gap-1 text-[9px] font-mono text-rose-400">
+          <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
+          Funds outflowing — institutional/whale flow net negative
+        </p>
+      )}
     </div>
   );
 }
