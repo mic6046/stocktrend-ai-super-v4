@@ -356,10 +356,24 @@ export function TradeZonesPanel({
         ? (['add', 'hold', 'takeProfit', 'reduce', 'exit', 'stop'] as const)
         : (['buy', 'hold', 'stop'] as const));
 
-    const journey = allCards.filter((c) => {
-      if (c.key.startsWith('buy') && keys.includes('buy')) return true;
-      return keys.includes(c.zoneKeyMatch as (typeof keys)[number]);
-    });
+    const journey = allCards
+      .filter((c) => {
+        if (c.key.startsWith('buy') && keys.includes('buy')) return true;
+        return keys.includes(c.zoneKeyMatch as (typeof keys)[number]);
+      })
+      .map((c) => ({
+        ...c,
+        // The single card the live price/Primary Action badge actually
+        // matches — every other card is a reference point for a price level
+        // we're not at ("if price gets here, this is what it means"), not a
+        // second live instruction. Without this distinction, ADD and REDUCE
+        // cards sitting side by side read as contradictory even when only
+        // one of them is the current, real recommendation.
+        isLive:
+          c.active ||
+          currentAction?.zoneKey === c.zoneKeyMatch ||
+          (currentAction?.activeBuyZoneLevel != null && c.key === `buy${currentAction.activeBuyZoneLevel}`),
+      }));
 
     const priceLocationLabel =
       currentAction?.priceLocation === 'INSIDE_ZONE_1'
@@ -517,6 +531,10 @@ export function TradeZonesPanel({
         </div>
       )}
 
+      <p className="mb-2 text-[9px] font-mono uppercase tracking-wide text-gray-600">
+        Full price roadmap below, low to high — only the highlighted card matches today's price / Primary Action.
+      </p>
+
       <AnimatePresence mode="wait">
         <motion.div
           key={`${horizon}-${userHasPosition ? 'owned' : 'flat'}`}
@@ -533,13 +551,9 @@ export function TradeZonesPanel({
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.28, delay: idx * 0.04 }}
                 className={cn(
-                  'rounded-xl border px-3 py-2.5 min-w-0 transition-transform duration-200 hover:scale-[1.01]',
+                  'rounded-xl border px-3 py-2.5 min-w-0 transition-all duration-200 hover:scale-[1.01]',
                   z.className,
-                  (z.active ||
-                    currentAction?.zoneKey === z.zoneKeyMatch ||
-                    (currentAction?.activeBuyZoneLevel != null &&
-                      z.key === `buy${currentAction.activeBuyZoneLevel}`)) &&
-                    'ring-1 ring-cyan-400/40'
+                  z.isLive ? 'ring-1 ring-cyan-400/40' : 'opacity-45 saturate-[0.4] hover:opacity-70'
                 )}
               >
                 <div className="flex items-start justify-between gap-3 min-w-0">
@@ -549,15 +563,20 @@ export function TradeZonesPanel({
                         {z.emoji}
                       </span>
                       {z.title}
-                      {z.active && (
+                      {z.isLive && (
                         <span className="ml-2 text-[9px] font-mono normal-case tracking-normal text-cyan-300">
-                          ← live price
+                          ← live price / current action
                         </span>
                       )}
                     </p>
                     <p className="mt-1 text-[11px] text-gray-300 leading-snug">{z.subtitle}</p>
                     {z.detail && (
                       <p className="mt-0.5 text-[10px] text-gray-500 leading-snug">{z.detail}</p>
+                    )}
+                    {!z.isLive && (
+                      <p className="mt-0.5 text-[9px] font-mono uppercase tracking-wide text-gray-600">
+                        Reference only — applies if price reaches this level, not now
+                      </p>
                     )}
                   </div>
                   <p className="font-mono text-[12px] sm:text-[13px] font-bold text-white tabular-nums text-right shrink-0 pt-0.5">
