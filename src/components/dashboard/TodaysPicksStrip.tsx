@@ -8,6 +8,8 @@ import type { StockRecommendation } from '../../lib/recommendation';
 import { formatRecommendationDisplay } from '../../lib/recommendation';
 import { scanForBuyNow, type BuyNowPick } from '../../lib/buyNowScan';
 import { usePortfolioProfitWatcher } from '../../lib/usePortfolioProfitWatcher';
+import { useSuggestedBuyFadeWatcher } from '../../lib/useSuggestedBuyFadeWatcher';
+import { recordSuggestedBuy } from '../../lib/suggestedBuysStore';
 
 const MARKETS: { key: SuggestMarket; label: string }[] = [
   { key: 'US', label: 'United States' },
@@ -41,7 +43,7 @@ const EMPTY_STATE: PicksState = {
 };
 
 type FireItem = {
-  kind: 'profit';
+  kind: 'profit' | 'fade';
   ticker: string;
   reason: string;
   at: number;
@@ -105,6 +107,15 @@ export function TodaysPicksStrip({ onOpenTicker }: { onOpenTicker: (ticker: stri
       [{ kind: 'profit' as const, ticker: event.ticker, reason: event.reason, at: event.at }, ...prev].slice(0, 5)
     )
   );
+  // Watches previously-suggested BUY/STRONG BUY picks (from this same strip)
+  // for signs the setup has faded since they were shown — see
+  // suggestedBuyFadeWatcher.ts for why every check is a leading signal, never
+  // a "price already broke the stop" one (too late to act on by then).
+  const { scanNow: scanFadeWatch } = useSuggestedBuyFadeWatcher((event) =>
+    setFires((prev) =>
+      [{ kind: 'fade' as const, ticker: event.ticker, reason: event.reason, at: event.at }, ...prev].slice(0, 5)
+    )
+  );
   const dismissFire = (at: number) => setFires((prev) => prev.filter((f) => f.at !== at));
 
   useEffect(() => {
@@ -112,6 +123,7 @@ export function TodaysPicksStrip({ onOpenTicker }: { onOpenTicker: (ticker: stri
     let cancelled = false;
     setState((s) => ({ ...s, loading: true, buyNowLoading: true, error: null }));
     void scanProfitWatch();
+    void scanFadeWatch();
 
     (async () => {
       try {
@@ -127,6 +139,22 @@ export function TodaysPicksStrip({ onOpenTicker }: { onOpenTicker: (ticker: stri
 
         const oneMonth = oneMonthResult.buyCandidates.slice(0, 3);
         const longTerm = longTermResult.buyCandidates.slice(0, 3);
+
+        // Track every BUY/STRONG BUY pick shown here so the fade watcher has
+        // a snapshot to compare fresh scans against later.
+        for (const c of [...oneMonth, ...longTerm]) {
+          if (c.recommendation !== 'BUY' && c.recommendation !== 'STRONG BUY') continue;
+          recordSuggestedBuy({
+            ticker: c.ticker,
+            companyName: c.companyName,
+            suggestedAt: Date.now(),
+            verdict: c.recommendation,
+            confidence: c.confidence,
+            setupTag: c.engine?.setupTag ?? null,
+            price: c.engine?.currentPrice ?? 0,
+            fundFlow: c.boardMetrics?.fundFlow ?? 'Flat',
+          });
+        }
 
         setState({
           dayTrades: dayTradeResult.candidates.slice(0, 3),
@@ -177,16 +205,28 @@ export function TodaysPicksStrip({ onOpenTicker }: { onOpenTicker: (ticker: stri
           {fires.map((f) => (
             <div
               key={f.at}
-              className="rounded-xl border border-amber-500/30 bg-amber-500/10 backdrop-blur-md px-3 py-2 shadow-lg flex items-start gap-2"
+              className={cn(
+                'rounded-xl border backdrop-blur-md px-3 py-2 shadow-lg flex items-start gap-2',
+                f.kind === 'fade'
+                  ? 'border-rose-500/30 bg-rose-500/10'
+                  : 'border-amber-500/30 bg-amber-500/10'
+              )}
             >
-              <BellRing className="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-400" />
+              {f.kind === 'fade' ? (
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-rose-400" />
+              ) : (
+                <BellRing className="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-400" />
+              )}
               <div className="min-w-0 flex-1">
                 <button
                   type="button"
                   onClick={() => onOpenTicker(f.ticker)}
-                  className="text-[11px] font-bold hover:underline cursor-pointer text-amber-300"
+                  className={cn(
+                    'text-[11px] font-bold hover:underline cursor-pointer',
+                    f.kind === 'fade' ? 'text-rose-300' : 'text-amber-300'
+                  )}
                 >
-                  Take Partial Profit: {f.ticker}
+                  {f.kind === 'fade' ? 'Pick Weakening' : 'Take Partial Profit'}: {f.ticker}
                 </button>
                 <p className="text-[9px] text-gray-300 leading-snug mt-0.5">{f.reason}</p>
               </div>
