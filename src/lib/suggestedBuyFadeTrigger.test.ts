@@ -24,7 +24,9 @@ function freshRec(overrides: Partial<StockRecommendation> = {}, engineOverrides:
     recommendation: 'STRONG BUY',
     confidence: 80,
     boardMetrics: { fundFlow: 'Inflow' },
-    engine: { currentPrice: 100, setupTag: null, ...engineOverrides },
+    // Above the default snapshot price (100) so tests aren't accidentally
+    // tripping the "back to entry cost" check unless they set currentPrice explicitly.
+    engine: { currentPrice: 105, setupTag: null, ...engineOverrides },
     ...overrides,
   } as any;
 }
@@ -91,9 +93,44 @@ describe('checkSuggestedBuyFade — leading signals only, never waits for a brok
     expect(out.reason).toMatch(/up 5\.0% from 100\.00/);
   });
 
-  it('never fires purely because price fell — that would be the "too late" stop-loss check we deliberately avoid', () => {
-    // Price collapsed but everything else (label, confidence, flow, setup) is unchanged.
-    const out = checkSuggestedBuyFade(snapshot({ price: 100 }), freshRec({}, { currentPrice: 60 }));
+  it('does not fire from price alone while still above the suggested entry cost', () => {
+    const out = checkSuggestedBuyFade(snapshot({ price: 100 }), freshRec({}, { currentPrice: 110 }));
     expect(out.fire).toBe(false);
+  });
+});
+
+describe('checkSuggestedBuyFade — price back to the suggested entry cost (the one deliberate price-based exception)', () => {
+  it('warns and leans toward reducing when price falls back to cost with no strong inflow to lean on', () => {
+    const out = checkSuggestedBuyFade(snapshot({ price: 100 }), freshRec({}, { currentPrice: 100, bullishFactors: [] }));
+    expect(out.fire).toBe(true);
+    expect(out.reason).toMatch(/fallen back to your suggested entry cost of 100\.00/);
+    expect(out.reason).toMatch(/Consider trimming or protecting the position/);
+  });
+
+  it('fires below cost too, not just exactly at it', () => {
+    const out = checkSuggestedBuyFade(snapshot({ price: 100 }), freshRec({}, { currentPrice: 95, bullishFactors: [] }));
+    expect(out.fire).toBe(true);
+  });
+
+  it('softens to a watch warning instead of a reduce suggestion when strong institutional/whale inflow is present', () => {
+    const out = checkSuggestedBuyFade(
+      snapshot({ price: 100 }),
+      freshRec(
+        {},
+        { currentPrice: 98, bullishFactors: [{ label: 'Accumulation conviction very high (80+)', weight: 0.35, polarity: 'bull' }] }
+      )
+    );
+    expect(out.fire).toBe(true);
+    expect(out.reason).toMatch(/Strong institutional\/whale inflow is still present/);
+    expect(out.reason).not.toMatch(/Consider trimming/);
+  });
+
+  it('takes priority over a verdict-downgrade message when both conditions are true at once', () => {
+    const out = checkSuggestedBuyFade(
+      snapshot({ price: 100 }),
+      freshRec({ recommendation: 'HOLD' as any }, { currentPrice: 95, bullishFactors: [] })
+    );
+    expect(out.reason).toMatch(/fallen back to your suggested entry cost/);
+    expect(out.reason).not.toMatch(/Downgraded/);
   });
 });
