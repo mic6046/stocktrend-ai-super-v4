@@ -1,5 +1,17 @@
 /** Dashboard / pulse market filter helpers. */
 
+/** % change over the last N trading bars in a chronological (oldest-first) daily-bar
+ * history array — e.g. bars=2 for a 2-trading-day change. Deliberately short-window
+ * by default (not the more common 5-day) so a relative-strength read stays early
+ * enough to act on rather than confirming a move that's already over. */
+export function changePctOverBars(history: Array<{ close: number }>, bars: number): number | null {
+  if (!Array.isArray(history) || history.length < bars + 1) return null;
+  const latest = history[history.length - 1]?.close;
+  const past = history[history.length - 1 - bars]?.close;
+  if (!(latest > 0) || !(past > 0)) return null;
+  return ((latest - past) / past) * 100;
+}
+
 export type DashboardMarket = 'US' | 'HK' | 'JP' | 'EU' | 'ALL';
 
 export const DASHBOARD_MARKETS: { key: DashboardMarket; label: string; short: string }[] = [

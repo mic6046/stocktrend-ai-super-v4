@@ -49,6 +49,9 @@ export type StockRecommendation = {
     momentum: string;
     technicalTrend: string;
     changePct?: number | null;
+    /** 2-trading-day % change — short enough to catch relative strength while
+     * it's still actionable, unlike a 5-day window which is often too late to enter. */
+    change2dPct?: number | null;
     /** Whether price is near / through support or resistance */
     srSignal?: SrSignalLabel;
     srDetail?: string;

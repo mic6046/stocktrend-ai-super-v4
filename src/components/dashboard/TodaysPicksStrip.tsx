@@ -10,6 +10,7 @@ import { scanForBuyNow, type BuyNowPick } from '../../lib/buyNowScan';
 import { usePortfolioProfitWatcher } from '../../lib/usePortfolioProfitWatcher';
 import { useSuggestedBuyFadeWatcher } from '../../lib/useSuggestedBuyFadeWatcher';
 import { recordSuggestedBuy } from '../../lib/suggestedBuysStore';
+import { fetchIndexChange2dPct, findMarketLeaders, type MarketLeader } from '../../lib/marketLeaders';
 
 const MARKETS: { key: SuggestMarket; label: string }[] = [
   { key: 'US', label: 'United States' },
@@ -30,6 +31,8 @@ type PicksState = {
   buyNowLoading: boolean;
   loading: boolean;
   error: string | null;
+  marketLeaders: MarketLeader[];
+  indexChange2dPct: number | null;
 };
 
 const EMPTY_STATE: PicksState = {
@@ -40,6 +43,8 @@ const EMPTY_STATE: PicksState = {
   buyNowLoading: true,
   loading: true,
   error: null,
+  marketLeaders: [],
+  indexChange2dPct: null,
 };
 
 type FireItem = {
@@ -130,15 +135,23 @@ export function TodaysPicksStrip({ onOpenTicker }: { onOpenTicker: (ticker: stri
         const universe = buildSuggestUniverse(market, 'ALL', SCAN_SIZE, { shuffle: false });
         const tickers = universe.map((u) => u.ticker);
 
-        const [dayTradeResult, oneMonthResult, longTermResult] = await Promise.all([
+        const [dayTradeResult, oneMonthResult, longTermResult, indexChange2dPct] = await Promise.all([
           scoutDayTrades({ market, max: SCAN_SIZE }),
           findATrade({ tickers, horizon: '1M', mode: 'find' }),
           findATrade({ tickers, horizon: '1Y', mode: 'find' }),
+          fetchIndexChange2dPct(market),
         ]);
         if (cancelled) return;
 
         const oneMonth = oneMonthResult.buyCandidates.slice(0, 3);
         const longTerm = longTermResult.buyCandidates.slice(0, 3);
+        // Market Leaders draws from the FULL scanned candidate pool (not just
+        // the top-3-by-score picks above) — the best relative-strength story
+        // today isn't necessarily the same name as the best overall score.
+        const marketLeaders = findMarketLeaders(
+          [...oneMonthResult.buyCandidates, ...longTermResult.buyCandidates],
+          indexChange2dPct
+        ).slice(0, 6);
 
         // Track every BUY/STRONG BUY pick shown here so the fade watcher has
         // a snapshot to compare fresh scans against later.
@@ -164,6 +177,8 @@ export function TodaysPicksStrip({ onOpenTicker }: { onOpenTicker: (ticker: stri
           buyNowLoading: true,
           loading: false,
           error: null,
+          marketLeaders,
+          indexChange2dPct,
         });
 
         // Re-check the picks already selected above against a fresh live
@@ -378,6 +393,45 @@ export function TodaysPicksStrip({ onOpenTicker }: { onOpenTicker: (ticker: stri
               </PicksColumn>
             </div>
           )}
+
+          {state.marketLeaders.length > 0 && (
+            <div className="mt-4 pt-3 border-t border-white/10">
+              <div className="flex items-center gap-1.5 mb-2">
+                <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-300">Market Leaders</span>
+                <span className="text-[9px] text-gray-600 font-mono">
+                  index {state.indexChange2dPct != null ? state.indexChange2dPct.toFixed(1) : '—'}% over 2 days — these are holding up or rising anyway
+                </span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1.5">
+                {state.marketLeaders.map((l) => (
+                  <button
+                    key={l.ticker}
+                    type="button"
+                    onClick={() => onOpenTicker(l.ticker)}
+                    className="text-left rounded-xl border border-emerald-500/25 bg-emerald-500/5 hover:border-emerald-500/40 hover:bg-emerald-500/10 p-2 transition-all cursor-pointer"
+                  >
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="font-mono font-bold text-white text-[11px] truncate">{l.ticker}</span>
+                      <span className={cn('text-[8px] font-bold uppercase px-1 py-0.5 rounded border shrink-0', toneForRecommendation(l.recommendation))}>
+                        {l.recommendation}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-[9px] font-mono text-emerald-400/90">
+                      +{l.outperformancePts.toFixed(1)}pt vs index ({l.change2dPct >= 0 ? '+' : ''}{l.change2dPct.toFixed(1)}%)
+                    </p>
+                    {l.nearResistance && (
+                      <p className="mt-0.5 flex items-center gap-1 text-[9px] font-mono text-amber-400">
+                        <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
+                        Near resistance
+                      </p>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <p className="mt-3 text-[9px] text-gray-600 text-center leading-relaxed">
             AI-generated screening, not personalized investment advice. Snapshot of current market data — verify before acting.
           </p>

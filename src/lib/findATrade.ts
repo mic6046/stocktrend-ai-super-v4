@@ -25,6 +25,7 @@ import {
 import { computeTechnicalIndicators } from './technical';
 import { srSignalFromEngine } from './srProximity';
 import { toHkTickerIfNumeric } from './tickerNormalize';
+import { changePctOverBars } from './dashboardMarket';
 import {
   buildRealisticSuggestEntry,
   formatFactorStrip,
@@ -223,6 +224,7 @@ async function scoutOneFind(
           : rec.boardMetrics?.fundFlow || 'Flat';
 
     const sr = srSignalFromEngine(rec.engine);
+    const change2dPct = changePctOverBars(history, 2);
     rec.boardMetrics = {
       rsi: rsiRaw != null && Number.isFinite(Number(rsiRaw)) ? Number(rsiRaw) : null,
       smartMoney,
@@ -234,6 +236,7 @@ async function scoutOneFind(
         rec.engine?.chartStance ||
         'flat',
       changePct: rec.boardMetrics?.changePct ?? null,
+      change2dPct,
       srSignal: rec.boardMetrics?.srSignal || sr.label,
       srDetail: rec.boardMetrics?.srDetail || sr.detail,
     };
