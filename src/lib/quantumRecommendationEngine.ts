@@ -532,10 +532,16 @@ type EvidenceBag = {
   unconfirmedBreakout: boolean;
   /** Whale/institutional/smart-money accumulation at a high-conviction threshold (80+). */
   strongAccumulation: boolean;
+  /** Any whale/institutional/smart-money accumulation at all (55+/55+/60+) — the MAJOR, near-unconditional
+   * gate for any BUY, not just the high-conviction bar strongAccumulation represents. */
+  hasAccum: boolean;
   /** Uptrend structure intact with price pulled back into the support zone. */
   pullbackToSupportInUptrend: boolean;
   /** Low P/E (<15) confirmed by strong accumulation and rising price/volume — extra-high conviction. */
   undervaluedWithFlowConfirmation: boolean;
+  /** Trend is confirmed BEARISH/DOWNTREND — a confluence signal firing here (e.g. accumulation alone
+   * during an oversold dip) is a bounce candidate, not evidence of a genuine reversal. */
+  trendReversed: boolean;
 };
 
 function pushSignal(
@@ -1124,7 +1130,15 @@ function collectEvidence(input: QuantumEngineInput): EvidenceBag {
     (input.whaleScore != null && input.whaleScore >= 55) ||
     (input.institutionalScore != null && input.institutionalScore >= 55) ||
     (input.smartMoneyScore != null && input.smartMoneyScore >= 60);
-  if (!hasAccum && netWeight < 0.35) {
+  // USER RULE: whale/institutional accumulation is a MAJOR condition for any
+  // BUY, not just a tiebreaker for borderline cases — it's the difference
+  // between "price is rising" and "price is rising because real money is
+  // behind it," which is what actually makes a support bounce or breakout
+  // durable. Previously this only blocked a BUY when overall evidence was
+  // already weak (netWeight < 0.35); a rally with strong technicals/
+  // fundamentals but zero detected accumulation could still pass. Now it's
+  // required unconditionally.
+  if (!hasAccum) {
     buyGateFails.push('No clear whale/institutional accumulation');
   }
   if (netWeight < 0.08) buyGateFails.push('Bullish evidence not stronger than bearish');
@@ -1199,8 +1213,10 @@ function collectEvidence(input: QuantumEngineInput): EvidenceBag {
     breakoutWithVolume,
     unconfirmedBreakout,
     strongAccumulation,
+    hasAccum,
     pullbackToSupportInUptrend,
     undervaluedWithFlowConfirmation,
+    trendReversed,
   };
 }
 
@@ -2142,6 +2158,15 @@ function decideRecommendation(evidence: EvidenceBag, rawReturn: number): Recomme
   // escalate straight to STRONG BUY. A lone signal now only lifts a HOLD to
   // BUY (or leaves an already-STRONG-BUY committee/return verdict alone —
   // this block only grants the label, it never revokes one earned elsewhere).
+  //
+  // USER RULE: whale/institutional accumulation (hasAccum, 55+/55+/60+) is a
+  // MAJOR condition for any BUY, not an optional extra — real money behind a
+  // move is what makes a support bounce or breakout durable rather than a
+  // fakeout. Without this gate, a lone price/volume signal (priceVolumeSurge,
+  // breakoutWithVolume, or pullbackToSupportInUptrend) could grant BUY here
+  // with ZERO detected accumulation, completely bypassing the buyGateFails
+  // accumulation check below — this block runs first and returns early, so
+  // that later check never even gets consulted otherwise.
   const hardBearishBlock = evidence.sellGatePass || evidence.supportBroken;
   const strongSignalCount = [
     evidence.priceVolumeSurge,
@@ -2149,11 +2174,19 @@ function decideRecommendation(evidence: EvidenceBag, rawReturn: number): Recomme
     evidence.strongAccumulation,
     evidence.pullbackToSupportInUptrend,
   ].filter(Boolean).length;
-  if (!hardBearishBlock && (candidate === 'HOLD' || candidate === 'BUY' || candidate === 'STRONG BUY')) {
+  if (!hardBearishBlock && evidence.hasAccum && (candidate === 'HOLD' || candidate === 'BUY' || candidate === 'STRONG BUY')) {
     if (strongSignalCount >= 2) {
       return 'STRONG BUY';
     }
-    if (strongSignalCount === 1) {
+    // USER RULE: oversold + strong accumulation inside a CONFIRMED downtrend
+    // is a bounce candidate, not a reversal — strongAccumulation is the only
+    // one of these four signals with no trend requirement at all (unlike
+    // pullbackToSupportInUptrend, which already requires trend.includes
+    // ('BULL')), so it's the one that can otherwise fire on its own straight
+    // through a hard downtrend. A single signal needs the trend to at least
+    // not be actively reversed against it before it's enough to grant BUY;
+    // two or more signals together is a stronger case that can still override.
+    if (strongSignalCount === 1 && !evidence.trendReversed) {
       return candidate === 'STRONG BUY' ? 'STRONG BUY' : 'BUY';
     }
   }
@@ -2739,7 +2772,19 @@ export function runQuantumRecommendationEngine(input: QuantumEngineInput): Quant
       const driver = evidence.strongAccumulation
         ? 'strong whale/institutional accumulation'
         : 'the underlying technical and flow evidence';
-      criticalCaveat = `This ${rec} call is supported by ${driver}, but ${warnParts.join(' and ')} — a short-term pullback or stall is common here even inside a longer uptrend. Consider scaling in rather than a full entry, or waiting for momentum to reset before adding size.`;
+      const uptrendClause = evidence.trendReversed ? '' : ' even inside a longer uptrend';
+      criticalCaveat = `This ${rec} call is supported by ${driver}, but ${warnParts.join(' and ')} — a short-term pullback or stall is common here${uptrendClause}. Consider scaling in rather than a full entry, or waiting for momentum to reset before adding size.`;
+    } else if (evidence.strongAccumulation && evidence.trendReversed && (rec === 'HOLD' || rec === 'REDUCE')) {
+      // USER RULE: oversold + strong accumulation inside a CONFIRMED downtrend
+      // reads as a bounce candidate, not a genuine reversal — the confluence
+      // escalation above deliberately withholds BUY/STRONG BUY here for
+      // exactly this reason. Frame it accordingly instead of leaving the call
+      // unexplained: for a flat account, this is not yet a real reversal; for
+      // an existing holder, a bounce against a downtrend is often the best
+      // exit opportunity you'll get, not a reason to keep holding for a rise.
+      criticalCaveat = userHasPosition
+        ? `Whale/institutional accumulation is showing up here, but the trend is still confirmed bearish — this looks more like a bounce than a reversal. If it bounces, that may be your best opportunity to reduce or exit rather than a reason to hold out for a sustained rise.`
+        : `Whale/institutional accumulation is showing up despite a confirmed downtrend — this is a bounce candidate, not evidence the trend has actually turned. Wait for the trend itself to confirm (a higher low, a reclaimed EMA) before treating this as a new uptrend.`;
     } else if (
       rec === 'REDUCE' &&
       userHasPosition &&

@@ -81,6 +81,124 @@ function bearishLabels(out: any): string[] {
   return (out.bearishFactors || []).map((f: any) => f.label as string);
 }
 
+describe('whale/institutional accumulation is a MAJOR condition for BUY, not just a tiebreaker', () => {
+  // These three cases were verified with a before/after comparison against
+  // the pre-tightening engine (git stash) rather than assumed: with
+  // whale/inst/smart all at 40 (zero accumulation), the ORIGINAL engine
+  // still returned BUY here — priceVolumeSurge alone (rsi 62, MACD bullish,
+  // BULLISH trend, high volume) drove it there via the confluence-escalation
+  // block, which used to grant BUY/STRONG BUY without ever consulting
+  // hasAccum. That's the loophole this rule closes.
+  const strongTechnicalsInput = (whale: number, inst: number, smart: number): QuantumEngineInput =>
+    ({
+      horizon: '1M',
+      currentPrice: 104,
+      baseScore: 85,
+      baseConfidence: 80,
+      technical: {
+        rsi: 62,
+        macdBullish: true,
+        trend: 'BULLISH',
+        volatility: 16,
+        adx: 30,
+        emaBias: 'bull',
+        smaBias: 'bull',
+        bollingerBias: 'mid',
+        volumeBias: 'high',
+      },
+      levels: { s1: 95, s2: 88, r1: 130, r2: 145 },
+      whaleScore: whale,
+      institutionalScore: inst,
+      smartMoneyScore: smart,
+      sentimentScore: 75,
+      momentumScore: 80,
+      userHasPosition: false,
+    }) as QuantumEngineInput;
+
+  it('strong price/volume/momentum evidence alone, with zero detected accumulation, caps at HOLD (was BUY before this rule)', () => {
+    const out = run(strongTechnicalsInput(40, 40, 40));
+    expect(out.finalVerdict).toBe('HOLD');
+  });
+
+  it('the same setup with baseline accumulation (just clearing 55+) unlocks BUY', () => {
+    const out = run(strongTechnicalsInput(60, 40, 40));
+    expect(out.finalVerdict).toBe('BUY');
+  });
+
+  it('the same setup with strong (80+) accumulation across the board reaches STRONG BUY via confluence', () => {
+    const out = run(strongTechnicalsInput(80, 80, 80));
+    expect(out.finalVerdict).toBe('STRONG BUY');
+  });
+});
+
+describe('oversold + accumulation inside a CONFIRMED downtrend is a bounce candidate, not a reversal', () => {
+  const oversoldDowntrendInput = (userHasPosition: boolean): QuantumEngineInput =>
+    ({
+      horizon: '1M',
+      currentPrice: 92,
+      baseScore: 50,
+      baseConfidence: 55,
+      technical: {
+        rsi: 26,
+        macdBullish: false,
+        trend: 'BEARISH',
+        volatility: 30,
+        adx: 28,
+        emaBias: 'bear',
+        smaBias: 'bear',
+        bollingerBias: 'oversold',
+        volumeBias: 'normal',
+      },
+      levels: { s1: 88, s2: 78, r1: 100, r2: 112 },
+      whaleScore: 85,
+      institutionalScore: 82,
+      smartMoneyScore: 88, // strongAccumulation (80+) is the ONLY one of the 4 confluence
+      // signals with no trend requirement — pullbackToSupportInUptrend already
+      // requires trend.includes('BULL'), so it can't fire here by construction.
+      sentimentScore: 40,
+      momentumScore: 35,
+      userHasPosition,
+    }) as QuantumEngineInput;
+
+  it('does not escalate to BUY on accumulation alone against a confirmed downtrend (was BUY before this rule)', () => {
+    const out = run(oversoldDowntrendInput(false));
+    expect(out.finalVerdict).toBe('HOLD');
+  });
+
+  it('flat account gets a "bounce, not a reversal" caveat instead of a silent HOLD', () => {
+    const out = run(oversoldDowntrendInput(false));
+    expect(out.criticalCaveat).toMatch(/bounce candidate, not evidence the trend has actually turned/i);
+  });
+
+  it('an existing holder gets framed toward using the bounce to exit, not toward holding for a rise', () => {
+    const out = run(oversoldDowntrendInput(true));
+    expect(out.criticalCaveat).toMatch(/best opportunity to reduce or exit/i);
+  });
+
+  it('two or more confluence signals together can still override, even against a reversed trend', () => {
+    // Same downtrend context, but now price has also cleared resistance on
+    // confirmed volume — a second, independent signal — which is a
+    // meaningfully stronger case than accumulation alone.
+    const out = run({
+      ...oversoldDowntrendInput(false),
+      currentPrice: 101,
+      levels: { s1: 88, s2: 78, r1: 100, r2: 112 },
+      technical: {
+        rsi: 55,
+        macdBullish: false,
+        trend: 'BEARISH',
+        volatility: 30,
+        adx: 28,
+        emaBias: 'bear',
+        smaBias: 'bear',
+        bollingerBias: 'mid',
+        volumeBias: 'high',
+      },
+    });
+    expect(['BUY', 'STRONG BUY']).toContain(out.finalVerdict);
+  });
+});
+
 describe('reaching support should never surface as REDUCE', () => {
   it('weak flow at support -> HOLD, never REDUCE', () => {
     const out = run(baseInput({}));
@@ -329,7 +447,35 @@ describe('reaching resistance', () => {
 });
 
 describe('STRONG BUY signal priority (price/volume/breakout/accumulation/pullback > fundamentals)', () => {
-  it('price rising with confirming volume alone -> BUY, not STRONG BUY (confluence required — see below)', () => {
+  it('price rising with confirming volume, plus baseline accumulation -> BUY, not STRONG BUY (confluence required — see below)', () => {
+    const out = run(baseInput({
+      currentPrice: 100,
+      baseScore: 45,
+      levels: { s1: 95, s2: 90, r1: 105, r2: 110 },
+      technical: {
+        rsi: 58,
+        macdBullish: true,
+        trend: 'BULLISH',
+        volatility: 18,
+        adx: 22,
+        emaBias: 'bull',
+        smaBias: 'neutral',
+        bollingerBias: 'mid',
+        volumeBias: 'high',
+      },
+      whaleScore: 55, // just clears hasAccum (55+) without being "strong" (80+) on its own
+      institutionalScore: 50,
+      smartMoneyScore: 50,
+      sentimentScore: 40,
+      userHasPosition: false,
+    }));
+    expect(out.finalVerdict).toBe('BUY');
+    expect(bullishLabels(out)).toEqual(
+      expect.arrayContaining(['Price rising with confirming volume — high-conviction buy signal'])
+    );
+  });
+
+  it('the same price/volume signal with ZERO accumulation caps at HOLD — accumulation is now a required condition, not just a tiebreaker', () => {
     const out = run(baseInput({
       currentPrice: 100,
       baseScore: 45,
@@ -347,17 +493,41 @@ describe('STRONG BUY signal priority (price/volume/breakout/accumulation/pullbac
       },
       whaleScore: 50,
       institutionalScore: 50,
-      smartMoneyScore: 50,
+      smartMoneyScore: 50, // all below the 55/55/60 hasAccum thresholds
       sentimentScore: 40,
+      userHasPosition: false,
+    }));
+    expect(out.finalVerdict).toBe('HOLD');
+  });
+
+  it('breakout confirmed by volume, plus baseline accumulation -> BUY, not STRONG BUY', () => {
+    const out = run(baseInput({
+      currentPrice: 107,
+      baseScore: 45,
+      levels: { s1: 95, s2: 90, r1: 105, r2: 112 },
+      technical: {
+        rsi: 60,
+        macdBullish: null as any,
+        trend: 'SIDEWAYS',
+        volatility: 20,
+        adx: 20,
+        emaBias: 'neutral',
+        smaBias: 'neutral',
+        bollingerBias: 'mid',
+        volumeBias: 'high',
+      },
+      whaleScore: 55,
+      institutionalScore: 50,
+      smartMoneyScore: 50,
       userHasPosition: false,
     }));
     expect(out.finalVerdict).toBe('BUY');
     expect(bullishLabels(out)).toEqual(
-      expect.arrayContaining(['Price rising with confirming volume — high-conviction buy signal'])
+      expect.arrayContaining(['Breakout above resistance confirmed by volume'])
     );
   });
 
-  it('breakout confirmed by volume alone -> BUY, not STRONG BUY', () => {
+  it('the same breakout signal with ZERO accumulation caps at HOLD', () => {
     const out = run(baseInput({
       currentPrice: 107,
       baseScore: 45,
@@ -378,10 +548,7 @@ describe('STRONG BUY signal priority (price/volume/breakout/accumulation/pullbac
       smartMoneyScore: 50,
       userHasPosition: false,
     }));
-    expect(out.finalVerdict).toBe('BUY');
-    expect(bullishLabels(out)).toEqual(
-      expect.arrayContaining(['Breakout above resistance confirmed by volume'])
-    );
+    expect(out.finalVerdict).toBe('HOLD');
   });
 
   it('strong (80+) accumulation alone -> BUY, not STRONG BUY', () => {
