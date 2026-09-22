@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronDown, ChevronUp, Zap, TrendingUp, Landmark, Loader2, BellRing, X, AlertTriangle } from 'lucide-react';
+import { ChevronDown, ChevronUp, Zap, TrendingUp, TrendingDown, Landmark, Loader2, BellRing, X, AlertTriangle } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { scoutDayTrades, type DayTradeCandidate } from '../../lib/dayTradeScout';
 import { findATrade } from '../../lib/findATrade';
@@ -11,6 +11,7 @@ import { usePortfolioProfitWatcher } from '../../lib/usePortfolioProfitWatcher';
 import { useSuggestedBuyFadeWatcher } from '../../lib/useSuggestedBuyFadeWatcher';
 import { recordSuggestedBuy } from '../../lib/suggestedBuysStore';
 import { fetchIndexChange2dPct, findMarketLeaders, type MarketLeader } from '../../lib/marketLeaders';
+import { usePeakAnalogWatcher } from '../../lib/usePeakAnalogWatcher';
 
 const MARKETS: { key: SuggestMarket; label: string }[] = [
   { key: 'US', label: 'United States' },
@@ -48,11 +49,23 @@ const EMPTY_STATE: PicksState = {
 };
 
 type FireItem = {
-  kind: 'profit' | 'fade';
+  kind: 'profit' | 'fade' | 'peaktop';
   ticker: string;
   reason: string;
   at: number;
 };
+
+function fireStyle(
+  kind: FireItem['kind']
+): { label: string; text: string; iconColor: string; border: string; bg: string; Icon: typeof AlertTriangle } {
+  if (kind === 'fade') {
+    return { label: 'Pick Weakening', text: 'text-rose-300', iconColor: 'text-rose-400', border: 'border-rose-500/30', bg: 'bg-rose-500/10', Icon: AlertTriangle };
+  }
+  if (kind === 'peaktop') {
+    return { label: 'Reaching Peak', text: 'text-orange-300', iconColor: 'text-orange-400', border: 'border-orange-500/30', bg: 'bg-orange-500/10', Icon: TrendingDown };
+  }
+  return { label: 'Take Partial Profit', text: 'text-amber-300', iconColor: 'text-amber-400', border: 'border-amber-500/30', bg: 'bg-amber-500/10', Icon: BellRing };
+}
 
 function toneForRecommendation(rec: string): string {
   const r = rec.toUpperCase();
@@ -121,6 +134,15 @@ export function TodaysPicksStrip({ onOpenTicker }: { onOpenTicker: (ticker: stri
       [{ kind: 'fade' as const, ticker: event.ticker, reason: event.reason, at: event.at }, ...prev].slice(0, 5)
     )
   );
+  // "Wide" watcher — scans both your portfolio holdings AND your watchlist
+  // for stocks currently sitting in the same RSI/MA-extension zone where
+  // THAT SPECIFIC stock has historically topped out and pulled back. Uses
+  // each stock's own 2-year peak history (peakAnalog.ts), not a generic rule.
+  const { scanNow: scanPeakAnalogWatch } = usePeakAnalogWatcher((event) =>
+    setFires((prev) =>
+      [{ kind: 'peaktop' as const, ticker: event.ticker, reason: event.reason, at: event.at }, ...prev].slice(0, 5)
+    )
+  );
   const dismissFire = (at: number) => setFires((prev) => prev.filter((f) => f.at !== at));
 
   useEffect(() => {
@@ -129,6 +151,7 @@ export function TodaysPicksStrip({ onOpenTicker }: { onOpenTicker: (ticker: stri
     setState((s) => ({ ...s, loading: true, buyNowLoading: true, error: null }));
     void scanProfitWatch();
     void scanFadeWatch();
+    void scanPeakAnalogWatch();
 
     (async () => {
       try {
@@ -220,43 +243,34 @@ export function TodaysPicksStrip({ onOpenTicker }: { onOpenTicker: (ticker: stri
     <div className="relative rounded-2xl border border-white/10 bg-[#111113]/90 backdrop-blur-md overflow-hidden">
       {fires.length > 0 && (
         <div className="absolute top-2 right-2 z-20 flex flex-col gap-1.5 w-[min(320px,calc(100%-1rem))]">
-          {fires.map((f) => (
-            <div
-              key={f.at}
-              className={cn(
-                'rounded-xl border backdrop-blur-md px-3 py-2 shadow-lg flex items-start gap-2',
-                f.kind === 'fade'
-                  ? 'border-rose-500/30 bg-rose-500/10'
-                  : 'border-amber-500/30 bg-amber-500/10'
-              )}
-            >
-              {f.kind === 'fade' ? (
-                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-rose-400" />
-              ) : (
-                <BellRing className="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-400" />
-              )}
-              <div className="min-w-0 flex-1">
+          {fires.map((f) => {
+            const style = fireStyle(f.kind);
+            return (
+              <div
+                key={f.at}
+                className={cn('rounded-xl border backdrop-blur-md px-3 py-2 shadow-lg flex items-start gap-2', style.border, style.bg)}
+              >
+                <style.Icon className={cn('w-3.5 h-3.5 shrink-0 mt-0.5', style.iconColor)} />
+                <div className="min-w-0 flex-1">
+                  <button
+                    type="button"
+                    onClick={() => onOpenTicker(f.ticker)}
+                    className={cn('text-[11px] font-bold hover:underline cursor-pointer', style.text)}
+                  >
+                    {style.label}: {f.ticker}
+                  </button>
+                  <p className="text-[9px] text-gray-300 leading-snug mt-0.5">{f.reason}</p>
+                </div>
                 <button
                   type="button"
-                  onClick={() => onOpenTicker(f.ticker)}
-                  className={cn(
-                    'text-[11px] font-bold hover:underline cursor-pointer',
-                    f.kind === 'fade' ? 'text-rose-300' : 'text-amber-300'
-                  )}
+                  onClick={() => dismissFire(f.at)}
+                  className="text-gray-500 hover:text-gray-300 cursor-pointer shrink-0"
                 >
-                  {f.kind === 'fade' ? 'Pick Weakening' : 'Take Partial Profit'}: {f.ticker}
+                  <X className="w-3 h-3" />
                 </button>
-                <p className="text-[9px] text-gray-300 leading-snug mt-0.5">{f.reason}</p>
               </div>
-              <button
-                type="button"
-                onClick={() => dismissFire(f.at)}
-                className="text-gray-500 hover:text-gray-300 cursor-pointer shrink-0"
-              >
-                <X className="w-3 h-3" />
-              </button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
       <button

@@ -1545,6 +1545,7 @@ app.get('/api/stock/:ticker?', async (req, res) => {
           case '6mo': startDate.setMonth(startDate.getMonth() - 6); break;
           case 'ytd': startDate.setMonth(0, 1); break;
           case '1y': startDate.setFullYear(startDate.getFullYear() - 1); break;
+          case '2y': startDate.setFullYear(startDate.getFullYear() - 2); break;
           case '5y': startDate.setFullYear(startDate.getFullYear() - 5); break;
           case 'max': startDate.setFullYear(1970, 0, 1); break;
           default: startDate.setMonth(startDate.getMonth() - 1);
