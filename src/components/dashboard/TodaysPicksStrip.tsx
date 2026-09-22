@@ -68,10 +68,10 @@ function riskTextTone(risk?: string): string {
   return 'text-gray-400';
 }
 
-function setupTagStyle(tag: 'PULLBACK BUY' | 'BREAKOUT BUY'): { label: string; className: string } {
-  return tag === 'BREAKOUT BUY'
-    ? { label: '🚀 Breakout Buy', className: 'text-cyan-300 bg-cyan-500/10 border-cyan-500/25' }
-    : { label: '↩ Pullback Buy', className: 'text-violet-300 bg-violet-500/10 border-violet-500/25' };
+function setupTagStyle(tag: 'PULLBACK BUY' | 'BREAKOUT BUY' | 'RECLAIM BUY'): { label: string; className: string } {
+  if (tag === 'BREAKOUT BUY') return { label: '🚀 Breakout Buy', className: 'text-cyan-300 bg-cyan-500/10 border-cyan-500/25' };
+  if (tag === 'RECLAIM BUY') return { label: '✅ Reclaim Buy', className: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/25' };
+  return { label: '↩ Pullback Buy', className: 'text-violet-300 bg-violet-500/10 border-violet-500/25' };
 }
 
 function toneForBias(bias: string): string {
@@ -163,7 +163,10 @@ export function TodaysPicksStrip({ onOpenTicker }: { onOpenTicker: (ticker: stri
             suggestedAt: Date.now(),
             verdict: c.recommendation,
             confidence: c.confidence,
-            setupTag: c.engine?.setupTag ?? null,
+            setupTags: [c.engine?.setupTag, c.boardMetrics?.reclaimSetupTag].filter(
+              (t): t is 'PULLBACK BUY' | 'BREAKOUT BUY' | 'RECLAIM BUY' =>
+                t === 'PULLBACK BUY' || t === 'BREAKOUT BUY' || t === 'RECLAIM BUY'
+            ),
             price: c.engine?.currentPrice ?? 0,
             fundFlow: c.boardMetrics?.fundFlow ?? 'Flat',
           });
@@ -493,15 +496,22 @@ function PickCard({
         </span>
       </div>
       <p className="mt-0.5 text-[10px] text-gray-500 truncate">{c.companyName}</p>
-      {c.engine?.setupTag && (
-        <span
-          className={cn(
-            'mt-1 inline-block text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border',
-            setupTagStyle(c.engine.setupTag).className
-          )}
-        >
-          {setupTagStyle(c.engine.setupTag).label}
-        </span>
+      {[c.engine?.setupTag, c.boardMetrics?.reclaimSetupTag].filter(Boolean).length > 0 && (
+        <div className="mt-1 flex flex-wrap gap-1">
+          {[c.engine?.setupTag, c.boardMetrics?.reclaimSetupTag]
+            .filter((tag): tag is 'PULLBACK BUY' | 'BREAKOUT BUY' | 'RECLAIM BUY' => !!tag)
+            .map((tag) => (
+              <span
+                key={tag}
+                className={cn(
+                  'inline-block text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border',
+                  setupTagStyle(tag).className
+                )}
+              >
+                {setupTagStyle(tag).label}
+              </span>
+            ))}
+        </div>
       )}
       <p className="mt-1 text-[9px] font-mono text-gray-400">
         score {c.overallScore} · conf {c.confidence}% · {c.expectedReturn >= 0 ? '+' : ''}

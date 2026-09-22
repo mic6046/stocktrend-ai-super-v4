@@ -26,6 +26,7 @@ import { computeTechnicalIndicators } from './technical';
 import { srSignalFromEngine } from './srProximity';
 import { toHkTickerIfNumeric } from './tickerNormalize';
 import { changePctOverBars } from './dashboardMarket';
+import { computeReclaimBuyTag } from './reclaimBuyTag';
 import {
   buildRealisticSuggestEntry,
   formatFactorStrip,
@@ -225,6 +226,14 @@ async function scoutOneFind(
 
     const sr = srSignalFromEngine(rec.engine);
     const change2dPct = changePctOverBars(history, 2);
+    const reclaimSetupTag = computeReclaimBuyTag(
+      rec.recommendation,
+      input.technical?.trend,
+      input.whaleScore,
+      input.institutionalScore,
+      input.smartMoneyScore,
+      history
+    );
     rec.boardMetrics = {
       rsi: rsiRaw != null && Number.isFinite(Number(rsiRaw)) ? Number(rsiRaw) : null,
       smartMoney,
@@ -237,6 +246,7 @@ async function scoutOneFind(
         'flat',
       changePct: rec.boardMetrics?.changePct ?? null,
       change2dPct,
+      reclaimSetupTag,
       srSignal: rec.boardMetrics?.srSignal || sr.label,
       srDetail: rec.boardMetrics?.srDetail || sr.detail,
     };

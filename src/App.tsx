@@ -19,6 +19,7 @@ import {
 } from './lib/recommendationChangeLog';
 import { buildQuantumInputFromMarketData } from './lib/quantumInputBuilder';
 import { runQuantumRecommendationEngine } from './lib/quantumRecommendationEngine';
+import { computeReclaimBuyTag } from './lib/reclaimBuyTag';
 import { logRecommendationOutcome } from './lib/recommendationOutcomeLog';
 import {
   assertMatchesQuantumRecommendation,
@@ -7472,7 +7473,16 @@ export default function App() {
         0;
       if (fallback > 0) input.currentPrice = fallback;
     }
-    return runQuantumRecommendationEngine(input);
+    const engineOut = runQuantumRecommendationEngine(input);
+    const reclaimSetupTag = computeReclaimBuyTag(
+      engineOut.finalVerdict,
+      input.technical?.trend,
+      input.whaleScore,
+      input.institutionalScore,
+      input.smartMoneyScore,
+      hist
+    );
+    return { ...engineOut, reclaimSetupTag };
   }, [
     analysisHorizon,
     data?.quote,

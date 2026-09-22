@@ -1,5 +1,19 @@
 import type { StockRecommendation } from './recommendation';
-import type { SuggestedBuySnapshot } from './suggestedBuysStore';
+import type { SetupTagName, SuggestedBuySnapshot } from './suggestedBuysStore';
+
+function tagLabel(tag: SetupTagName): string {
+  if (tag === 'BREAKOUT BUY') return 'Breakout Buy';
+  if (tag === 'RECLAIM BUY') return 'Reclaim Buy';
+  return 'Pullback Buy';
+}
+
+/** Every setup tag currently active for a fresh recommendation — mirrors how
+ * the UI computes the badge set (engine.setupTag + boardMetrics.reclaimSetupTag). */
+function activeTags(fresh: StockRecommendation): SetupTagName[] {
+  return [fresh.engine?.setupTag, fresh.boardMetrics?.reclaimSetupTag].filter(
+    (t): t is SetupTagName => t === 'PULLBACK BUY' || t === 'BREAKOUT BUY' || t === 'RECLAIM BUY'
+  );
+}
 
 export type SuggestedBuyFadeCheck = {
   fire: boolean;
@@ -65,9 +79,12 @@ export function checkSuggestedBuyFade(snapshot: SuggestedBuySnapshot, fresh: Sto
   if (snapshot.fundFlow !== 'Outflow' && fresh.boardMetrics?.fundFlow === 'Outflow') {
     return { fire: true, reason: `Institutional/whale flow has flipped to net outflow since this was suggested.${priceMove}` };
   }
-  if (snapshot.setupTag && fresh.engine?.setupTag !== snapshot.setupTag) {
-    const tagLabel = snapshot.setupTag === 'BREAKOUT BUY' ? 'Breakout Buy' : 'Pullback Buy';
-    return { fire: true, reason: `The ${tagLabel} setup that justified this pick is gone — the pattern no longer holds.${priceMove}` };
+  const missingTags = (snapshot.setupTags ?? []).filter((t) => !activeTags(fresh).includes(t));
+  if (missingTags.length > 0) {
+    const labels = missingTags.map(tagLabel).join(' and ');
+    const noun = missingTags.length > 1 ? 'setups' : 'setup';
+    const verb = missingTags.length > 1 ? 'are' : 'is';
+    return { fire: true, reason: `The ${labels} ${noun} that justified this pick ${verb} gone — the pattern no longer holds.${priceMove}` };
   }
   return { fire: false, reason: '' };
 }

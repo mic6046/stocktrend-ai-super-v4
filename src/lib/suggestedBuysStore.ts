@@ -5,13 +5,17 @@
  * portfolio or watchlist — this is a short-lived cache (auto-expires), not a
  * durable user record.
  */
+export type SetupTagName = 'PULLBACK BUY' | 'BREAKOUT BUY' | 'RECLAIM BUY';
+
 export type SuggestedBuySnapshot = {
   ticker: string;
   companyName: string;
   suggestedAt: number;
   verdict: 'BUY' | 'STRONG BUY';
   confidence: number;
-  setupTag: 'PULLBACK BUY' | 'BREAKOUT BUY' | null;
+  /** All setup tags active when this was suggested — a pick can carry more
+   * than one at once (e.g. PULLBACK BUY and RECLAIM BUY together). */
+  setupTags: SetupTagName[];
   price: number;
   fundFlow: string;
 };

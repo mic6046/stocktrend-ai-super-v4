@@ -52,6 +52,10 @@ export type StockRecommendation = {
     /** 2-trading-day % change — short enough to catch relative strength while
      * it's still actionable, unlike a 5-day window which is often too late to enter. */
     change2dPct?: number | null;
+    /** Confirmatory sibling of engine.setupTag's "PULLBACK BUY" — same trend +
+     * accumulation context, but requires a confirmed MA-cluster reclaim
+     * (2+ closes) instead of mere proximity to support. See reclaimBuyTag.ts. */
+    reclaimSetupTag?: 'RECLAIM BUY' | null;
     /** Whether price is near / through support or resistance */
     srSignal?: SrSignalLabel;
     srDetail?: string;

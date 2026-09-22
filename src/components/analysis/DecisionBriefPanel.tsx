@@ -7,7 +7,7 @@ import { formatPct, formatMoney } from './analysisTheme';
 import type { QuantumEngineOutput } from '../../lib/quantumRecommendationEngine';
 
 type DecisionBriefPanelProps = {
-  decision: QuantumEngineOutput;
+  decision: QuantumEngineOutput & { reclaimSetupTag?: 'RECLAIM BUY' | null };
 };
 
 function px(n: number) {
@@ -44,17 +44,26 @@ export function DecisionBriefPanel({ decision }: DecisionBriefPanelProps) {
         <Metric label="Suggested Action" value={decision.suggestedAction} tone={decision.chartStance} />
       </div>
 
-      {decision.setupTag && (
-        <span
-          className={cn(
-            'inline-block text-[10px] font-bold uppercase px-2 py-1 rounded-lg border tracking-wide',
-            decision.setupTag === 'BREAKOUT BUY'
-              ? 'text-cyan-300 bg-cyan-500/10 border-cyan-500/25'
-              : 'text-violet-300 bg-violet-500/10 border-violet-500/25'
+      {(decision.setupTag || decision.reclaimSetupTag) && (
+        <div className="flex flex-wrap gap-2">
+          {decision.setupTag && (
+            <span
+              className={cn(
+                'inline-block text-[10px] font-bold uppercase px-2 py-1 rounded-lg border tracking-wide',
+                decision.setupTag === 'BREAKOUT BUY'
+                  ? 'text-cyan-300 bg-cyan-500/10 border-cyan-500/25'
+                  : 'text-violet-300 bg-violet-500/10 border-violet-500/25'
+              )}
+            >
+              {decision.setupTag === 'BREAKOUT BUY' ? '🚀 Breakout Buy' : '↩ Pullback Buy'} setup
+            </span>
           )}
-        >
-          {decision.setupTag === 'BREAKOUT BUY' ? '🚀 Breakout Buy' : '↩ Pullback Buy'} setup
-        </span>
+          {decision.reclaimSetupTag && (
+            <span className="inline-block text-[10px] font-bold uppercase px-2 py-1 rounded-lg border tracking-wide text-emerald-300 bg-emerald-500/10 border-emerald-500/25">
+              ✅ Reclaim Buy setup
+            </span>
+          )}
+        </div>
       )}
 
       <p className="text-[10px] text-gray-500 font-mono leading-relaxed">

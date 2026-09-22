@@ -10,7 +10,7 @@ function snapshot(overrides: Partial<SuggestedBuySnapshot> = {}): SuggestedBuySn
     suggestedAt: Date.now(),
     verdict: 'STRONG BUY',
     confidence: 80,
-    setupTag: null,
+    setupTags: [],
     price: 100,
     fundFlow: 'Inflow',
     ...overrides,
@@ -73,15 +73,36 @@ describe('checkSuggestedBuyFade — leading signals only, never waits for a brok
 
   it('fires when the setup tag that justified the pick is gone', () => {
     const out = checkSuggestedBuyFade(
-      snapshot({ setupTag: 'PULLBACK BUY' }),
+      snapshot({ setupTags: ['PULLBACK BUY'] }),
       freshRec({}, { setupTag: null })
     );
     expect(out.fire).toBe(true);
     expect(out.reason).toMatch(/Pullback Buy setup that justified this pick is gone/);
   });
 
+  it('fires with combined wording when multiple tags are lost at once', () => {
+    const out = checkSuggestedBuyFade(
+      snapshot({ setupTags: ['PULLBACK BUY', 'RECLAIM BUY'] }),
+      freshRec({ boardMetrics: { fundFlow: 'Inflow', reclaimSetupTag: null } } as any, { setupTag: null })
+    );
+    expect(out.fire).toBe(true);
+    expect(out.reason).toMatch(/Pullback Buy and Reclaim Buy setups that justified this pick are gone/);
+  });
+
+  it('does not fire when a tag is lost but another tracked tag is still active', () => {
+    const out = checkSuggestedBuyFade(
+      snapshot({ setupTags: ['PULLBACK BUY', 'RECLAIM BUY'] }),
+      freshRec({ boardMetrics: { fundFlow: 'Inflow', reclaimSetupTag: null } } as any, { setupTag: 'PULLBACK BUY' })
+    );
+    // PULLBACK BUY is still active in the fresh read, so only tracking that
+    // one wouldn't fire — but RECLAIM BUY dropping out still should.
+    expect(out.fire).toBe(true);
+    expect(out.reason).toMatch(/Reclaim Buy setup that justified this pick is gone/);
+    expect(out.reason).not.toMatch(/Pullback Buy/);
+  });
+
   it('does not fire when there was no setup tag to begin with', () => {
-    const out = checkSuggestedBuyFade(snapshot({ setupTag: null }), freshRec({}, { setupTag: null }));
+    const out = checkSuggestedBuyFade(snapshot({ setupTags: [] }), freshRec({}, { setupTag: null }));
     expect(out.fire).toBe(false);
   });
 
