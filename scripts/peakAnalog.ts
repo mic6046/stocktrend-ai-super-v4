@@ -1,19 +1,22 @@
 /**
- * Peak Analog Finder — run this against any ticker to see how it has
- * historically behaved at local peaks: breakout continuation vs pullback vs
- * indecisive chop, what distinguished the two outcomes (RSI, volume, extension
- * above the 50-day MA), and how today's setup compares to those fingerprints.
+ * Peak & Trough Analog Finder — run this against any ticker to see how it has
+ * historically behaved at local peaks AND troughs: breakout vs pullback at
+ * highs, rebound vs breakdown at lows, what distinguished the outcomes (RSI,
+ * volume, extension above the 50-day MA, and fund-flow state), and how
+ * today's setup compares.
  *
  * This is historical pattern-matching for ONE stock's own past behavior —
  * not a general model, and it doesn't feed back into the recommendation
- * engine. Originally built from a live worked example on 0700.HK, which
- * showed 14 pullbacks and 0 clean breakouts across 19 peaks over 2 years.
+ * engine. Fund flow is the same technical-indicator proxy (accumulation/
+ * distribution, institutional flow, smart-money index) that already feeds
+ * whaleScore/institutionalScore elsewhere in the app — not literal 13F
+ * filings or real order-flow data.
  *
  * Usage: npx tsx scripts/peakAnalog.ts TICKER [YEARS_BACK]
  *   npx tsx scripts/peakAnalog.ts 0700.HK 2
  */
 import YahooFinanceImport from 'yahoo-finance2';
-import { analyzePeakAnalogs } from '../src/lib/peakAnalog';
+import { analyzePeakAnalogs, type FundFlowLabel, type OutcomeCounts } from '../src/lib/peakAnalog';
 
 const YahooFinanceConstructor = (YahooFinanceImport as any).default || YahooFinanceImport;
 const yahooFinance = new YahooFinanceConstructor({
@@ -25,6 +28,11 @@ function fmtPct(n: number | null): string {
 }
 function fmt(n: number | null, digits = 1): string {
   return n == null ? 'n/a' : n.toFixed(digits);
+}
+function fmtCounts(counts: OutcomeCounts): string {
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  if (!total) return '(none)';
+  return Object.entries(counts).map(([k, v]) => `${v} ${k.toLowerCase()}`).join(', ') + ` (n=${total})`;
 }
 
 async function main() {
@@ -59,38 +67,56 @@ async function main() {
     process.exit(1);
   }
 
-  console.log('\n=== All identified local peaks ===');
-  console.log('date         price      RSI  volRatio  volTrendIntoPeak  %aboveMA50   outcome');
+  console.log('\n=== All identified local PEAKS (resistance tests) ===');
+  console.log('date         price      RSI  volRatio  fundFlow   outcome');
   for (const p of result.peaks) {
     console.log(
-      `${p.date}  ${p.price.toFixed(2).padStart(9)}  ${fmt(p.rsi, 0).padStart(4)}  ${p.volRatio.toFixed(2).padStart(7)}x  ${fmtPct(p.volTrendIntoPeakPct).padStart(7)}  ${fmtPct(p.pctAboveMA50).padStart(7)}   ${p.outcome} (${p.outcomeDetail})`
+      `${p.date}  ${p.price.toFixed(2).padStart(9)}  ${fmt(p.rsi, 0).padStart(4)}  ${p.volRatio.toFixed(2).padStart(7)}x  ${p.fundFlow.padEnd(8)}   ${p.outcome} (${p.outcomeDetail})`
     );
   }
+  const nPeaks = result.peaks.length;
+  const resolvedPeaks = result.peaks.filter((p) => p.outcome === 'BREAKOUT' || p.outcome === 'PULLBACK');
+  const breakouts = resolvedPeaks.filter((p) => p.outcome === 'BREAKOUT').length;
+  const pullbacks = resolvedPeaks.filter((p) => p.outcome === 'PULLBACK').length;
+  console.log(`\n${nPeaks} peaks total | ${breakouts} breakout / ${pullbacks} pullback / ${nPeaks - breakouts - pullbacks} mixed or too recent`);
 
-  const n = result.peaks.length;
-  const resolved = result.peaks.filter((p) => p.outcome === 'BREAKOUT' || p.outcome === 'PULLBACK');
-  const breakouts = resolved.filter((p) => p.outcome === 'BREAKOUT').length;
-  const pullbacks = resolved.filter((p) => p.outcome === 'PULLBACK').length;
-  console.log(`\n${n} peaks total | ${breakouts} breakout / ${pullbacks} pullback / ${n - breakouts - pullbacks} mixed or too recent`);
-
-  if (result.breakoutFingerprint) {
-    console.log(`\n=== Signal fingerprint: BREAKOUT peaks (n=${result.breakoutFingerprint.count}) ===`);
-    console.log('avg RSI at peak:', fmt(result.breakoutFingerprint.avgRsi));
-    console.log('avg volume ratio at peak:', fmt(result.breakoutFingerprint.avgVolRatio, 2), 'x');
-    console.log('avg volume trend into peak:', fmtPct(result.breakoutFingerprint.avgVolTrendPct));
-    console.log('avg % above MA50:', fmtPct(result.breakoutFingerprint.avgPctAboveMA50));
-  } else {
-    console.log('\n(No resolved breakout peaks in this window — not enough history to fingerprint that outcome.)');
+  console.log('\n=== All identified local TROUGHS (support tests) ===');
+  console.log('date         price      RSI  volRatio  fundFlow   outcome');
+  for (const t of result.troughs) {
+    console.log(
+      `${t.date}  ${t.price.toFixed(2).padStart(9)}  ${fmt(t.rsi, 0).padStart(4)}  ${t.volRatio.toFixed(2).padStart(7)}x  ${t.fundFlow.padEnd(8)}   ${t.outcome} (${t.outcomeDetail})`
+    );
   }
+  const nTroughs = result.troughs.length;
+  const resolvedTroughs = result.troughs.filter((t) => t.outcome === 'REBOUND' || t.outcome === 'BREAKDOWN');
+  const rebounds = resolvedTroughs.filter((t) => t.outcome === 'REBOUND').length;
+  const breakdowns = resolvedTroughs.filter((t) => t.outcome === 'BREAKDOWN').length;
+  console.log(`\n${nTroughs} troughs total | ${rebounds} rebound / ${breakdowns} breakdown / ${nTroughs - rebounds - breakdowns} mixed or too recent`);
 
-  if (result.pullbackFingerprint) {
-    console.log(`\n=== Signal fingerprint: PULLBACK peaks (n=${result.pullbackFingerprint.count}) ===`);
-    console.log('avg RSI at peak:', fmt(result.pullbackFingerprint.avgRsi));
-    console.log('avg volume ratio at peak:', fmt(result.pullbackFingerprint.avgVolRatio, 2), 'x');
-    console.log('avg volume trend into peak:', fmtPct(result.pullbackFingerprint.avgVolTrendPct));
-    console.log('avg % above MA50:', fmtPct(result.pullbackFingerprint.avgPctAboveMA50));
-  } else {
-    console.log('\n(No resolved pullback peaks in this window — not enough history to fingerprint that outcome.)');
+  function printFingerprint(label: string, fp: typeof result.breakoutFingerprint) {
+    if (!fp) {
+      console.log(`\n(No resolved ${label} in this window — not enough history to fingerprint that outcome.)`);
+      return;
+    }
+    console.log(`\n=== Signal fingerprint: ${label.toUpperCase()} (n=${fp.count}) ===`);
+    console.log('avg RSI:', fmt(fp.avgRsi));
+    console.log('avg volume ratio:', fmt(fp.avgVolRatio, 2), 'x');
+    console.log('avg volume trend into it:', fmtPct(fp.avgVolTrendPct));
+    console.log('avg % above MA50:', fmtPct(fp.avgPctAboveMA50));
+  }
+  printFingerprint('breakout peaks', result.breakoutFingerprint);
+  printFingerprint('pullback peaks', result.pullbackFingerprint);
+  printFingerprint('rebound troughs', result.reboundFingerprint);
+  printFingerprint('breakdown troughs', result.breakdownFingerprint);
+
+  console.log('\n=== Fund-flow cross-tab: does inflow/outflow predict the outcome? ===');
+  console.log('At PEAKS (resistance tests):');
+  for (const flow of ['INFLOW', 'OUTFLOW', 'NEUTRAL'] as FundFlowLabel[]) {
+    console.log(`  ${flow.padEnd(8)} -> ${fmtCounts(result.fundFlowCrossTab.peaksByFundFlow[flow])}`);
+  }
+  console.log('At TROUGHS (support tests):');
+  for (const flow of ['INFLOW', 'OUTFLOW', 'NEUTRAL'] as FundFlowLabel[]) {
+    console.log(`  ${flow.padEnd(8)} -> ${fmtCounts(result.fundFlowCrossTab.troughsByFundFlow[flow])}`);
   }
 
   console.log('\n=== Current state ===');
@@ -98,9 +124,10 @@ async function main() {
   console.log('price:', result.current.price.toFixed(2));
   console.log('RSI:', fmt(result.current.rsi));
   console.log('volume ratio (vs 20d avg):', fmt(result.current.volRatio, 2), 'x');
-  console.log('volume trend into today:', fmtPct(result.current.volTrendIntoPeakPct));
   console.log('% above MA50:', fmtPct(result.current.pctAboveMA50));
+  console.log('fund flow right now:', result.current.fundFlow);
   console.log('is at/near a local high right now:', result.current.isNearRecentHigh);
+  console.log('is at/near a local low right now:', result.current.isNearRecentLow);
 }
 
 main();

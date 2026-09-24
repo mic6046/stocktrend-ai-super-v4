@@ -5,16 +5,22 @@ import type { PeakAnalogResult } from './peakAnalog';
 function result(overrides: Partial<PeakAnalogResult> = {}): PeakAnalogResult {
   return {
     peaks: [],
+    troughs: [],
     breakoutFingerprint: null,
     pullbackFingerprint: { count: 11, avgRsi: 64, avgVolRatio: 1.4, avgVolTrendPct: 10, avgPctAboveMA50: 8 },
+    reboundFingerprint: null,
+    breakdownFingerprint: null,
+    fundFlowCrossTab: { peaksByFundFlow: { INFLOW: {}, OUTFLOW: {}, NEUTRAL: {} }, troughsByFundFlow: { INFLOW: {}, OUTFLOW: {}, NEUTRAL: {} } },
     current: {
       date: '2026-09-22',
       price: 400,
       rsi: 68,
       volRatio: 1.5,
-      volTrendIntoPeakPct: 20,
+      volTrendIntoExtremePct: 20,
       pctAboveMA50: 9,
+      fundFlow: 'NEUTRAL',
       isNearRecentHigh: true,
+      isNearRecentLow: false,
     },
     ...overrides,
   };

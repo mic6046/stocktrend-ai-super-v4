@@ -83,4 +83,45 @@ describe('analyzePeakAnalogs', () => {
     expect(lastPeak.price).toBe(150);
     expect(lastPeak.outcome).toBe('TOO_RECENT');
   });
+
+  it('also detects local troughs (support tests), mirroring peak detection', () => {
+    const out = analyzePeakAnalogs(buildBars(fullSeries));
+    expect(out!.troughs).toHaveLength(2);
+    expect(out!.troughs[0].price).toBe(108);
+    expect(out!.troughs[0].outcome).toBe('REBOUND');
+    expect(out!.troughs[1].price).toBe(110);
+    expect(out!.troughs[1].outcome).toBe('REBOUND');
+  });
+
+  it('tags fund flow (INFLOW/OUTFLOW/NEUTRAL) at every peak and trough', () => {
+    const out = analyzePeakAnalogs(buildBars(fullSeries));
+    for (const p of out!.peaks) expect(['INFLOW', 'OUTFLOW', 'NEUTRAL']).toContain(p.fundFlow);
+    for (const t of out!.troughs) expect(['INFLOW', 'OUTFLOW', 'NEUTRAL']).toContain(t.fundFlow);
+    expect(['INFLOW', 'OUTFLOW', 'NEUTRAL']).toContain(out!.current.fundFlow);
+  });
+
+  it('cross-tabs peak/trough outcomes by fund-flow state', () => {
+    const out = analyzePeakAnalogs(buildBars(fullSeries));
+    // Both peaks in this series read as INFLOW (a smooth synthetic rally) —
+    // one pulled back, one broke out, so both outcomes land in the same bucket.
+    expect(out!.fundFlowCrossTab.peaksByFundFlow.INFLOW).toEqual({ PULLBACK: 1, BREAKOUT: 1 });
+    expect(out!.fundFlowCrossTab.troughsByFundFlow.NEUTRAL).toEqual({ REBOUND: 2 });
+  });
+
+  it('does not tally a TOO_RECENT peak/trough into the fund-flow cross-tab', () => {
+    const truncated = [...base, ...rally1, ...pullback1, ...rally2, ...consolidateBelowPeak];
+    const out = analyzePeakAnalogs(buildBars(truncated));
+    const totalPeakTallies = Object.values(out!.fundFlowCrossTab.peaksByFundFlow).reduce(
+      (sum, counts) => sum + Object.values(counts).reduce((a, b) => a + b, 0),
+      0
+    );
+    // Only the first (resolved) peak should be tallied — the second is TOO_RECENT.
+    expect(totalPeakTallies).toBe(1);
+  });
+
+  it('flags isNearRecentLow when the last bar is at/near its own recent low', () => {
+    const seriesEndingAtLow = [...base, ...rally1, ...pullback1.slice(0, 4)]; // ends right at the 108 trough
+    const out = analyzePeakAnalogs(buildBars(seriesEndingAtLow));
+    expect(out!.current.isNearRecentLow).toBe(true);
+  });
 });
